@@ -6,8 +6,8 @@ import { supabase } from '@/integrations/supabase/client';
 
 const Invoice = () => {
   const [showPharmacyCharges, setShowPharmacyCharges] = useState(false);
-  const [showLabAndRadiologyCharges, setShowLabAndRadiologyCharges] = useState(true);
   const [discountRemoved, setDiscountRemoved] = useState(false);
+  const [chargeFilter, setChargeFilter] = useState('all'); // 'all', 'lab', 'radiology'
   const navigate = useNavigate();
   const { visitId } = useParams<{ visitId: string }>();
 
@@ -110,6 +110,190 @@ const Invoice = () => {
     enabled: !!visitId
   });
 
+  // Fetch lab tests from visit_labs table (Service Selection data)
+  const { data: labOrdersData } = useQuery({
+    queryKey: ['invoice-visit-labs', visitId],
+    queryFn: async () => {
+      console.log('=== VISIT LABS DEBUG ===');
+      console.log('visitId:', visitId);
+
+      if (!visitId) {
+        console.log('No visit ID found');
+        return [];
+      }
+
+      // First get the UUID from visits table using visit_id string
+      console.log('Getting visit UUID for visit_id:', visitId);
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('Visit UUID query result:', { visitData, visitError });
+
+      if (visitError || !visitData?.id) {
+        console.error('Could not find visit UUID:', visitError);
+        return [];
+      }
+
+      const visitUUID = visitData.id;
+      console.log('Found visit UUID:', visitUUID);
+
+      // Now fetch visit_labs using the UUID
+      console.log('Fetching visit_labs for visit UUID:', visitUUID);
+
+      const { data, error } = await supabase
+        .from('visit_labs')
+        .select(`
+          *,
+          lab:lab_id (
+            id,
+            name,
+            NABH_rates_in_rupee,
+            category,
+            description
+          )
+        `)
+        .eq('visit_id', visitUUID)
+        .order('ordered_date', { ascending: false });
+
+      console.log('Visit labs query result:', { data, error });
+
+      if (error) {
+        console.error('Error fetching visit labs:', error);
+        return [];
+      }
+
+      console.log('Visit labs data fetched successfully:', data);
+      return data || [];
+    },
+    enabled: !!visitId
+  });
+
+  // Fetch radiology tests from visit_radiology (service selection data)
+  const { data: radiologyOrdersData } = useQuery({
+    queryKey: ['invoice-visit-radiology', visitId],
+    queryFn: async () => {
+      if (!visitId) {
+        console.log('No visit ID found for radiology tests');
+        return [];
+      }
+
+      // First get the UUID from visits table using visit_id string
+      console.log('=== RADIOLOGY DEBUG ===');
+      console.log('Getting visit UUID for radiology, visit_id:', visitId);
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('Visit UUID query for radiology result:', { visitData, visitError });
+
+      if (visitError || !visitData?.id) {
+        console.error('Could not find visit UUID for radiology:', visitError);
+        return [];
+      }
+
+      const visitUUID = visitData.id;
+      console.log('Found visit UUID for radiology:', visitUUID);
+
+      // Now fetch visit_radiology using the UUID
+      console.log('Fetching visit radiology tests for visit UUID:', visitUUID);
+
+      const { data, error } = await supabase
+        .from('visit_radiology')
+        .select(`
+          *,
+          radiology:radiology_id (
+            id,
+            name,
+            category,
+            description
+          )
+        `)
+        .eq('visit_id', visitUUID)
+        .order('ordered_date', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching visit radiology tests:', error);
+        return [];
+      }
+
+      console.log('Visit radiology tests data fetched successfully:', data);
+
+      // Also try to fetch all visit_radiology records for debugging
+      if (!data || data.length === 0) {
+        console.log('No radiology data found, checking all visit_radiology records...');
+        const { data: allRadiologyData, error: allRadiologyError } = await supabase
+          .from('visit_radiology')
+          .select('*')
+          .limit(10);
+        console.log('All visit_radiology records (sample):', { allRadiologyData, allRadiologyError });
+      }
+
+      return data || [];
+    },
+    enabled: !!visitId
+  });
+
+  // Fetch mandatory services based on patient type
+  const { data: mandatoryServicesData } = useQuery({
+    queryKey: ['invoice-mandatory-services', visitData?.category, visitData?.patients?.category],
+    queryFn: async () => {
+      console.log('=== MANDATORY SERVICES DEBUG ===');
+      console.log('Full visitData:', visitData);
+      console.log('visitData.category:', visitData?.category);
+      console.log('visitData.patients:', visitData?.patients);
+      console.log('visitData.patients.category:', visitData?.patients?.category);
+
+      // Try to get category from different possible fields
+      const patientCategory = visitData?.category || visitData?.patients?.category || visitData?.patients?.patient_category || 'Private';
+      console.log('Detected patient category:', patientCategory);
+
+      if (!patientCategory) {
+        console.log('No patient category found in any field');
+        return [];
+      }
+
+      // Determine which services to fetch based on patient type
+      let serviceNames = [];
+
+      // Check if patient has admission_date (IPD) or not (OPD)
+      const isIPD = visitData?.admission_date && visitData.admission_date !== null;
+      console.log('Patient type - isIPD:', isIPD);
+
+      if (isIPD) {
+        // IPD patients get Nursing Charges and Doctor Charges
+        serviceNames = ['Nursing Charges', 'Doctor Charges'];
+        console.log('Fetching IPD mandatory services:', serviceNames);
+      } else {
+        // OPD patients get First Consultation and Registration Charges
+        serviceNames = ['First Consultation', 'Registration Charges'];
+        console.log('Fetching OPD mandatory services:', serviceNames);
+      }
+
+      const { data, error } = await supabase
+        .from('mandatory_services')
+        .select('*')
+        .eq('status', 'Active')
+        .in('service_name', serviceNames)
+        .order('service_name', { ascending: true });
+
+      console.log('Mandatory services query result:', { data, error });
+
+      if (error) {
+        console.error('Error fetching mandatory services:', error);
+        return [];
+      }
+
+      console.log('Mandatory services data fetched successfully:', data);
+      return data || [];
+    },
+    enabled: !!visitData // Enable when visitData is available, regardless of category
+  });
+
   // Show loading state
   if (isLoading) {
     return (
@@ -165,18 +349,119 @@ const Invoice = () => {
     return `${ageYears}Y ${ageMonths}M 0D`;
   };
 
-  // Create services array from actual bill data
-  const createServicesFromBillData = () => {
-    if (!billData?.bill_sections) {
-      return [
-        { srNo: 1, item: `General Ward (${visitData.admission_date ? format(new Date(visitData.admission_date), 'dd/MM/yyyy') : 'N/A'}-${visitData.discharge_date ? format(new Date(visitData.discharge_date), 'dd/MM/yyyy') : 'Present'})`, rate: 0, qty: 1, amount: 0 }
-      ];
+  // Create services array from actual bill data and lab/radiology orders
+  // Helper function to get rate based on patient type
+  const getMandatoryServiceRate = (service, patientCategory) => {
+    if (!service) {
+      console.log('getMandatoryServiceRate: No service provided');
+      return 0;
     }
 
+    console.log('getMandatoryServiceRate: service rates:', {
+      service_name: service.service_name,
+      private_rate: service.private_rate,
+      tpa_rate: service.tpa_rate,
+      cghs_rate: service.cghs_rate,
+      non_cghs_rate: service.non_cghs_rate,
+      patientCategory: patientCategory
+    });
+
+    let rate = 0;
+    switch (patientCategory?.toLowerCase()) {
+      case 'private':
+        rate = parseFloat(service.private_rate) || 0;
+        console.log('Using private_rate:', rate);
+        break;
+      case 'tpa':
+      case 'corporate':
+        rate = parseFloat(service.tpa_rate) || 0;
+        console.log('Using tpa_rate:', rate);
+        break;
+      case 'cghs':
+        rate = parseFloat(service.cghs_rate) || 0;
+        console.log('Using cghs_rate:', rate);
+        break;
+      case 'non_cghs':
+        rate = parseFloat(service.non_cghs_rate) || 0;
+        console.log('Using non_cghs_rate:', rate);
+        break;
+      default:
+        rate = parseFloat(service.private_rate) || 0; // Default to private rate
+        console.log('Using default private_rate:', rate);
+        break;
+    }
+
+    return rate;
+  };
+
+  const createServicesFromBillData = () => {
     const services = [];
     let srNo = 1;
 
-    billData.bill_sections.forEach((section) => {
+    // If filter is set to lab or radiology, show only that data
+    if (chargeFilter === 'lab') {
+      console.log('Creating lab services, labOrdersData:', labOrdersData);
+      // Show visit labs data (Service Selection)
+      if (labOrdersData && labOrdersData.length > 0) {
+        labOrdersData.forEach((visitLab) => {
+          console.log('Processing visit lab:', visitLab);
+          // Ensure amounts are numbers, not strings
+          const rate = parseFloat(visitLab.lab?.NABH_rates_in_rupee) || 0;
+          services.push({
+            srNo: srNo++,
+            item: visitLab.lab?.name || 'Lab Test',
+            rate: rate,
+            qty: 1,
+            amount: rate
+          });
+        });
+      } else {
+        console.log('No visit labs data found');
+      }
+      console.log('Lab services created:', services);
+      return services;
+    }
+
+    if (chargeFilter === 'radiology') {
+      console.log('=== CREATING RADIOLOGY SERVICES ===');
+      console.log('radiologyOrdersData:', radiologyOrdersData);
+      console.log('radiologyOrdersData length:', radiologyOrdersData?.length);
+
+      // Show visit radiology tests data
+      if (radiologyOrdersData && radiologyOrdersData.length > 0) {
+        radiologyOrdersData.forEach((visitRadiology) => {
+          console.log('Processing visit radiology test:', visitRadiology);
+          // Use default amount since radiology table doesn't have amount field yet
+          const defaultAmount = visitRadiology.radiology?.name?.includes('CT Brain') ? 4000 : 1000;
+
+          console.log('Radiology test details:', {
+            name: visitRadiology.radiology?.name,
+            defaultAmount: defaultAmount,
+            id: visitRadiology.radiology?.id
+          });
+          services.push({
+            srNo: srNo++,
+            item: visitRadiology.radiology?.name || 'Radiology Procedure',
+            rate: defaultAmount,
+            qty: 1,
+            amount: defaultAmount
+          });
+        });
+      } else {
+        console.log('No visit radiology tests data found - empty or null array');
+      }
+      console.log('Radiology services created:', services);
+      return services;
+    }
+
+    // Default: show all charges (bill data + lab + radiology + mandatory services)
+    // Don't add static General Ward - let mandatory services be the primary charges
+    if (!billData?.bill_sections) {
+      // Start with empty services array - mandatory services will be added later
+      console.log('No bill sections found, starting with empty services array');
+    } else {
+      // Add bill sections if they exist
+      billData.bill_sections.forEach((section) => {
       if (section.bill_line_items && section.bill_line_items.length > 0) {
         section.bill_line_items.forEach((item) => {
           services.push({
@@ -197,7 +482,44 @@ const Invoice = () => {
           amount: section.total_amount || 0
         });
       }
-    });
+      });
+    }
+
+    // Lab and radiology charges should only show when specifically selected from dropdown
+    // They are NOT included in "All Charges" view anymore
+
+    // Add mandatory services for Private/OPD and IPD patients
+    console.log('=== MANDATORY SERVICES INTEGRATION ===');
+    console.log('mandatoryServicesData:', mandatoryServicesData);
+    console.log('mandatoryServicesData length:', mandatoryServicesData?.length);
+
+    // Try to get category from different possible fields
+    const patientCategory = visitData?.category || visitData?.patients?.category || visitData?.patients?.patient_category || 'Private';
+    console.log('Using patient category for rate calculation:', patientCategory);
+
+    if (mandatoryServicesData && mandatoryServicesData.length > 0) {
+      console.log('Adding mandatory services for patient category:', patientCategory);
+      mandatoryServicesData.forEach((mandatoryService) => {
+        console.log('Processing mandatory service:', mandatoryService);
+        const rate = getMandatoryServiceRate(mandatoryService, patientCategory);
+        console.log('Calculated rate for', mandatoryService.service_name, ':', rate);
+
+        if (rate > 0) { // Only add services with valid rates
+          console.log('Adding mandatory service to invoice:', mandatoryService.service_name, 'Rate:', rate);
+          services.push({
+            srNo: srNo++,
+            item: mandatoryService.service_name,
+            rate: rate,
+            qty: 1,
+            amount: rate
+          });
+        } else {
+          console.log('Skipping mandatory service (rate = 0):', mandatoryService.service_name);
+        }
+      });
+    } else {
+      console.log('No mandatory services data found or empty array');
+    }
 
     return services;
   };
@@ -249,14 +571,12 @@ const Invoice = () => {
     amountInWords: 'Rupee Thirteen Thousand Nine Hundred Three Only' // TODO: Implement number to words conversion
   };
 
-  // Calculate dynamic total excluding hidden charges
+  // Calculate dynamic total based on filter selection
   const calculateVisibleTotal = () => {
     return invoiceData.services.reduce((total, service) => {
-      // Exclude both laboratory and radiology charges if hidden
-      if ((service.item.toLowerCase().includes('laboratory') || service.item.toLowerCase().includes('radiology')) && !showLabAndRadiologyCharges) {
-        return total;
-      }
-      return total + service.amount;
+      // Ensure amount is converted to number to avoid string concatenation
+      const amount = typeof service.amount === 'string' ? parseFloat(service.amount) || 0 : service.amount || 0;
+      return total + amount;
     }, 0);
   };
 
@@ -494,10 +814,6 @@ const Invoice = () => {
               </thead>
               <tbody>
                 ${invoiceData.services.map((service) => {
-                  // Hide services based on state
-                  if ((service.item.toLowerCase().includes('laboratory') || service.item.toLowerCase().includes('radiology')) && !showLabAndRadiologyCharges) {
-                    return '';
-                  }
                   return `
                     <tr>
                       <td>${service.srNo}</td>
@@ -643,24 +959,23 @@ const Invoice = () => {
             </tbody>
           </table>
 
-          {/* Control Buttons */}
-          <div className="flex justify-center gap-2 mb-4 flex-wrap">
+          {/* Control Buttons and Dropdown */}
+          <div className="flex justify-center gap-2 mb-4 flex-wrap items-center">
             <button
               onClick={() => setShowPharmacyCharges(!showPharmacyCharges)}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm"
             >
               Show Pharmacy Charge
             </button>
-            <button
-              onClick={() => setShowLabAndRadiologyCharges(!showLabAndRadiologyCharges)}
-              className={`px-4 py-2 text-white rounded transition-colors text-sm ${
-                showLabAndRadiologyCharges
-                  ? 'bg-red-500 hover:bg-red-600'
-                  : 'bg-green-500 hover:bg-green-600'
-              }`}
+            <select
+              value={chargeFilter}
+              onChange={(e) => setChargeFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              {showLabAndRadiologyCharges ? 'Hide Lab & Radiology Charges' : 'Show Lab & Radiology Charges'}
-            </button>
+              <option value="all">All Charges</option>
+              <option value="lab">Lab Charges Only</option>
+              <option value="radiology">Radiology Charges Only</option>
+            </select>
           </div>
 
           {/* Services Table */}
@@ -676,11 +991,6 @@ const Invoice = () => {
             </thead>
             <tbody>
               {invoiceData.services.map((service) => {
-                // Hide both Laboratory and Radiology Charges if showLabAndRadiologyCharges is false
-                if ((service.item.toLowerCase().includes('laboratory') || service.item.toLowerCase().includes('radiology')) && !showLabAndRadiologyCharges) {
-                  return null;
-                }
-
                 return (
                   <tr key={service.srNo}>
                     <td className="border border-gray-400 p-2 text-center">{service.srNo}</td>

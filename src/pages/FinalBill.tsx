@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label"
 import { EnhancedDatePicker } from "@/components/ui/enhanced-date-picker"
 import { ChevronUp, ChevronDown, Trash2, Plus, ChevronLeft, ChevronRight, Edit, X, Copy, PenTool } from "lucide-react"
 import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from '@/contexts/AuthContext';
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
@@ -520,6 +521,7 @@ const FinalBill = () => {
   const navigate = useNavigate();
   const { billData, isLoading: isBillLoading, saveBill, isSaving } = useFinalBillData(visitId || '');
   const queryClient = useQueryClient();
+  const { hospitalConfig } = useAuth();
   const [surgeons, setSurgeons] = useState<{ id: string; name: string }[]>([]);
   const [pathologyNote, setPathologyNote] = useState("");
   const [cghsSurgeries, setCghsSurgeries] = useState<{ id: string; name: string; NABH_NABL_Rate: string; code: string }[]>([]);
@@ -1495,6 +1497,12 @@ const FinalBill = () => {
   const [savedLabData, setSavedLabData] = useState<any[]>([]);
   const [savedRadiologyData, setSavedRadiologyData] = useState<any[]>([]);
   const [savedMedicationData, setSavedMedicationData] = useState<any[]>([]);
+  const [savedClinicalServicesData, setSavedClinicalServicesData] = useState<any[]>([]);
+  const [savedMandatoryServicesData, setSavedMandatoryServicesData] = useState<any[]>([]);
+
+  // State initialization flags to prevent duplicate fetches
+  const [clinicalServicesInitialized, setClinicalServicesInitialized] = useState(false);
+  const [mandatoryServicesInitialized, setMandatoryServicesInitialized] = useState(false);
   const [selectedLabTests, setSelectedLabTests] = useState<string[]>([]);
   const [selectedRadiologyTests, setSelectedRadiologyTests] = useState<string[]>([]);
   const [savedRequisitions, setSavedRequisitions] = useState<{[key: string]: boolean}>({});
@@ -1902,12 +1910,36 @@ const FinalBill = () => {
       Promise.all([
         fetchSavedLabData(),
         fetchSavedRadiologyData(),
-        fetchSavedMedicationData()
+        fetchSavedMedicationData(),
+        fetchSavedClinicalServicesData(),
+        fetchSavedMandatoryServicesData()
       ]).catch(error => {
         console.error('Error fetching individual saved data:', error);
       });
     }
   }, [visitId]);
+
+  // Periodic state verification to ensure data consistency
+  useEffect(() => {
+    if (!visitId) return;
+
+    // Initial verification after data is loaded
+    const initialVerificationTimer = setTimeout(() => {
+      if (clinicalServicesInitialized && mandatoryServicesInitialized) {
+        verifyServicesStateConsistency();
+      }
+    }, 1000);
+
+    // Periodic verification every 30 seconds
+    const periodicVerificationInterval = setInterval(() => {
+      verifyServicesStateConsistency();
+    }, 30000);
+
+    return () => {
+      clearTimeout(initialVerificationTimer);
+      clearInterval(periodicVerificationInterval);
+    };
+  }, [visitId, clinicalServicesInitialized, mandatoryServicesInitialized, savedClinicalServicesData.length, savedMandatoryServicesData.length]);
 
   // Function to refresh saved data
   const refreshSavedData = async () => {
@@ -1918,7 +1950,9 @@ const FinalBill = () => {
       await Promise.all([
         fetchSavedLabData(),
         fetchSavedRadiologyData(),
-        fetchSavedMedicationData()
+        fetchSavedMedicationData(),
+        fetchSavedClinicalServicesData(),
+        fetchSavedMandatoryServicesData()
       ]);
     } catch (error) {
       console.error('Error refreshing saved data:', error);
@@ -5467,6 +5501,688 @@ INSTRUCTIONS:
     }
   };
 
+  // Function to verify state consistency for clinical and mandatory services
+  const verifyServicesStateConsistency = async () => {
+    if (!visitId) return;
+
+    console.log('🔍 [STATE VERIFICATION] Starting state consistency check...');
+    console.log('🔍 [STATE VERIFICATION] Current state:', {
+      clinicalServicesCount: savedClinicalServicesData.length,
+      mandatoryServicesCount: savedMandatoryServicesData.length,
+      clinicalInitialized: clinicalServicesInitialized,
+      mandatoryInitialized: mandatoryServicesInitialized
+    });
+
+    try {
+      // Fetch current database state
+      const { data: visitData, error } = await supabase
+        .from('visits')
+        .select('clinical_services, mandatory_services')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (error) {
+        console.error('❌ [STATE VERIFICATION] Database error:', error);
+        return;
+      }
+
+      // Parse database data
+      let dbClinicalServices = [];
+      let dbMandatoryServices = [];
+
+      if (visitData?.clinical_services) {
+        try {
+          if (typeof visitData.clinical_services === 'string') {
+            dbClinicalServices = JSON.parse(visitData.clinical_services);
+          } else if (Array.isArray(visitData.clinical_services)) {
+            dbClinicalServices = visitData.clinical_services;
+          }
+        } catch (e) {
+          console.warn('⚠️ [STATE VERIFICATION] Failed to parse clinical services from DB');
+        }
+      }
+
+      if (visitData?.mandatory_services) {
+        try {
+          if (typeof visitData.mandatory_services === 'string') {
+            dbMandatoryServices = JSON.parse(visitData.mandatory_services);
+          } else if (Array.isArray(visitData.mandatory_services)) {
+            dbMandatoryServices = visitData.mandatory_services;
+          }
+        } catch (e) {
+          console.warn('⚠️ [STATE VERIFICATION] Failed to parse mandatory services from DB');
+        }
+      }
+
+      console.log('🔍 [STATE VERIFICATION] Database vs State comparison:', {
+        dbClinicalCount: dbClinicalServices.length,
+        stateClinicalCount: savedClinicalServicesData.length,
+        dbMandatoryCount: dbMandatoryServices.length,
+        stateMandatoryCount: savedMandatoryServicesData.length,
+        clinicalMatch: dbClinicalServices.length === savedClinicalServicesData.length,
+        mandatoryMatch: dbMandatoryServices.length === savedMandatoryServicesData.length
+      });
+
+      // If state doesn't match database, update state
+      if (dbClinicalServices.length !== savedClinicalServicesData.length) {
+        console.log('🔧 [STATE VERIFICATION] Updating clinical services state to match database');
+        setSavedClinicalServicesData(dbClinicalServices);
+      }
+
+      if (dbMandatoryServices.length !== savedMandatoryServicesData.length) {
+        console.log('🔧 [STATE VERIFICATION] Updating mandatory services state to match database');
+        setSavedMandatoryServicesData(dbMandatoryServices);
+      }
+
+    } catch (error) {
+      console.error('❌ [STATE VERIFICATION] Unexpected error:', error);
+    }
+  };
+
+  // Function to perform comprehensive database verification and logging
+  const performDatabaseVerification = async () => {
+    if (!visitId) {
+      console.warn('🚫 [DB VERIFICATION] No visitId provided');
+      return;
+    }
+
+    console.log('🔍 [DB VERIFICATION] Starting comprehensive database verification for visit:', visitId);
+
+    try {
+      // Fetch complete visit data
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('*')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError) {
+        console.error('❌ [DB VERIFICATION] Error fetching visit:', visitError);
+        return;
+      }
+
+      if (!visitData) {
+        console.warn('⚠️ [DB VERIFICATION] No visit data found');
+        return;
+      }
+
+      console.log('🔍 [DB VERIFICATION] Full visit data structure:', {
+        visit_id: visitData.visit_id,
+        id: visitData.id,
+        hasClinicialServices: visitData.hasOwnProperty('clinical_services'),
+        hasMandatoryServices: visitData.hasOwnProperty('mandatory_services'),
+        clinicalServicesType: typeof visitData.clinical_services,
+        mandatoryServicesType: typeof visitData.mandatory_services,
+        clinicalServicesValue: visitData.clinical_services,
+        mandatoryServicesValue: visitData.mandatory_services,
+        clinicalServicesLength: visitData.clinical_services ?
+          (typeof visitData.clinical_services === 'string' ? visitData.clinical_services.length :
+           Array.isArray(visitData.clinical_services) ? visitData.clinical_services.length : 'unknown') : 0,
+        mandatoryServicesLength: visitData.mandatory_services ?
+          (typeof visitData.mandatory_services === 'string' ? visitData.mandatory_services.length :
+           Array.isArray(visitData.mandatory_services) ? visitData.mandatory_services.length : 'unknown') : 0
+      });
+
+      // Test parsing clinical services
+      let parsedClinicalServices = [];
+      if (visitData.clinical_services) {
+        try {
+          if (typeof visitData.clinical_services === 'string') {
+            parsedClinicalServices = JSON.parse(visitData.clinical_services);
+            console.log('✅ [DB VERIFICATION] Clinical services parsed successfully:', parsedClinicalServices);
+          } else if (Array.isArray(visitData.clinical_services)) {
+            parsedClinicalServices = visitData.clinical_services;
+            console.log('✅ [DB VERIFICATION] Clinical services is already an array:', parsedClinicalServices);
+          }
+        } catch (error) {
+          console.error('❌ [DB VERIFICATION] Error parsing clinical services:', error);
+        }
+      }
+
+      // Test parsing mandatory services
+      let parsedMandatoryServices = [];
+      if (visitData.mandatory_services) {
+        try {
+          if (typeof visitData.mandatory_services === 'string') {
+            parsedMandatoryServices = JSON.parse(visitData.mandatory_services);
+            console.log('✅ [DB VERIFICATION] Mandatory services parsed successfully:', parsedMandatoryServices);
+          } else if (Array.isArray(visitData.mandatory_services)) {
+            parsedMandatoryServices = visitData.mandatory_services;
+            console.log('✅ [DB VERIFICATION] Mandatory services is already an array:', parsedMandatoryServices);
+          }
+        } catch (error) {
+          console.error('❌ [DB VERIFICATION] Error parsing mandatory services:', error);
+        }
+      }
+
+      // Compare with current state
+      console.log('🔍 [DB VERIFICATION] State comparison:', {
+        dbClinicalCount: parsedClinicalServices.length,
+        stateClinicalCount: savedClinicalServicesData.length,
+        dbMandatoryCount: parsedMandatoryServices.length,
+        stateMandatoryCount: savedMandatoryServicesData.length,
+        stateInitialized: {
+          clinical: clinicalServicesInitialized,
+          mandatory: mandatoryServicesInitialized
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ [DB VERIFICATION] Unexpected error:', error);
+    }
+  };
+
+  // Function to test data persistence after page reload simulation
+  const testDataPersistence = async () => {
+    if (!visitId) {
+      console.warn('🚫 [PERSISTENCE TEST] No visitId provided');
+      return;
+    }
+
+    console.log('🧪 [PERSISTENCE TEST] Starting data persistence test for visit:', visitId);
+
+    try {
+      // Step 1: Clear current state to simulate page load
+      console.log('🧪 [PERSISTENCE TEST] Step 1: Clearing current state...');
+      setSavedClinicalServicesData([]);
+      setSavedMandatoryServicesData([]);
+      setClinicalServicesInitialized(false);
+      setMandatoryServicesInitialized(false);
+
+      // Step 2: Wait a bit to ensure state is cleared
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      console.log('🧪 [PERSISTENCE TEST] Step 2: State cleared, now fetching fresh data...');
+
+      // Step 3: Fetch fresh data from database (simulating page reload)
+      await Promise.all([
+        fetchSavedClinicalServicesData(),
+        fetchSavedMandatoryServicesData()
+      ]);
+
+      // Step 4: Wait for state updates
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Step 5: Verify data was loaded correctly
+      console.log('🧪 [PERSISTENCE TEST] Step 3: Verification after fresh fetch:', {
+        clinicalCount: savedClinicalServicesData.length,
+        mandatoryCount: savedMandatoryServicesData.length,
+        clinicalInitialized: clinicalServicesInitialized,
+        mandatoryInitialized: mandatoryServicesInitialized
+      });
+
+      // Step 6: Perform database comparison
+      const { data: verificationData, error } = await supabase
+        .from('visits')
+        .select('clinical_services, mandatory_services')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (error) {
+        console.error('❌ [PERSISTENCE TEST] Database verification error:', error);
+        return;
+      }
+
+      let dbClinicalCount = 0;
+      let dbMandatoryCount = 0;
+
+      if (verificationData?.clinical_services) {
+        try {
+          const parsed = typeof verificationData.clinical_services === 'string'
+            ? JSON.parse(verificationData.clinical_services)
+            : verificationData.clinical_services;
+          dbClinicalCount = Array.isArray(parsed) ? parsed.length : 0;
+        } catch (e) {
+          console.warn('⚠️ [PERSISTENCE TEST] Could not parse clinical services');
+        }
+      }
+
+      if (verificationData?.mandatory_services) {
+        try {
+          const parsed = typeof verificationData.mandatory_services === 'string'
+            ? JSON.parse(verificationData.mandatory_services)
+            : verificationData.mandatory_services;
+          dbMandatoryCount = Array.isArray(parsed) ? parsed.length : 0;
+        } catch (e) {
+          console.warn('⚠️ [PERSISTENCE TEST] Could not parse mandatory services');
+        }
+      }
+
+      const clinicalMatch = dbClinicalCount === savedClinicalServicesData.length;
+      const mandatoryMatch = dbMandatoryCount === savedMandatoryServicesData.length;
+
+      console.log('🧪 [PERSISTENCE TEST] Final Results:', {
+        dbClinicalCount,
+        stateClinicalCount: savedClinicalServicesData.length,
+        dbMandatoryCount,
+        stateMandatoryCount: savedMandatoryServicesData.length,
+        clinicalMatch,
+        mandatoryMatch,
+        overallSuccess: clinicalMatch && mandatoryMatch && clinicalServicesInitialized && mandatoryServicesInitialized
+      });
+
+      if (clinicalMatch && mandatoryMatch && clinicalServicesInitialized && mandatoryServicesInitialized) {
+        console.log('✅ [PERSISTENCE TEST] SUCCESS: Data persistence working correctly!');
+      } else {
+        console.log('❌ [PERSISTENCE TEST] FAILURE: Data persistence has issues');
+      }
+
+    } catch (error) {
+      console.error('❌ [PERSISTENCE TEST] Unexpected error:', error);
+    }
+  };
+
+  // Function to validate visit existence and get available visit IDs for debugging
+  const validateVisitAndGetDebugInfo = async (targetVisitId: string) => {
+    console.log('🔍 [VISIT VALIDATION] Starting visit validation for:', targetVisitId);
+
+    try {
+      // Check if the specific visit exists
+      const { data: targetVisit, error: targetError } = await supabase
+        .from('visits')
+        .select('id, visit_id, patient_id, created_at')
+        .eq('visit_id', targetVisitId)
+        .single();
+
+      console.log('🔍 [VISIT VALIDATION] Target visit check:', {
+        targetVisitId,
+        targetVisit,
+        targetError,
+        exists: !!targetVisit && !targetError
+      });
+
+      // Get list of recent visit IDs for debugging
+      const { data: recentVisits, error: recentError } = await supabase
+        .from('visits')
+        .select('visit_id, patient_id, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      console.log('🔍 [VISIT VALIDATION] Recent visits in database:', {
+        recentVisits: recentVisits?.map(v => ({
+          visit_id: v.visit_id,
+          patient_id: v.patient_id,
+          created_at: v.created_at
+        })) || [],
+        recentError,
+        totalFound: recentVisits?.length || 0
+      });
+
+      // Check if any visits match partially (for debugging typos)
+      if (!targetVisit && targetVisitId) {
+        const { data: partialMatches, error: partialError } = await supabase
+          .from('visits')
+          .select('visit_id')
+          .ilike('visit_id', `%${targetVisitId.slice(0, -3)}%`)
+          .limit(5);
+
+        console.log('🔍 [VISIT VALIDATION] Partial matches for debugging:', {
+          searchPattern: `%${targetVisitId.slice(0, -3)}%`,
+          partialMatches: partialMatches?.map(v => v.visit_id) || [],
+          partialError
+        });
+      }
+
+      return {
+        exists: !!targetVisit && !targetError,
+        visitData: targetVisit,
+        error: targetError,
+        debugInfo: {
+          recentVisits: recentVisits?.map(v => v.visit_id) || [],
+          totalVisitsFound: recentVisits?.length || 0
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ [VISIT VALIDATION] Unexpected error during validation:', error);
+      return {
+        exists: false,
+        visitData: null,
+        error,
+        debugInfo: { recentVisits: [], totalVisitsFound: 0 }
+      };
+    }
+  };
+
+  // Function to verify database schema for clinical and mandatory services columns
+  const verifyDatabaseSchema = async () => {
+    console.log('🔍 [SCHEMA VERIFICATION] Starting database schema verification...');
+
+    try {
+      // Test if columns exist by trying to select them
+      const { data: testData, error: testError } = await supabase
+        .from('visits')
+        .select('clinical_services, mandatory_services')
+        .limit(1)
+        .single();
+
+      console.log('🔍 [SCHEMA VERIFICATION] Column existence test:', {
+        testData,
+        testError,
+        columnsExist: !testError || (testError.code !== 'PGRST116' && testError.code !== '42703')
+      });
+
+      if (testError && (testError.code === 'PGRST116' || testError.code === '42703')) {
+        console.error('❌ [SCHEMA VERIFICATION] Required columns do not exist:', {
+          error: testError,
+          hint: 'Run: ALTER TABLE visits ADD COLUMN clinical_services jsonb, ADD COLUMN mandatory_services jsonb;'
+        });
+        return {
+          columnsExist: false,
+          error: testError,
+          sqlFix: 'ALTER TABLE visits ADD COLUMN clinical_services jsonb, ADD COLUMN mandatory_services jsonb;'
+        };
+      }
+
+      // Test if we can write JSON data to the columns
+      const testJsonData = JSON.stringify([{ test: 'schema_verification', timestamp: new Date().toISOString() }]);
+
+      // Find a visit to test with
+      const { data: testVisit, error: visitError } = await supabase
+        .from('visits')
+        .select('visit_id')
+        .limit(1)
+        .single();
+
+      if (visitError || !testVisit) {
+        console.warn('⚠️ [SCHEMA VERIFICATION] No visits found for testing write operations');
+        return {
+          columnsExist: true,
+          canWrite: 'unknown',
+          reason: 'No visits available for testing'
+        };
+      }
+
+      // Test write operation
+      console.log('🔍 [SCHEMA VERIFICATION] Testing write operation with visit:', testVisit.visit_id);
+      const { data: writeTestData, error: writeError } = await supabase
+        .from('visits')
+        .update({
+          clinical_services: testJsonData
+        })
+        .eq('visit_id', testVisit.visit_id)
+        .select('clinical_services');
+
+      console.log('🔍 [SCHEMA VERIFICATION] Write test result:', {
+        writeTestData,
+        writeError,
+        canWrite: !writeError
+      });
+
+      if (writeError) {
+        console.error('❌ [SCHEMA VERIFICATION] Cannot write to columns:', {
+          error: writeError,
+          possibleIssues: [
+            'Columns have wrong data type',
+            'RLS policies blocking writes',
+            'Permission issues',
+            'Constraint violations'
+          ]
+        });
+        return {
+          columnsExist: true,
+          canWrite: false,
+          error: writeError
+        };
+      }
+
+      // Clean up test data
+      await supabase
+        .from('visits')
+        .update({
+          clinical_services: null
+        })
+        .eq('visit_id', testVisit.visit_id);
+
+      console.log('✅ [SCHEMA VERIFICATION] Schema verification passed');
+      return {
+        columnsExist: true,
+        canWrite: true,
+        testVisitId: testVisit.visit_id
+      };
+
+    } catch (error) {
+      console.error('❌ [SCHEMA VERIFICATION] Unexpected error during schema verification:', error);
+      return {
+        columnsExist: 'unknown',
+        canWrite: false,
+        error
+      };
+    }
+  };
+
+  // Function to fetch saved clinical services data
+  const fetchSavedClinicalServicesData = async () => {
+    if (!visitId) {
+      console.warn('🚫 fetchSavedClinicalServicesData: No visitId provided');
+      return;
+    }
+
+    console.log('🔍 [CLINICAL SERVICES FETCH] Starting fetch for visit:', visitId);
+    console.log('🔍 [CLINICAL SERVICES FETCH] Current savedClinicalServicesData state:', savedClinicalServicesData.length);
+
+    try {
+      // Get clinical services from visits table
+      console.log('🔍 [CLINICAL SERVICES FETCH] Querying database...');
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('clinical_services')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('🔍 [CLINICAL SERVICES FETCH] Database response:', {
+        visitData,
+        visitError,
+        hasData: !!visitData,
+        hasError: !!visitError
+      });
+
+      if (visitError) {
+        console.error('❌ [CLINICAL SERVICES FETCH] Database error:', visitError);
+        return;
+      }
+
+      if (!visitData) {
+        console.warn('⚠️ [CLINICAL SERVICES FETCH] No visit data found for visitId:', visitId);
+        return;
+      }
+
+      // Log raw clinical_services data
+      console.log('🔍 [CLINICAL SERVICES FETCH] Raw clinical_services from DB:', {
+        data: visitData.clinical_services,
+        type: typeof visitData.clinical_services,
+        isString: typeof visitData.clinical_services === 'string',
+        isArray: Array.isArray(visitData.clinical_services),
+        isNull: visitData.clinical_services === null,
+        isUndefined: visitData.clinical_services === undefined,
+        stringValue: typeof visitData.clinical_services === 'string' ? visitData.clinical_services : 'not a string'
+      });
+
+      let clinicalServicesData = [];
+
+      if (visitData?.clinical_services) {
+        try {
+          // Parse JSON data from clinical_services column
+          if (typeof visitData.clinical_services === 'string') {
+            console.log('🔍 [CLINICAL SERVICES FETCH] Parsing string JSON:', visitData.clinical_services);
+
+            // Check for empty string
+            if (visitData.clinical_services.trim() === '') {
+              console.log('⚠️ [CLINICAL SERVICES FETCH] Empty string found, defaulting to empty array');
+              clinicalServicesData = [];
+            } else {
+              // Check for malformed data before parsing
+              let cleanedString = visitData.clinical_services;
+              if (cleanedString.startsWith('["') && !cleanedString.startsWith('[{')) {
+                console.warn('⚠️ [CLINICAL SERVICES FETCH] Detected malformed array literal, resetting to empty array');
+                clinicalServicesData = [];
+
+                // Update database to clean malformed data
+                const { error: cleanupError } = await supabase
+                  .from('visits')
+                  .update({ clinical_services: '[]' })
+                  .eq('visit_id', visitId);
+
+                if (cleanupError) {
+                  console.error('❌ [CLINICAL SERVICES FETCH] Error cleaning malformed data:', cleanupError);
+                }
+              } else {
+                clinicalServicesData = JSON.parse(visitData.clinical_services);
+                console.log('✅ [CLINICAL SERVICES FETCH] Successfully parsed JSON:', clinicalServicesData);
+              }
+            }
+          } else if (Array.isArray(visitData.clinical_services)) {
+            console.log('✅ [CLINICAL SERVICES FETCH] Data is already an array:', visitData.clinical_services);
+            clinicalServicesData = visitData.clinical_services;
+          } else {
+            console.warn('⚠️ [CLINICAL SERVICES FETCH] Unexpected data type, defaulting to empty array');
+            clinicalServicesData = [];
+          }
+        } catch (parseError) {
+          console.error('❌ [CLINICAL SERVICES FETCH] JSON parse error:', parseError);
+          console.error('❌ [CLINICAL SERVICES FETCH] Failed to parse:', visitData.clinical_services);
+          clinicalServicesData = [];
+        }
+      } else {
+        console.log('ℹ️ [CLINICAL SERVICES FETCH] No clinical services data in database (null/undefined)');
+        clinicalServicesData = [];
+      }
+
+      // Validate parsed data
+      if (!Array.isArray(clinicalServicesData)) {
+        console.error('❌ [CLINICAL SERVICES FETCH] Parsed data is not an array:', clinicalServicesData);
+        clinicalServicesData = [];
+      }
+
+      console.log('🎯 [CLINICAL SERVICES FETCH] Final data to set in state:', {
+        count: clinicalServicesData.length,
+        data: clinicalServicesData,
+        sample: clinicalServicesData[0] || 'no items'
+      });
+
+      setSavedClinicalServicesData(clinicalServicesData);
+      setClinicalServicesInitialized(true);
+
+      console.log('✅ [CLINICAL SERVICES FETCH] State updated successfully');
+
+      // Verify state will be updated in next render
+      setTimeout(() => {
+        console.log('🔍 [CLINICAL SERVICES FETCH] State verification (after setState):', {
+          currentStateLength: savedClinicalServicesData.length,
+          expectedLength: clinicalServicesData.length
+        });
+      }, 100);
+
+    } catch (error) {
+      console.error('❌ [CLINICAL SERVICES FETCH] Unexpected error:', error);
+      console.error('❌ [CLINICAL SERVICES FETCH] Error stack:', error.stack);
+    }
+  };
+
+  // Function to fetch saved mandatory services data
+  const fetchSavedMandatoryServicesData = async () => {
+    if (!visitId) {
+      console.log('🔍 [MANDATORY SERVICES FETCH] No visitId, skipping fetch');
+      return;
+    }
+
+    console.log('🔍 [MANDATORY SERVICES FETCH] Starting fetch for visit:', visitId);
+
+    try {
+      // Get mandatory services from visits table
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('mandatory_services')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('🔍 [MANDATORY SERVICES FETCH] Database response:', {
+        visitData,
+        visitError,
+        hasData: !!visitData,
+        hasError: !!visitError
+      });
+
+      if (visitError) {
+        console.error('❌ [MANDATORY SERVICES FETCH] Database error:', visitError);
+        return;
+      }
+
+      console.log('🔍 [MANDATORY SERVICES FETCH] Raw mandatory_services from DB:', visitData?.mandatory_services);
+      console.log('🔍 [MANDATORY SERVICES FETCH] Data type:', typeof visitData?.mandatory_services);
+
+      let mandatoryServicesData = [];
+      if (visitData?.mandatory_services) {
+        try {
+          // Parse JSON data from mandatory_services column
+          if (typeof visitData.mandatory_services === 'string') {
+            console.log('🔍 [MANDATORY SERVICES FETCH] Parsing string data...');
+
+            // Check for empty string
+            if (visitData.mandatory_services.trim() === '') {
+              console.log('⚠️ [MANDATORY SERVICES FETCH] Empty string found, defaulting to empty array');
+              mandatoryServicesData = [];
+            } else {
+              // Check for malformed data before parsing
+              let cleanedString = visitData.mandatory_services;
+              if (cleanedString.startsWith('["') && !cleanedString.startsWith('[{')) {
+                console.warn('⚠️ [MANDATORY SERVICES FETCH] Detected malformed array literal, resetting to empty array');
+                mandatoryServicesData = [];
+
+                // Update database to clean malformed data
+                const { error: cleanupError } = await supabase
+                  .from('visits')
+                  .update({ mandatory_services: '[]' })
+                  .eq('visit_id', visitId);
+
+                if (cleanupError) {
+                  console.error('❌ [MANDATORY SERVICES FETCH] Error cleaning malformed data:', cleanupError);
+                }
+              } else {
+                mandatoryServicesData = JSON.parse(visitData.mandatory_services);
+              }
+            }
+          } else if (Array.isArray(visitData.mandatory_services)) {
+            console.log('🔍 [MANDATORY SERVICES FETCH] Using array data directly...');
+            mandatoryServicesData = visitData.mandatory_services;
+          }
+          console.log('🔍 [MANDATORY SERVICES FETCH] Parsed data:', mandatoryServicesData);
+          console.log('🔍 [MANDATORY SERVICES FETCH] Parsed data length:', mandatoryServicesData.length);
+        } catch (parseError) {
+          console.error('❌ [MANDATORY SERVICES FETCH] JSON parsing error:', parseError);
+          console.error('❌ [MANDATORY SERVICES FETCH] Failed to parse:', visitData.mandatory_services);
+          mandatoryServicesData = [];
+
+          // Clean corrupted data in database
+          console.log('🔧 [MANDATORY SERVICES FETCH] Cleaning corrupted data in database...');
+          const { error: cleanupError } = await supabase
+            .from('visits')
+            .update({ mandatory_services: '[]' })
+            .eq('visit_id', visitId);
+
+          if (cleanupError) {
+            console.error('❌ [MANDATORY SERVICES FETCH] Error cleaning corrupted data:', cleanupError);
+          }
+        }
+      } else {
+        console.log('🔍 [MANDATORY SERVICES FETCH] No mandatory_services data found in visit');
+      }
+
+      console.log('✅ [MANDATORY SERVICES FETCH] Final data to set in state:', mandatoryServicesData);
+      setSavedMandatoryServicesData(mandatoryServicesData);
+      setMandatoryServicesInitialized(true);
+
+      // Add a delay to ensure state update and log the result
+      setTimeout(() => {
+        console.log('🔍 [MANDATORY SERVICES FETCH] State updated, current savedMandatoryServicesData length should be:', mandatoryServicesData.length);
+      }, 100);
+
+    } catch (error) {
+      console.error('❌ [MANDATORY SERVICES FETCH] Unexpected error:', error);
+      console.error('❌ [MANDATORY SERVICES FETCH] Error stack:', error.stack);
+    }
+  };
+
   // Function to delete saved medication
   const handleDeleteMedication = async (medicationId: string) => {
     if (!confirm('Are you sure you want to delete this medication?')) {
@@ -5494,7 +6210,125 @@ INSTRUCTIONS:
     }
   };
 
+  // Function to delete saved clinical service
+  const handleDeleteClinicalService = async (serviceId: string) => {
+    if (!confirm('Are you sure you want to delete this clinical service?')) {
+      return;
+    }
 
+    try {
+      // Get current clinical services from visits table
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('clinical_services')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError) {
+        console.error('Error fetching visit data:', visitError);
+        toast.error('Failed to delete clinical service');
+        return;
+      }
+
+      let existingServices = [];
+      if (visitData?.clinical_services) {
+        try {
+          if (typeof visitData.clinical_services === 'string') {
+            existingServices = JSON.parse(visitData.clinical_services);
+          } else if (Array.isArray(visitData.clinical_services)) {
+            existingServices = visitData.clinical_services;
+          }
+        } catch (parseError) {
+          console.error('Error parsing clinical services:', parseError);
+          existingServices = [];
+        }
+      }
+
+      // Remove the service with matching ID
+      const updatedServices = existingServices.filter(service => service.id !== serviceId);
+
+      // Update visits table
+      const { error: updateError } = await supabase
+        .from('visits')
+        .update({
+          clinical_services: JSON.stringify(updatedServices)
+        })
+        .eq('visit_id', visitId);
+
+      if (updateError) {
+        console.error('Error updating clinical services:', updateError);
+        toast.error('Failed to delete clinical service');
+        return;
+      }
+
+      // Refresh saved clinical services data
+      await fetchSavedClinicalServicesData();
+      toast.success('Clinical service deleted successfully');
+    } catch (error) {
+      console.error('Error deleting clinical service:', error);
+      toast.error('Failed to delete clinical service');
+    }
+  };
+
+  // Function to delete saved mandatory service
+  const handleDeleteMandatoryService = async (serviceId: string) => {
+    if (!confirm('Are you sure you want to delete this mandatory service?')) {
+      return;
+    }
+
+    try {
+      // Get current mandatory services from visits table
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('mandatory_services')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError) {
+        console.error('Error fetching visit data:', visitError);
+        toast.error('Failed to delete mandatory service');
+        return;
+      }
+
+      let existingServices = [];
+      if (visitData?.mandatory_services) {
+        try {
+          if (typeof visitData.mandatory_services === 'string') {
+            existingServices = JSON.parse(visitData.mandatory_services);
+          } else if (Array.isArray(visitData.mandatory_services)) {
+            existingServices = visitData.mandatory_services;
+          }
+        } catch (parseError) {
+          console.error('Error parsing mandatory services:', parseError);
+          existingServices = [];
+        }
+      }
+
+      // Remove the service with matching ID
+      const updatedServices = existingServices.filter(service => service.id !== serviceId);
+
+      // Update visits table
+      const { error: updateError } = await supabase
+        .from('visits')
+        .update({
+          mandatory_services: JSON.stringify(updatedServices)
+        })
+        .eq('visit_id', visitId);
+
+      if (updateError) {
+        console.error('Error updating mandatory services:', updateError);
+        toast.error('Failed to delete mandatory service');
+        return;
+      }
+
+      // Refresh saved mandatory services data
+      await fetchSavedMandatoryServicesData();
+      toast.success('Mandatory service deleted successfully');
+    } catch (error) {
+      console.error('Error deleting mandatory service:', error);
+      toast.error('Failed to delete mandatory service');
+    }
+  };
 
   const handleAddItem = (mainItemId: string) => {
     setInvoiceItems(prev => prev.map((item): InvoiceItem => {
@@ -6220,11 +7054,484 @@ INSTRUCTIONS:
     enabled: serviceSearchTerm.length >= 2 && activeServiceTab === "Pharmacy",
   });
 
+  // Clinical services search query with patient type-based rates
+  const { data: searchedClinicalServices = [], isLoading: isSearchingClinicalServices, error: clinicalServicesError } = useQuery({
+    queryKey: ['clinical-services-search', serviceSearchTerm, hospitalConfig.name, visitId],
+    queryFn: async () => {
+      console.log('🔍 Clinical services search triggered:', {
+        serviceSearchTerm,
+        serviceSearchTermLength: serviceSearchTerm?.length,
+        activeServiceTab,
+        hospital: hospitalConfig.name,
+        hospitalType: hospitalConfig.id,
+        visitId
+      });
+
+      if (!serviceSearchTerm || serviceSearchTerm.length < 2) {
+        console.log('⚠️ Search term too short or empty:', serviceSearchTerm);
+        return [];
+      }
+
+      // First, get patient information to determine appropriate rate
+      let patientCategory = 'Private'; // Default
+      let visitData = null;
+
+      try {
+        console.log('👤 Fetching patient information for rate selection...');
+        const { data: visitDataResult, error: visitError } = await supabase
+          .from('visits')
+          .select(`
+            *,
+            patients (
+              *
+            )
+          `)
+          .eq('visit_id', visitId)
+          .single();
+
+        if (!visitError && visitDataResult) {
+          visitData = visitDataResult;
+          // Determine patient category from various possible fields
+          patientCategory =
+            visitDataResult.category ||
+            visitDataResult.patient_type ||
+            visitDataResult.insurance_type ||
+            visitDataResult.patients?.category ||
+            visitDataResult.patients?.patient_type ||
+            visitDataResult.patients?.insurance_type ||
+            'Private';
+
+          console.log('👤 Patient category determined:', {
+            category: patientCategory,
+            visitCategory: visitDataResult.category,
+            patientCategory: visitDataResult.patients?.category,
+            patientType: visitDataResult.patients?.patient_type,
+            insuranceType: visitDataResult.patients?.insurance_type
+          });
+        }
+      } catch (patientError) {
+        console.error('⚠️ Could not fetch patient data, defaulting to Private:', patientError);
+      }
+
+      // Hospital-specific filtering based on the pattern used in lab services
+      let hospitalFilter = 'hope'; // Default fallback
+      if (hospitalConfig.name === 'hope') {
+        hospitalFilter = 'hope';
+        console.log('🏥 HOPE Hospital login detected - filtering clinical services');
+      } else if (hospitalConfig.name === 'ayushman') {
+        hospitalFilter = 'ayushman';
+        console.log('🏥 AYUSHMAN Hospital login detected - filtering clinical services');
+      } else {
+        hospitalFilter = 'hope'; // Default fallback
+        console.log('🏥 Unknown hospital, defaulting to HOPE - filtering clinical services');
+      }
+
+      console.log('🔍 About to query clinical services with:', {
+        searchTerm: serviceSearchTerm,
+        hospitalFilter,
+        activeTab: activeServiceTab,
+        patientCategory
+      });
+
+      // First, let's try to get all clinical services to see if the table exists and has data
+      console.log('🔍 Step 1: Testing if clinical_services table exists and has data');
+      const { data: allServices, error: testError } = await supabase
+        .from('clinical_services')
+        .select('id, service_name')
+        .limit(5);
+
+      if (testError) {
+        console.error('❌ Error accessing clinical_services table:', testError);
+        console.error('❌ Full error details:', JSON.stringify(testError, null, 2));
+        return [];
+      }
+
+      console.log('✅ clinical_services table accessible. Sample data:', allServices);
+      console.log('📊 Total services found in test query:', allServices?.length || 0);
+
+      if (!allServices || allServices.length === 0) {
+        console.log('⚠️ No clinical services found in database at all');
+        return [];
+      }
+
+      // Now try the main query - first without hospital filtering to see if search works
+      console.log('🔍 Step 2: Searching for services matching:', serviceSearchTerm);
+
+      // Let's try a simpler query first to see what columns exist
+      const { data: sampleService, error: sampleError } = await supabase
+        .from('clinical_services')
+        .select('*')
+        .limit(1);
+
+      if (sampleError) {
+        console.error('❌ Error getting sample service:', sampleError);
+        return [];
+      }
+
+      console.log('📋 Sample service structure:', sampleService?.[0]);
+
+      // Now try the search with proper syntax using only columns that exist
+      let searchResults, searchError;
+
+      // First, let's get the actual column structure from the sample
+      const availableColumns = sampleService?.[0] ? Object.keys(sampleService[0]) : [];
+      console.log('📋 Available columns in clinical_services:', availableColumns);
+
+      // Build select clause with only existing columns
+      const baseColumns = ['id', 'service_name', 'status'];
+      const optionalColumns = ['tpa_rate', 'private_rate', 'cghs_rate', 'non_cghs_rate', 'hospital', 'amount', 'rate', 'cost'];
+
+      const existingColumns = baseColumns.concat(
+        optionalColumns.filter(col => availableColumns.includes(col))
+      );
+
+      console.log('🔍 Using columns for query:', existingColumns);
+
+      try {
+        const result = await supabase
+          .from('clinical_services')
+          .select(existingColumns.join(', '))
+          .ilike('service_name', `%${serviceSearchTerm}%`)
+          .order('service_name')
+          .limit(20);
+
+        searchResults = result.data;
+        searchError = result.error;
+
+        if (searchError) {
+          console.error('❌ Error in primary search query:', searchError);
+          throw searchError;
+        }
+      } catch (queryError) {
+        console.error('❌ Primary query failed, trying fallback:', queryError);
+        // If structured query fails, try getting all data and filter in JavaScript
+        try {
+          const fallbackResult = await supabase
+            .from('clinical_services')
+            .select('*')
+            .order('service_name')
+            .limit(50); // Get more records for filtering
+
+          if (fallbackResult.error) {
+            console.error('❌ Fallback query error:', fallbackResult.error);
+            return [];
+          }
+
+          // Filter in JavaScript
+          searchResults = fallbackResult.data?.filter(service =>
+            service.service_name?.toLowerCase().includes(serviceSearchTerm.toLowerCase())
+          ) || [];
+
+          searchError = null;
+          console.log('✅ Fallback filtering successful, found:', searchResults.length, 'services');
+        } catch (fallbackError) {
+          console.error('❌ Fallback query also failed:', fallbackError);
+          return [];
+        }
+      }
+
+      if (searchError) {
+        console.error('❌ Error searching clinical services:', searchError);
+        return [];
+      }
+
+      console.log('🔍 Step 2 results:', searchResults?.length || 0, 'services found');
+
+      // If we have results, now try to filter by hospital and status
+      let finalData = searchResults || [];
+
+      // Filter by active status
+      finalData = finalData.filter(service => service.status === 'Active');
+      console.log('📊 After status filter (Active only):', finalData.length, 'services');
+
+      // Try hospital filtering if we have the data
+      if (finalData.length > 0) {
+        // Check if any service has hospital field
+        const hasHospitalField = finalData.some(service => 'hospital' in service);
+        if (hasHospitalField) {
+          console.log('✅ Hospital field found, filtering by:', hospitalFilter);
+          finalData = finalData.filter(service => service.hospital === hospitalFilter);
+          console.log('📊 After hospital filter:', finalData.length, 'services');
+        } else {
+          console.log('ℹ️ No hospital field found, returning all active services');
+        }
+      }
+
+      let data = finalData;
+      let error = null;
+
+      // Transform data to match expected format and handle missing fields with patient type-based rates
+      const transformedData = data?.map((item, index) => {
+        // Select appropriate rate based on patient category
+        let selectedRate = 0;
+        let rateType = 'private'; // Default
+
+        // Map patient categories to rate fields
+        const categoryLower = patientCategory.toLowerCase();
+
+        if (categoryLower.includes('corporate') || categoryLower.includes('company')) {
+          selectedRate = item.private_rate || item.tpa_rate || item.amount || item.rate || item.cost || 0;
+          rateType = 'corporate';
+        } else if (categoryLower.includes('tpa') || categoryLower.includes('insurance')) {
+          selectedRate = item.tpa_rate || item.private_rate || item.amount || item.rate || item.cost || 0;
+          rateType = 'tpa';
+        } else if (categoryLower.includes('cghs')) {
+          selectedRate = item.cghs_rate || item.private_rate || item.amount || item.rate || item.cost || 0;
+          rateType = 'cghs';
+        } else if (categoryLower.includes('non_cghs') || categoryLower.includes('non-cghs')) {
+          selectedRate = item.non_cghs_rate || item.private_rate || item.amount || item.rate || item.cost || 0;
+          rateType = 'non_cghs';
+        } else {
+          // Default to private rate
+          selectedRate = item.private_rate || item.tpa_rate || item.amount || item.rate || item.cost || 0;
+          rateType = 'private';
+        }
+
+        const transformed = {
+          ...item,
+          name: item.service_name || item.name || 'Unknown Service',
+          service_name: item.service_name || item.name || 'Unknown Service',
+          amount: selectedRate,
+          selectedRate: selectedRate,
+          rateType: rateType,
+          patientCategory: patientCategory,
+          tpa_rate: item.tpa_rate || selectedRate || 0,
+          private_rate: item.private_rate || selectedRate || 0,
+          cghs_rate: item.cghs_rate || selectedRate || 0,
+          non_cghs_rate: item.non_cghs_rate || selectedRate || 0,
+          status: item.status || 'Active',
+          id: item.id || `temp-${Date.now()}-${index}`
+        };
+
+        console.log(`🔧 Transformed service ${index + 1} for ${patientCategory} patient:`, {
+          serviceName: item.service_name,
+          patientCategory,
+          rateType,
+          selectedRate,
+          availableRates: {
+            private: item.private_rate,
+            tpa: item.tpa_rate,
+            cghs: item.cghs_rate,
+            non_cghs: item.non_cghs_rate
+          }
+        });
+
+        return transformed;
+      }) || [];
+
+      console.log('🔍 Final clinical services results:');
+      console.log('📊 Total transformed services:', transformedData.length);
+      console.log('📋 Sample transformed service:', transformedData[0]);
+      console.log('🏥 Hospital filter applied:', hospitalFilter);
+
+      return transformedData;
+    },
+    enabled: serviceSearchTerm.length >= 2 && activeServiceTab === "Clinical services",
+  });
+
+  // Mandatory services search query with patient type-based rates
+  const { data: searchedMandatoryServices = [], isLoading: isSearchingMandatoryServices, error: mandatoryServicesError } = useQuery({
+    queryKey: ['mandatory-services-search', serviceSearchTerm, hospitalConfig.name, visitId],
+    queryFn: async () => {
+      console.log('🔍 Mandatory services search triggered:', {
+        serviceSearchTerm,
+        serviceSearchTermLength: serviceSearchTerm?.length,
+        activeServiceTab,
+        hospital: hospitalConfig.name,
+        hospitalType: hospitalConfig.id,
+        visitId
+      });
+
+      if (!serviceSearchTerm || serviceSearchTerm.length < 2) {
+        console.log('⚠️ Search term too short or empty:', serviceSearchTerm);
+        return [];
+      }
+
+      // First, get patient information to determine appropriate rate
+      let patientCategory = 'Private'; // Default
+      let visitData = null;
+
+      try {
+        console.log('👤 Fetching patient information for mandatory services rate selection...');
+        const { data: visitDataResult, error: visitError } = await supabase
+          .from('visits')
+          .select(`
+            *,
+            patients (
+              *
+            )
+          `)
+          .eq('visit_id', visitId)
+          .single();
+
+        if (!visitError && visitDataResult) {
+          visitData = visitDataResult;
+          // Determine patient category from various possible fields
+          patientCategory =
+            visitDataResult.category ||
+            visitDataResult.patient_type ||
+            visitDataResult.insurance_type ||
+            visitDataResult.patients?.category ||
+            visitDataResult.patients?.patient_type ||
+            visitDataResult.patients?.insurance_type ||
+            'Private';
+
+          console.log('👤 Patient category determined for mandatory services:', {
+            category: patientCategory,
+            visitCategory: visitDataResult.category,
+            patientCategory: visitDataResult.patients?.category,
+            patientType: visitDataResult.patients?.patient_type,
+            insuranceType: visitDataResult.patients?.insurance_type
+          });
+        }
+      } catch (patientError) {
+        console.error('⚠️ Could not fetch patient data for mandatory services, defaulting to Private:', patientError);
+      }
+
+      console.log('🔍 About to query mandatory services with:', {
+        searchTerm: serviceSearchTerm,
+        activeTab: activeServiceTab,
+        patientCategory
+      });
+
+      // Query mandatory services table
+      let searchResults, searchError;
+
+      try {
+        const result = await supabase
+          .from('mandatory_services')
+          .select('*')
+          .ilike('service_name', `%${serviceSearchTerm}%`)
+          .eq('status', 'Active')
+          .order('service_name')
+          .limit(20);
+
+        searchResults = result.data;
+        searchError = result.error;
+
+        if (searchError) {
+          console.error('❌ Error in mandatory services search query:', searchError);
+          throw searchError;
+        }
+      } catch (queryError) {
+        console.error('❌ Mandatory services query failed, trying fallback:', queryError);
+        // If structured query fails, try getting all data and filter in JavaScript
+        try {
+          const fallbackResult = await supabase
+            .from('mandatory_services')
+            .select('*')
+            .order('service_name')
+            .limit(50);
+
+          if (fallbackResult.error) {
+            console.error('❌ Fallback mandatory services query error:', fallbackResult.error);
+            return [];
+          }
+
+          // Filter in JavaScript
+          searchResults = fallbackResult.data?.filter(service =>
+            service.service_name?.toLowerCase().includes(serviceSearchTerm.toLowerCase())
+          ) || [];
+
+          searchError = null;
+          console.log('✅ Fallback mandatory services filtering successful, found:', searchResults.length, 'services');
+        } catch (fallbackError) {
+          console.error('❌ Fallback mandatory services query also failed:', fallbackError);
+          return [];
+        }
+      }
+
+      if (searchError) {
+        console.error('❌ Error searching mandatory services:', searchError);
+        return [];
+      }
+
+      console.log('🔍 Step 2 mandatory services results:', searchResults?.length || 0, 'services found');
+
+      // If we have results, filter by status
+      let finalData = searchResults || [];
+      finalData = finalData.filter(service => service.status === 'Active');
+      console.log('📊 After status filter (Active only):', finalData.length, 'mandatory services');
+
+      // Transform data to match expected format and handle missing fields with patient type-based rates
+      const transformedData = finalData?.map((item, index) => {
+        // Select appropriate rate based on patient category for mandatory services
+        let selectedRate = 0;
+        let rateType = 'private'; // Default
+
+        // Map patient categories to rate fields
+        const categoryLower = patientCategory.toLowerCase();
+
+        if (categoryLower.includes('corporate') || categoryLower.includes('company')) {
+          selectedRate = item.private_rate || item.rate || item.amount || 0;
+          rateType = 'corporate';
+        } else if (categoryLower.includes('tpa') || categoryLower.includes('insurance')) {
+          selectedRate = item.tpa_rate || item.private_rate || item.rate || item.amount || 0;
+          rateType = 'tpa';
+        } else if (categoryLower.includes('cghs')) {
+          selectedRate = item.cghs_rate || item.private_rate || item.rate || item.amount || 0;
+          rateType = 'cghs';
+        } else if (categoryLower.includes('non_cghs') || categoryLower.includes('non-cghs')) {
+          selectedRate = item.non_cghs_rate || item.private_rate || item.rate || item.amount || 0;
+          rateType = 'non_cghs';
+        } else {
+          // Default to private rate
+          selectedRate = item.private_rate || item.rate || item.amount || 0;
+          rateType = 'private';
+        }
+
+        const transformed = {
+          ...item,
+          name: item.service_name || item.name || 'Unknown Mandatory Service',
+          service_name: item.service_name || item.name || 'Unknown Mandatory Service',
+          amount: selectedRate,
+          selectedRate: selectedRate,
+          rateType: rateType,
+          patientCategory: patientCategory,
+          private_rate: item.private_rate || selectedRate || 0,
+          tpa_rate: item.tpa_rate || selectedRate || 0,
+          cghs_rate: item.cghs_rate || selectedRate || 0,
+          non_cghs_rate: item.non_cghs_rate || selectedRate || 0,
+          status: item.status || 'Active',
+          id: item.id || `temp-mandatory-${Date.now()}-${index}`
+        };
+
+        console.log(`🔧 Transformed mandatory service ${index + 1} for ${patientCategory} patient:`, {
+          serviceName: item.service_name,
+          patientCategory,
+          rateType,
+          selectedRate,
+          availableRates: {
+            private: item.private_rate,
+            tpa: item.tpa_rate,
+            cghs: item.cghs_rate,
+            non_cghs: item.non_cghs_rate
+          }
+        });
+
+        return transformed;
+      }) || [];
+
+      console.log('🔍 Final mandatory services results:');
+      console.log('📊 Total transformed mandatory services:', transformedData.length);
+      console.log('📋 Sample transformed mandatory service:', transformedData[0]);
+
+      return transformedData;
+    },
+    enabled: serviceSearchTerm.length >= 2 && activeServiceTab === "Mandatory services",
+  });
+
   const filteredPharmacyServices = serviceSearchTerm.length >= 2 ? searchedPharmacyServices :
     availablePharmacyServices.filter(service =>
       service.name?.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
       service.code?.toLowerCase().includes(serviceSearchTerm.toLowerCase())
     );
+
+  // Filtered clinical services
+  const filteredClinicalServices = serviceSearchTerm.length >= 2 ? searchedClinicalServices : [];
+
+  // Filtered mandatory services
+  const filteredMandatoryServices = serviceSearchTerm.length >= 2 ? searchedMandatoryServices : [];
 
   // Diagnosis search query
   const { data: availableDiagnoses = [] } = useQuery({
@@ -12381,6 +13688,266 @@ Dr. Murali B K
                         </>
                       )}
 
+                      {activeServiceTab === "Mandatory services" && (
+                        <>
+                          {isSearchingMandatoryServices ? (
+                            <div className="p-2 text-gray-500 text-sm">
+                              {serviceSearchTerm.length >= 2 ? 'Searching mandatory services...' : 'Loading mandatory services...'}
+                            </div>
+                          ) : (
+                            <>
+                              {mandatoryServicesError && (
+                                <div className="p-2 text-red-500 text-sm">
+                                  Error loading mandatory services: {mandatoryServicesError.message || 'Unknown error'}
+                                  <br />
+                                  <small>Check browser console for details</small>
+                                </div>
+                              )}
+                              {filteredMandatoryServices.map((service) => (
+                                <div
+                                  key={service.id}
+                                  className="p-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                  onClick={async () => {
+                                    console.log('🏥 Mandatory service selected:', service);
+
+                                    // Show immediate feedback
+                                    toast.info(`Saving mandatory service "${service.service_name}"...`);
+
+                                    try {
+                                      console.log('🚀 [MANDATORY SAVE] Starting mandatory service save process...');
+                                      console.log('🚀 [MANDATORY SAVE] Input data:', {
+                                        visitId,
+                                        serviceId: service.id,
+                                        serviceName: service.service_name,
+                                        selectedRate: service.selectedRate,
+                                        rateType: service.rateType,
+                                        patientCategory: service.patientCategory
+                                      });
+
+                                      // Validate visit existence first
+                                      const validationResult = await validateVisitAndGetDebugInfo(visitId);
+
+                                      if (!validationResult.exists) {
+                                        console.error('❌ [MANDATORY SAVE] Visit validation failed:', {
+                                          visitId,
+                                          error: validationResult.error,
+                                          availableVisits: validationResult.debugInfo.recentVisits
+                                        });
+                                        toast.error(`Visit ${visitId} not found in database. Check console for available visits.`);
+                                        return;
+                                      }
+
+                                      // Get visit UUID and current mandatory_services
+                                      console.log('🔍 [MANDATORY SAVE] Fetching visit data for visitId:', visitId);
+                                      const { data: visitData, error: visitError } = await supabase
+                                        .from('visits')
+                                        .select('id, visit_id, mandatory_services')
+                                        .eq('visit_id', visitId)
+                                        .single();
+
+                                      console.log('🔍 [MANDATORY SAVE] Visit fetch result:', {
+                                        visitData,
+                                        visitError,
+                                        hasData: !!visitData,
+                                        hasError: !!visitError
+                                      });
+
+                                      if (visitError) {
+                                        console.error('❌ [MANDATORY SAVE] Error fetching visit after validation passed:', {
+                                          message: visitError.message,
+                                          details: visitError.details,
+                                          hint: visitError.hint,
+                                          code: visitError.code,
+                                          visitId: visitId,
+                                          note: 'This is unexpected since validation passed'
+                                        });
+                                        toast.error('Failed to save mandatory service - visit fetch error');
+                                        return;
+                                      }
+
+                                      if (!visitData) {
+                                        console.error('❌ [MANDATORY SAVE] No visit data returned after validation passed:', {
+                                          visitId,
+                                          note: 'This is unexpected since validation passed'
+                                        });
+                                        toast.error('Failed to save mandatory service - no visit data');
+                                        return;
+                                      }
+
+                                      // Prepare service data to store
+                                      const serviceToStore = {
+                                        id: service.id,
+                                        service_name: service.service_name,
+                                        selectedRate: service.selectedRate,
+                                        rateType: service.rateType,
+                                        patientCategory: service.patientCategory,
+                                        private_rate: service.private_rate,
+                                        tpa_rate: service.tpa_rate,
+                                        cghs_rate: service.cghs_rate,
+                                        non_cghs_rate: service.non_cghs_rate,
+                                        selected_at: new Date().toISOString()
+                                      };
+
+                                      // Get existing mandatory services or initialize empty array
+                                      let existingServices = [];
+                                      if (visitData.mandatory_services) {
+                                        if (typeof visitData.mandatory_services === 'string') {
+                                          try {
+                                            // Handle malformed array literal by cleaning first
+                                            let cleanedString = visitData.mandatory_services;
+
+                                            // If it's a malformed array literal, try to fix it
+                                            if (cleanedString.startsWith('["') && !cleanedString.startsWith('[{')) {
+                                              console.warn('⚠️ Detected malformed mandatory services array literal, cleaning...');
+                                              // Reset to empty array if malformed
+                                              existingServices = [];
+                                            } else {
+                                              existingServices = JSON.parse(cleanedString);
+                                            }
+                                          } catch (parseError) {
+                                            console.warn('⚠️ Could not parse existing mandatory services, resetting:', parseError);
+                                            existingServices = [];
+
+                                            // Clear the malformed data in database
+                                            try {
+                                              await supabase
+                                                .from('visits')
+                                                .update({ mandatory_services: '[]' })
+                                                .eq('visit_id', visitId);
+                                            } catch (clearError) {
+                                              console.warn('Could not clear malformed mandatory services data:', clearError);
+                                            }
+                                          }
+                                        } else if (Array.isArray(visitData.mandatory_services)) {
+                                          existingServices = visitData.mandatory_services;
+                                        } else {
+                                          console.warn('⚠️ Unknown mandatory_services format, resetting');
+                                          existingServices = [];
+                                        }
+                                      }
+
+                                      // Check if service already exists
+                                      const existingIndex = existingServices.findIndex(s => s.id === service.id);
+                                      if (existingIndex >= 0) {
+                                        // Update existing service
+                                        existingServices[existingIndex] = serviceToStore;
+                                        console.log('🔄 Updated existing mandatory service');
+                                      } else {
+                                        // Add new service
+                                        existingServices.push(serviceToStore);
+                                        console.log('➕ Added new mandatory service');
+                                      }
+
+                                      // Prepare the data for database update
+                                      const jsonDataToSave = JSON.stringify(existingServices);
+                                      console.log('💾 [MANDATORY SAVE] Preparing database update:', {
+                                        targetVisitId: visitId,
+                                        targetDbId: visitData.id,
+                                        servicesCount: existingServices.length,
+                                        jsonLength: jsonDataToSave.length,
+                                        jsonSample: jsonDataToSave.substring(0, 200) + (jsonDataToSave.length > 200 ? '...' : ''),
+                                        fullData: existingServices
+                                      });
+
+                                      // Update visits table with mandatory services
+                                      console.log('🔄 [MANDATORY SAVE] Executing database UPDATE...');
+                                      const { data: updateData, error: updateError, count } = await supabase
+                                        .from('visits')
+                                        .update({
+                                          mandatory_services: jsonDataToSave
+                                        })
+                                        .eq('visit_id', visitId)
+                                        .select();
+
+                                      console.log('🔄 [MANDATORY SAVE] Database UPDATE result:', {
+                                        updateData,
+                                        updateError,
+                                        count,
+                                        wasSuccessful: !updateError,
+                                        rowsAffected: updateData?.length || 0
+                                      });
+
+                                      if (updateError) {
+                                        console.error('❌ [MANDATORY SAVE] Database UPDATE failed:', {
+                                          message: updateError.message,
+                                          details: updateError.details,
+                                          hint: updateError.hint,
+                                          code: updateError.code,
+                                          visitId: visitId,
+                                          jsonData: jsonDataToSave
+                                        });
+                                        toast.error(`Failed to save mandatory service: ${updateError.message}`);
+                                        return;
+                                      }
+
+                                      if (!updateData || updateData.length === 0) {
+                                        console.error('❌ [MANDATORY SAVE] No rows were updated - possible visitId mismatch:', {
+                                          visitId,
+                                          searchedFor: visitId,
+                                          availableVisits: 'Check database for existing visit_id values'
+                                        });
+                                        toast.error('Failed to save mandatory service - visit not found in database');
+                                        return;
+                                      }
+
+                                      console.log('✅ Mandatory service saved successfully:', serviceToStore);
+                                      toast.success(`Mandatory service "${service.service_name}" saved for ${service.patientCategory} patient (${service.rateType.toUpperCase()} rate: ₹${service.selectedRate})`);
+                                      setServiceSearchTerm("");
+
+                                      // Refresh saved mandatory services data
+                                      fetchSavedMandatoryServicesData().catch(console.error);
+
+                                    } catch (error) {
+                                      console.error('❌ Error in mandatory service selection:', error);
+                                      toast.error('Failed to save mandatory service. Please try again.');
+                                    }
+                                  }}
+                                >
+                                  <div className="flex justify-between items-center">
+                                    <div className="flex-1">
+                                      <div className="font-medium text-sm">{service.service_name}</div>
+                                      <div className="text-xs text-gray-500">
+                                        Patient: {service.patientCategory} | Rate Type: {service.rateType.toUpperCase()}
+                                      </div>
+                                      <div className="text-xs text-blue-600">
+                                        TPA: ₹{service.tpa_rate || 'N/A'} | Private: ₹{service.private_rate || 'N/A'}
+                                      </div>
+                                      <div className="text-xs text-green-600">
+                                        CGHS: ₹{service.cghs_rate || 'N/A'} | Non-CGHS: ₹{service.non_cghs_rate || 'N/A'}
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-sm font-bold text-orange-800">
+                                        ₹{service.selectedRate}
+                                      </div>
+                                      <div className="text-xs text-gray-500">
+                                        {service.rateType.toUpperCase()} Rate
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              {filteredMandatoryServices.length === 0 && !isSearchingMandatoryServices && (
+                                <div className="p-2 text-sm text-gray-500 text-center">
+                                  {serviceSearchTerm.length >= 2 ?
+                                    `No mandatory services found for "${serviceSearchTerm}". Check console for details.` :
+                                    'Type at least 2 characters to search mandatory services'
+                                  }
+                                  {console.log('🔍 Debugging mandatory services:', {
+                                    searchTerm: serviceSearchTerm,
+                                    searchTermLength: serviceSearchTerm?.length,
+                                    filteredServicesCount: filteredMandatoryServices.length,
+                                    isSearching: isSearchingMandatoryServices,
+                                    hasError: !!mandatoryServicesError,
+                                    activeTab: activeServiceTab
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+
                       {activeServiceTab === "Pharmacy" && (
                         <>
                           {(isLoadingPharmacyServices || isSearchingPharmacyServices) ? (
@@ -12413,6 +13980,350 @@ Dr. Murali B K
                               {filteredPharmacyServices.length === 0 && !isLoadingPharmacyServices && !isSearchingPharmacyServices && (
                                 <div className="p-2 text-sm text-gray-500 text-center">
                                   {serviceSearchTerm.length >= 2 ? 'No pharmacy services found' : 'Type to search pharmacy services'}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {activeServiceTab === "Clinical services" && (
+                        <>
+                          {isSearchingClinicalServices ? (
+                            <div className="p-2 text-gray-500 text-sm">
+                              {serviceSearchTerm.length >= 2 ? 'Searching clinical services...' : 'Loading clinical services...'}
+                            </div>
+                          ) : (
+                            <>
+                              {clinicalServicesError && (
+                                <div className="p-2 text-red-500 text-sm">
+                                  Error loading clinical services: {clinicalServicesError.message || 'Unknown error'}
+                                  <br />
+                                  <small>Check browser console for details</small>
+                                </div>
+                              )}
+                              {filteredClinicalServices.map((service) => (
+                                <div
+                                  key={service.id}
+                                  className="p-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                  onClick={async () => {
+                                    console.log('🏥 Clinical service selected:', service);
+
+                                    // Show immediate feedback
+                                    toast.info(`Saving clinical service "${service.service_name}"...`);
+
+                                    try {
+                                      console.log('🚀 [CLINICAL SAVE] Starting clinical service save process...');
+                                      console.log('🚀 [CLINICAL SAVE] Input data:', {
+                                        visitId,
+                                        serviceId: service.id,
+                                        serviceName: service.service_name,
+                                        selectedRate: service.selectedRate,
+                                        rateType: service.rateType,
+                                        patientCategory: service.patientCategory
+                                      });
+
+                                      // Validate visit existence first
+                                      const validationResult = await validateVisitAndGetDebugInfo(visitId);
+
+                                      if (!validationResult.exists) {
+                                        console.error('❌ [CLINICAL SAVE] Visit validation failed:', {
+                                          visitId,
+                                          error: validationResult.error,
+                                          availableVisits: validationResult.debugInfo.recentVisits
+                                        });
+                                        toast.error(`Visit ${visitId} not found in database. Check console for available visits.`);
+                                        return;
+                                      }
+
+                                      // Verify database schema before proceeding
+                                      console.log('🔍 [CLINICAL SAVE] Verifying database schema...');
+                                      const schemaResult = await verifyDatabaseSchema();
+
+                                      if (!schemaResult.columnsExist) {
+                                        console.error('❌ [CLINICAL SAVE] Database schema verification failed - columns missing:', schemaResult);
+                                        toast.error('Database schema error: clinical_services column missing. Check console for SQL fix.');
+                                        return;
+                                      }
+
+                                      if (!schemaResult.canWrite) {
+                                        console.error('❌ [CLINICAL SAVE] Database schema verification failed - cannot write:', schemaResult);
+                                        toast.error('Database permission error: cannot write to clinical_services column.');
+                                        return;
+                                      }
+
+                                      console.log('✅ [CLINICAL SAVE] Schema verification passed');
+
+                                      // Get visit UUID and current clinical_services
+                                      console.log('🔍 [CLINICAL SAVE] Fetching visit data for visitId:', visitId);
+                                      const { data: visitData, error: visitError } = await supabase
+                                        .from('visits')
+                                        .select('id, visit_id, clinical_services')
+                                        .eq('visit_id', visitId)
+                                        .single();
+
+                                      console.log('🔍 [CLINICAL SAVE] Visit fetch result:', {
+                                        visitData,
+                                        visitError,
+                                        hasData: !!visitData,
+                                        hasError: !!visitError
+                                      });
+
+                                      if (visitError) {
+                                        console.error('❌ [CLINICAL SAVE] Error fetching visit after validation passed:', {
+                                          message: visitError.message,
+                                          details: visitError.details,
+                                          hint: visitError.hint,
+                                          code: visitError.code,
+                                          visitId: visitId,
+                                          note: 'This is unexpected since validation passed'
+                                        });
+                                        toast.error('Failed to save clinical service - visit fetch error');
+                                        return;
+                                      }
+
+                                      if (!visitData) {
+                                        console.error('❌ [CLINICAL SAVE] No visit data returned after validation passed:', {
+                                          visitId,
+                                          note: 'This is unexpected since validation passed'
+                                        });
+                                        toast.error('Failed to save clinical service - no visit data');
+                                        return;
+                                      }
+
+                                      // Prepare service data to store
+                                      const serviceToStore = {
+                                        id: service.id,
+                                        service_name: service.service_name,
+                                        selectedRate: service.selectedRate,
+                                        rateType: service.rateType,
+                                        patientCategory: service.patientCategory,
+                                        private_rate: service.private_rate,
+                                        tpa_rate: service.tpa_rate,
+                                        cghs_rate: service.cghs_rate,
+                                        non_cghs_rate: service.non_cghs_rate,
+                                        selected_at: new Date().toISOString()
+                                      };
+
+                                      // Get existing clinical services or initialize empty array
+                                      let existingServices = [];
+                                      if (visitData.clinical_services) {
+                                        if (typeof visitData.clinical_services === 'string') {
+                                          try {
+                                            // Handle malformed array literal by cleaning first
+                                            let cleanedString = visitData.clinical_services;
+
+                                            // If it's a malformed array literal, try to fix it
+                                            if (cleanedString.startsWith('["') && !cleanedString.startsWith('[{')) {
+                                              console.warn('⚠️ Detected malformed array literal, cleaning...');
+                                              // Reset to empty array if malformed
+                                              existingServices = [];
+                                            } else {
+                                              existingServices = JSON.parse(cleanedString);
+                                            }
+                                          } catch (parseError) {
+                                            console.warn('⚠️ Could not parse existing clinical services, resetting:', parseError);
+                                            existingServices = [];
+
+                                            // Clear the malformed data in database
+                                            try {
+                                              await supabase
+                                                .from('visits')
+                                                .update({ clinical_services: '[]' })
+                                                .eq('visit_id', visitId);
+                                            } catch (clearError) {
+                                              console.warn('Could not clear malformed clinical services data:', clearError);
+                                            }
+                                          }
+                                        } else if (Array.isArray(visitData.clinical_services)) {
+                                          existingServices = visitData.clinical_services;
+                                        } else {
+                                          console.warn('⚠️ Unknown clinical_services format, resetting');
+                                          existingServices = [];
+                                        }
+                                      }
+
+                                      // Check if service already exists
+                                      const existingIndex = existingServices.findIndex(s => s.id === service.id);
+                                      if (existingIndex >= 0) {
+                                        // Update existing service
+                                        existingServices[existingIndex] = serviceToStore;
+                                        console.log('🔄 Updated existing clinical service');
+                                      } else {
+                                        // Add new service
+                                        existingServices.push(serviceToStore);
+                                        console.log('➕ Added new clinical service');
+                                      }
+
+                                      // Prepare the data for database update
+                                      const jsonDataToSave = JSON.stringify(existingServices);
+                                      console.log('💾 [CLINICAL SAVE] Preparing database update:', {
+                                        targetVisitId: visitId,
+                                        targetDbId: visitData.id,
+                                        servicesCount: existingServices.length,
+                                        jsonLength: jsonDataToSave.length,
+                                        jsonSample: jsonDataToSave.substring(0, 200) + (jsonDataToSave.length > 200 ? '...' : ''),
+                                        fullData: existingServices
+                                      });
+
+                                      // Update visits table with clinical services (with retry logic)
+                                      console.log('🔄 [CLINICAL SAVE] Executing database UPDATE...');
+                                      let updateResult = null;
+                                      let retryCount = 0;
+                                      const maxRetries = 2;
+
+                                      while (retryCount <= maxRetries) {
+                                        const { data: updateData, error: updateError, count } = await supabase
+                                          .from('visits')
+                                          .update({
+                                            clinical_services: jsonDataToSave
+                                          })
+                                          .eq('visit_id', visitId)
+                                          .select();
+
+                                        console.log(`🔄 [CLINICAL SAVE] Database UPDATE attempt ${retryCount + 1}:`, {
+                                          updateData,
+                                          updateError,
+                                          count,
+                                          wasSuccessful: !updateError,
+                                          rowsAffected: updateData?.length || 0
+                                        });
+
+                                        if (!updateError && updateData && updateData.length > 0) {
+                                          updateResult = { data: updateData, error: null };
+                                          break;
+                                        }
+
+                                        if (updateError) {
+                                          console.error(`❌ [CLINICAL SAVE] Database UPDATE attempt ${retryCount + 1} failed:`, {
+                                            message: updateError.message,
+                                            details: updateError.details,
+                                            hint: updateError.hint,
+                                            code: updateError.code,
+                                            visitId: visitId,
+                                            jsonData: jsonDataToSave.substring(0, 100) + '...'
+                                          });
+
+                                          if (retryCount === maxRetries) {
+                                            toast.error(`Failed to save clinical service after ${maxRetries + 1} attempts: ${updateError.message}`);
+                                            return;
+                                          }
+                                        } else if (!updateData || updateData.length === 0) {
+                                          console.error(`❌ [CLINICAL SAVE] No rows updated on attempt ${retryCount + 1}:`, {
+                                            visitId,
+                                            searchedFor: visitId,
+                                            attemptNumber: retryCount + 1
+                                          });
+
+                                          if (retryCount === maxRetries) {
+                                            toast.error('Failed to save clinical service - visit not found in database');
+                                            return;
+                                          }
+                                        }
+
+                                        retryCount++;
+                                        if (retryCount <= maxRetries) {
+                                          console.log(`⏳ [CLINICAL SAVE] Retrying in 1 second... (attempt ${retryCount + 1}/${maxRetries + 1})`);
+                                          await new Promise(resolve => setTimeout(resolve, 1000));
+                                        }
+                                      }
+
+                                      // Verify the update was successful by reading back the data
+                                      console.log('✅ [CLINICAL SAVE] Verifying the update was successful...');
+                                      const { data: verificationData, error: verificationError } = await supabase
+                                        .from('visits')
+                                        .select('clinical_services')
+                                        .eq('visit_id', visitId)
+                                        .single();
+
+                                      if (verificationError || !verificationData) {
+                                        console.error('❌ [CLINICAL SAVE] Post-update verification failed:', {
+                                          verificationError,
+                                          verificationData
+                                        });
+                                        toast.error('Save operation uncertain - please refresh page to verify');
+                                        return;
+                                      }
+
+                                      let verifiedServices = [];
+                                      try {
+                                        if (verificationData.clinical_services) {
+                                          verifiedServices = typeof verificationData.clinical_services === 'string'
+                                            ? JSON.parse(verificationData.clinical_services)
+                                            : verificationData.clinical_services;
+                                        }
+                                      } catch (parseError) {
+                                        console.error('❌ [CLINICAL SAVE] Could not parse verified data:', parseError);
+                                      }
+
+                                      console.log('✅ [CLINICAL SAVE] Post-update verification successful:', {
+                                        servicesInDb: verifiedServices.length,
+                                        expectedServices: existingServices.length,
+                                        dataMatches: verifiedServices.length === existingServices.length
+                                      });
+
+                                      console.log('✅ [CLINICAL SERVICES SAVE] Service saved successfully:', serviceToStore);
+                                      console.log('✅ [CLINICAL SERVICES SAVE] Final services in database:', verifiedServices);
+
+                                      toast.success(`Clinical service "${service.service_name}" saved successfully! (${service.patientCategory} - ${service.rateType.toUpperCase()} rate: ₹${service.selectedRate})`);
+                                      setServiceSearchTerm("");
+
+                                      // Immediately update state with verified data to ensure UI consistency
+                                      console.log('🔄 [CLINICAL SERVICES SAVE] Updating state with verified data...');
+                                      setSavedClinicalServicesData(verifiedServices);
+                                      setClinicalServicesInitialized(true);
+
+                                      // Also trigger a fresh fetch to double-verify
+                                      console.log('🔄 [CLINICAL SERVICES SAVE] Triggering additional verification fetch...');
+                                      setTimeout(() => {
+                                        fetchSavedClinicalServicesData().catch(console.error);
+                                      }, 100);
+
+                                    } catch (error) {
+                                      console.error('❌ Error in clinical service selection:', error);
+                                      toast.error('Failed to save clinical service. Please try again.');
+                                    }
+                                  }}
+                                >
+                                  <div className="flex justify-between items-center">
+                                    <div className="flex-1">
+                                      <div className="font-medium text-sm">{service.service_name}</div>
+                                      <div className="text-xs text-gray-500">
+                                        Patient: {service.patientCategory} | Rate Type: {service.rateType.toUpperCase()}
+                                      </div>
+                                      <div className="text-xs text-blue-600">
+                                        TPA: ₹{service.tpa_rate || 'N/A'} | Private: ₹{service.private_rate || 'N/A'}
+                                      </div>
+                                      <div className="text-xs text-green-600">
+                                        CGHS: ₹{service.cghs_rate || 'N/A'} | Non-CGHS: ₹{service.non_cghs_rate || 'N/A'}
+                                      </div>
+                                    </div>
+                                    <div className="text-right">
+                                      <div className="text-sm font-bold text-blue-800">
+                                        ₹{service.selectedRate}
+                                      </div>
+                                      <div className="text-xs text-gray-500">
+                                        {service.rateType.toUpperCase()} Rate
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              {filteredClinicalServices.length === 0 && !isSearchingClinicalServices && (
+                                <div className="p-2 text-sm text-gray-500 text-center">
+                                  {serviceSearchTerm.length >= 2 ?
+                                    `No clinical services found for "${serviceSearchTerm}" in ${hospitalConfig.name} hospital. Check console for details.` :
+                                    'Type at least 2 characters to search clinical services'
+                                  }
+                                  {console.log('🔍 Debugging clinical services:', {
+                                    searchTerm: serviceSearchTerm,
+                                    searchTermLength: serviceSearchTerm?.length,
+                                    hospital: hospitalConfig.name,
+                                    filteredServicesCount: filteredClinicalServices.length,
+                                    isSearching: isSearchingClinicalServices,
+                                    hasError: !!clinicalServicesError,
+                                    activeTab: activeServiceTab
+                                  })}
                                 </div>
                               )}
                             </>
@@ -12549,6 +14460,61 @@ Dr. Murali B K
                     </p>
                   </div>
 
+                  {/* Debug Verification (Development Only) */}
+                  {process.env.NODE_ENV === 'development' && (
+                    <div className="p-4">
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm text-yellow-800">
+                            Debug Tools (Development Only)
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={performDatabaseVerification}
+                              className="px-3 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
+                            >
+                              Verify DB
+                            </button>
+                            <button
+                              onClick={verifyServicesStateConsistency}
+                              className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                            >
+                              Verify State
+                            </button>
+                            <button
+                              onClick={testDataPersistence}
+                              className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                            >
+                              Test Persistence
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (visitId) {
+                                  await validateVisitAndGetDebugInfo(visitId);
+                                } else {
+                                  console.warn('No visitId available for validation');
+                                }
+                              }}
+                              className="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
+                            >
+                              Check Visit
+                            </button>
+                            <button
+                              onClick={verifyDatabaseSchema}
+                              className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                            >
+                              Check Schema
+                            </button>
+                          </div>
+                        </div>
+                        <div className="text-xs text-yellow-700 mt-1">
+                          Clinical: {savedClinicalServicesData.length} | Mandatory: {savedMandatoryServicesData.length} |
+                          Init: {clinicalServicesInitialized ? 'C✓' : 'C✗'} {mandatoryServicesInitialized ? 'M✓' : 'M✗'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Saved Data Tabs */}
                   <div className="p-4">
                     <div className="bg-white border border-gray-200 rounded-lg">
@@ -12580,6 +14546,24 @@ Dr. Murali B K
                           onClick={() => setSavedDataTab('medications')}
                         >
                           Medications
+                        </button>
+                        <button
+                          className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'clinical_services'
+                            ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
+                            : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                          onClick={() => setSavedDataTab('clinical_services')}
+                        >
+                          Clinical Services
+                        </button>
+                        <button
+                          className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'mandatory_services'
+                            ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
+                            : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                          onClick={() => setSavedDataTab('mandatory_services')}
+                        >
+                          Mandatory Services
                         </button>
                       </div>
 
@@ -12886,6 +14870,136 @@ Dr. Murali B K
                               <div className="text-center py-8 text-gray-500">
                                 <div className="text-4xl mb-2">💊</div>
                                 <p>No medications saved for this visit</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {savedDataTab === 'clinical_services' && (
+                          <div>
+                            <div className="flex justify-between items-center mb-3">
+                              <h5 className="font-medium text-gray-900">
+                                Saved Clinical Services ({savedClinicalServicesData.length})
+                              </h5>
+                              <div className="text-lg font-bold text-blue-600">
+                                Total: ₹{savedClinicalServicesData.reduce((total, service) => total + (parseFloat(service.selectedRate || service.amount) || 0), 0)}
+                              </div>
+                            </div>
+                            {savedClinicalServicesData.length > 0 ? (
+                              <div className="overflow-x-auto">
+                                <table className="w-full border-collapse border border-gray-300">
+                                  <thead>
+                                    <tr className="bg-gray-100">
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Service Name</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Patient Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Selected Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {savedClinicalServicesData.map((service, index) => (
+                                      <tr key={index} className="hover:bg-gray-50">
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
+                                          {service.service_name}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          {service.patientCategory}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
+                                          {service.rateType?.toUpperCase()}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
+                                          ₹{service.selectedRate || service.amount}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          {service.selected_at ? new Date(service.selected_at).toLocaleDateString() : 'N/A'}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-center">
+                                          <button
+                                            onClick={() => handleDeleteClinicalService(service.id)}
+                                            className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
+                                            title="Delete clinical service"
+                                          >
+                                            🗑️
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-center py-8 text-gray-500">
+                                <div className="text-4xl mb-2">🏥</div>
+                                <p className="font-medium">No clinical services saved for this visit</p>
+                                <p className="text-sm mt-2">Search and select clinical services from the Clinical services section above to save them here</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {savedDataTab === 'mandatory_services' && (
+                          <div>
+                            <div className="flex justify-between items-center mb-3">
+                              <h5 className="font-medium text-gray-900">
+                                Saved Mandatory Services ({savedMandatoryServicesData.length})
+                              </h5>
+                              <div className="text-lg font-bold text-orange-600">
+                                Total: ₹{savedMandatoryServicesData.reduce((total, service) => total + (parseFloat(service.selectedRate || service.amount) || 0), 0)}
+                              </div>
+                            </div>
+                            {savedMandatoryServicesData.length > 0 ? (
+                              <div className="overflow-x-auto">
+                                <table className="w-full border-collapse border border-gray-300">
+                                  <thead>
+                                    <tr className="bg-gray-100">
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Service Name</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Patient Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Selected Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {savedMandatoryServicesData.map((service, index) => (
+                                      <tr key={index} className="hover:bg-gray-50">
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
+                                          {service.service_name}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          {service.patientCategory}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
+                                          {service.rateType?.toUpperCase()}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
+                                          ₹{service.selectedRate || service.amount}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          {service.selected_at ? new Date(service.selected_at).toLocaleDateString() : 'N/A'}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-center">
+                                          <button
+                                            onClick={() => handleDeleteMandatoryService(service.id)}
+                                            className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
+                                            title="Delete mandatory service"
+                                          >
+                                            🗑️
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-center py-8 text-gray-500">
+                                <div className="text-4xl mb-2">🔧</div>
+                                <p className="font-medium">No mandatory services saved for this visit</p>
+                                <p className="text-sm mt-2">Search and select mandatory services from the Mandatory services section above to save them here</p>
                               </div>
                             )}
                           </div>
