@@ -81,7 +81,8 @@ export default function Reports() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+        {/* Commenting out the entire Patient Reports content */}
+        {/* <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold text-gray-900">Patient Reports</h1>
           <button
             onClick={handleExportToExcel}
@@ -93,7 +94,7 @@ export default function Reports() {
             Export to Excel
           </button>
         </div>
-        
+
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -133,20 +134,27 @@ export default function Reports() {
               </tbody>
             </table>
           </div>
-          
+
           {patientData.length === 0 && (
             <div className="text-center py-12">
               <div className="text-gray-500 text-lg">No patient data found</div>
             </div>
           )}
         </div>
-        
+
         <div className="mt-4 flex items-center justify-between text-sm text-gray-600 bg-white px-4 py-2 rounded-lg shadow">
           <div>
             Total Records: <span className="font-semibold text-gray-900">{patientData.length}</span>
           </div>
-          <div>
             Last Updated: <span className="font-semibold text-gray-900">{new Date().toLocaleString()}</span>
+          </div>
+        </div> */}
+
+        {/* Display a placeholder message instead of the patient reports table */}
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <h2 className="text-2xl font-semibold text-gray-400 mb-2">Patient Reports</h2>
+            <p className="text-gray-500">This section has been temporarily disabled</p>
           </div>
         </div>
       </div>
