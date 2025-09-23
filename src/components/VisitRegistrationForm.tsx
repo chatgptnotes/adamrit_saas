@@ -16,12 +16,16 @@ interface VisitRegistrationFormProps {
     name: string;
     patients_id?: string;
   };
+  existingVisit?: any;  // Optional existing visit data for editing
+  editMode?: boolean;   // Flag to indicate edit mode
 }
 
 export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
   isOpen,
   onClose,
-  patient
+  patient,
+  existingVisit,
+  editMode = false
 }) => {
   const [visitDate, setVisitDate] = useState<Date>(new Date());
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -44,6 +48,34 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
   const [selectedIds, setSelectedIds] = useState({
     referringDoctorId: '' as string
   });
+
+  // Populate form with existing data when in edit mode
+  React.useEffect(() => {
+    if (editMode && existingVisit) {
+      console.log('=== POPULATING FORM FOR EDIT MODE ===');
+      console.log('Existing Visit Data:', existingVisit);
+      console.log('Appointment With value from DB:', existingVisit.appointment_with);
+
+      const populatedData = {
+        visitType: existingVisit.visit_type || 'Follow-up',
+        appointmentWith: existingVisit.appointment_with || 'Dr. Unknown',
+        reasonForVisit: existingVisit.reason_for_visit || '',
+        relationWithEmployee: existingVisit.relation_with_employee || 'Self',
+        status: existingVisit.status || 'scheduled',
+        referringDoctor: existingVisit.referring_doctor || '',
+        claimId: existingVisit.claim_id || '',
+        patientType: existingVisit.patient_type || 'OPD',
+      };
+
+      console.log('Populated Form Data:', populatedData);
+      setFormData(populatedData);
+
+      // Set visit date if available
+      if (existingVisit.visit_date) {
+        setVisitDate(new Date(existingVisit.visit_date));
+      }
+    }
+  }, [editMode, existingVisit]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -108,17 +140,40 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     console.log('=== FORM SUBMISSION DEBUG ===');
     console.log('Form Data:', formData);
+    console.log('Individual Fields:');
+    console.log('  - visitType:', formData.visitType, 'Length:', formData.visitType?.length);
+    console.log('  - appointmentWith:', formData.appointmentWith, 'Length:', formData.appointmentWith?.length);
+    console.log('  - reasonForVisit:', formData.reasonForVisit, 'Length:', formData.reasonForVisit?.length);
+    console.log('  - patientType:', formData.patientType, 'Length:', formData.patientType?.length);
     console.log('Selected IDs:', selectedIds);
     console.log('Patient data:', patient);
-    
+    console.log('Edit Mode:', editMode);
+    console.log('Existing Visit:', existingVisit);
 
-    if (!formData.visitType || !formData.appointmentWith || !formData.reasonForVisit || !formData.patientType) {
+    // Validate required fields with more detailed error messaging
+    const missingFields = [];
+    if (!formData.visitType || formData.visitType.trim() === '') missingFields.push('Visit Type');
+
+    // For edit mode, be more lenient with appointment_with validation
+    if (!editMode && (!formData.appointmentWith || formData.appointmentWith.trim() === '')) {
+      missingFields.push('Appointment With');
+    } else if (editMode && (!formData.appointmentWith || formData.appointmentWith.trim() === '' || formData.appointmentWith === 'Select Doctor')) {
+      // In edit mode, set a default value if appointment_with is missing
+      formData.appointmentWith = 'Dr. Unknown';
+      console.log('Setting default appointment_with for edit mode:', formData.appointmentWith);
+    }
+
+    if (!formData.reasonForVisit || formData.reasonForVisit.trim() === '') missingFields.push('Reason for Visit');
+    if (!formData.patientType || formData.patientType.trim() === '') missingFields.push('Patient Type');
+
+    if (missingFields.length > 0) {
+      console.error('Missing required fields:', missingFields);
       toast({
         title: "Error",
-        description: "Please fill in patient type, visit type, appointment with, and reason for visit",
+        description: `Please fill in the following required fields: ${missingFields.join(', ')}`,
         variant: "destructive"
       });
       return;
@@ -127,16 +182,10 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
     setIsSubmitting(true);
 
     try {
-      const visitId = await generateVisitId(visitDate);
-      console.log('Generated visit ID (TEXT):', visitId);
-      
-
-      // Insert the visit record
-      const { data: visitData, error: visitError } = await supabase
-        .from('visits')
-        .insert({
-          visit_id: visitId, // TEXT field for custom ID
-          patient_id: patient.id,
+      if (editMode && existingVisit?.visit_id) {
+        // Update existing visit
+        console.log('Updating visit with ID:', existingVisit.visit_id);
+        console.log('Update data:', {
           visit_date: format(visitDate, 'yyyy-MM-dd'),
           visit_type: formData.visitType,
           appointment_with: formData.appointmentWith,
@@ -146,9 +195,73 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
           patient_type: formData.patientType,
           referring_doctor_id: selectedIds.referringDoctorId || null,
           claim_id: formData.claimId
-        })
-        .select('id, visit_id')
-        .single();
+        });
+
+        const { data: updateData, error: updateError } = await supabase
+          .from('visits')
+          .update({
+            visit_date: format(visitDate, 'yyyy-MM-dd'),
+            visit_type: formData.visitType,
+            appointment_with: formData.appointmentWith,
+            reason_for_visit: formData.reasonForVisit,
+            relation_with_employee: formData.relationWithEmployee || null,
+            status: formData.status || 'scheduled',
+            patient_type: formData.patientType,
+            referring_doctor_id: selectedIds.referringDoctorId || null,
+            claim_id: formData.claimId || null
+          })
+          .eq('visit_id', existingVisit.visit_id)
+          .select();
+
+        if (updateError) {
+          console.error('Error updating visit:', updateError);
+          toast({
+            title: "Error",
+            description: `Failed to update visit: ${updateError.message}`,
+            variant: "destructive"
+          });
+          return;
+        }
+
+        console.log('Visit updated successfully:', updateData);
+
+        toast({
+          title: "Success",
+          description: "Visit updated successfully",
+        });
+
+        // Invalidate queries to refresh data
+        await queryClient.invalidateQueries({ queryKey: ['opd-patients'] });
+        await queryClient.invalidateQueries({ queryKey: ['todays-visits'] });
+        await queryClient.invalidateQueries({ queryKey: ['visits'] });
+        await queryClient.invalidateQueries({ queryKey: ['patients'] });
+
+        // Close the form
+        onClose();
+
+      } else {
+        // Create new visit (existing code)
+        const visitId = await generateVisitId(visitDate);
+        console.log('Generated visit ID (TEXT):', visitId);
+
+        // Insert the visit record
+        const { data: visitData, error: visitError } = await supabase
+          .from('visits')
+          .insert({
+            visit_id: visitId, // TEXT field for custom ID
+            patient_id: patient.id,
+            visit_date: format(visitDate, 'yyyy-MM-dd'),
+            visit_type: formData.visitType,
+            appointment_with: formData.appointmentWith,
+            reason_for_visit: formData.reasonForVisit,
+            relation_with_employee: formData.relationWithEmployee || null,
+            status: formData.status || 'scheduled',
+            patient_type: formData.patientType,
+            referring_doctor_id: selectedIds.referringDoctorId || null,
+            claim_id: formData.claimId
+          })
+          .select('id, visit_id')
+          .single();
 
       if (visitError) {
         console.error('Error registering visit:', visitError);
@@ -307,7 +420,8 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
         title: "Data Stored Successfully",
         description: `Patient ID ${readablePatientId} and Visit ID ${visitData.visit_id} stored properly!`,
       });
-      
+      }  // Close the else block for create new visit
+
     } catch (error) {
       console.error('Error registering visit:', error);
       toast({
@@ -343,7 +457,7 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold text-blue-600">
-            Register New Visit
+            {editMode ? 'Edit Visit' : 'Register New Visit'}
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
             Patient: {patient.name} {patient.patients_id ? `(${patient.patients_id})` : ''} IPD
@@ -362,6 +476,7 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
             isSubmitting={isSubmitting}
             onCancel={handleCancel}
             onSubmit={handleSubmit}
+            editMode={editMode}
           />
         </form>
       </DialogContent>

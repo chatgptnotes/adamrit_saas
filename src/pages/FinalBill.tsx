@@ -531,21 +531,7 @@ const FinalBill = () => {
     respiratoryRate: '18'
   });
 
-  // Document Modal States
-  const [isPhotosModalOpen, setIsPhotosModalOpen] = useState(false);
-  const [isSignModalOpen, setIsSignModalOpen] = useState(false);
-  const [isHospitalStampModalOpen, setIsHospitalStampModalOpen] = useState(false);
-  const [isDrSurgeonStampModalOpen, setIsDrSurgeonStampModalOpen] = useState(false);
-
-  // Debug modal state changes
-  useEffect(() => {
-    console.log('Modal states:', {
-      photos: isPhotosModalOpen,
-      sign: isSignModalOpen,
-      hospitalStamp: isHospitalStampModalOpen,
-      drSurgeonStamp: isDrSurgeonStampModalOpen
-    });
-  }, [isPhotosModalOpen, isSignModalOpen, isHospitalStampModalOpen, isDrSurgeonStampModalOpen]);
+  // Document Modal States - removed 4 document modals
 
   // Document Options
   const photosOptions = ['P2-Form', 'P6-Form', 'Patient Photo Geotag'];
@@ -1375,6 +1361,7 @@ const FinalBill = () => {
     surgeon: '',
     anaesthetist: '',
     anaesthesia: '',
+    implant: '',
     description: ''
   });
   const [isGeneratingSurgeryNotes, setIsGeneratingSurgeryNotes] = useState(false);
@@ -1418,18 +1405,6 @@ const FinalBill = () => {
   const [editingRadiologyId, setEditingRadiologyId] = useState<string | null>(null);
   const [editingMedicationId, setEditingMedicationId] = useState<string | null>(null);
 
-  // Advance Payment Modal State
-  const [showAdvancePaymentModal, setShowAdvancePaymentModal] = useState(false);
-  const [advancePaymentForm, setAdvancePaymentForm] = useState({
-    returnedAmount: '0.00',
-    showRefundField: false,
-    paymentAmount: '',
-    refundAmount: '',
-    paymentDate: new Date().toISOString().slice(0, 16), // Format for datetime-local input
-    paymentMode: 'Cash',
-    remark: `Being cash received towards from pt. ${patientData.name || 'Patient'} against R. No.: `
-  });
-
   // State for medication modal
   const [selectedMedication, setSelectedMedication] = useState<any>(null);
 
@@ -1447,10 +1422,8 @@ const FinalBill = () => {
     isSaving: isFinancialSummarySaving,
     saveFinancialSummary,
     handleFinancialSummaryChange,
-    loadFinancialSummary,
-    testDatabaseConnection
+    loadFinancialSummary
   } = useFinancialSummary(billData?.id, visitId);
-
 
   // Function to load saved requisitions from database
   const loadSavedRequisitions = async () => {
@@ -3418,6 +3391,7 @@ ADDITIONAL INFORMATION:
 Surgeon: ${otNotesData.surgeon || 'Dr. [Surgeon Name]'}
 Anaesthetist: ${otNotesData.anaesthetist || 'Dr. [Anaesthetist Name]'}
 Anaesthesia: ${otNotesData.anaesthesia || 'General Anaesthesia'}
+Implant: ${otNotesData.implant || 'N/A'}
 Date: ${otNotesData.date || new Date().toISOString()}
 
 Generate a comprehensive surgical note that includes:
@@ -3475,6 +3449,7 @@ PROCEDURE: ${otNotesData.procedure}
 SURGEON: ${otNotesData.surgeon}
 ANAESTHETIST: ${otNotesData.anaesthetist}
 ANAESTHESIA: ${otNotesData.anaesthesia || 'General Anaesthesia'}
+IMPLANT: ${otNotesData.implant || 'N/A'}
 
 PRE-OPERATIVE DIAGNOSIS: ${otNotesData.procedure}
 
@@ -3776,90 +3751,6 @@ INSTRUCTIONS:
       return item;
     }));
   }, [savedLabData, visitId]);
-
-  // Auto-calculate Laboratory Services total from saved lab data
-  useEffect(() => {
-    if (savedLabData && savedLabData.length > 0) {
-      const labTotal = savedLabData.reduce((total, lab) => total + (parseFloat(lab.cost) || 0), 0);
-      console.log('🧪 Auto-calculating lab total:', {
-        labCount: savedLabData.length,
-        calculatedTotal: labTotal,
-        labData: savedLabData
-      });
-
-      // Update financial summary with calculated lab total
-      setFinancialSummaryData(prev => ({
-        ...prev,
-        totalAmount: {
-          ...prev.totalAmount,
-          laboratoryServices: labTotal.toString()
-        }
-      }));
-    } else {
-      // Set to 0 if no lab data
-      setFinancialSummaryData(prev => ({
-        ...prev,
-        totalAmount: {
-          ...prev.totalAmount,
-          laboratoryServices: '0'
-        }
-      }));
-    }
-  }, [savedLabData]);
-
-  // Auto-calculate Radiology total from saved radiology data
-  useEffect(() => {
-    if (savedRadiologyData && savedRadiologyData.length > 0) {
-      const radiologyTotal = savedRadiologyData.reduce((total, radiology) => total + (parseFloat(radiology.cost) || 0), 0);
-      console.log('📷 Auto-calculating radiology total:', {
-        radiologyCount: savedRadiologyData.length,
-        calculatedTotal: radiologyTotal,
-        radiologyData: savedRadiologyData
-      });
-
-      // Update financial summary with calculated radiology total
-      setFinancialSummaryData(prev => ({
-        ...prev,
-        totalAmount: {
-          ...prev.totalAmount,
-          radiology: radiologyTotal.toString()
-        }
-      }));
-    } else {
-      // Set to 0 if no radiology data
-      setFinancialSummaryData(prev => ({
-        ...prev,
-        totalAmount: {
-          ...prev.totalAmount,
-          radiology: '0'
-        }
-      }));
-    }
-  }, [savedRadiologyData]);
-
-  // Auto-calculate Balance row: Balance = Total Amount - Discount - Amount Paid + Refunded Amount
-  useEffect(() => {
-    setFinancialSummaryData(prev => {
-      const newBalance = { ...prev.balance };
-
-      // Calculate balance for each column
-      Object.keys(prev.totalAmount).forEach(key => {
-        const totalAmount = parseFloat(prev.totalAmount[key as keyof typeof prev.totalAmount] || '0');
-        const discount = parseFloat(prev.discount[key as keyof typeof prev.discount] || '0');
-        const amountPaid = parseFloat(prev.amountPaid[key as keyof typeof prev.amountPaid] || '0');
-        const refundedAmount = parseFloat(prev.refundedAmount[key as keyof typeof prev.refundedAmount] || '0');
-
-        const calculatedBalance = totalAmount - discount - amountPaid + refundedAmount;
-        newBalance[key as keyof typeof newBalance] = calculatedBalance.toString();
-      });
-
-      return {
-        ...prev,
-        balance: newBalance
-      };
-    });
-  }, [financialSummaryData.totalAmount, financialSummaryData.discount, financialSummaryData.amountPaid, financialSummaryData.refundedAmount]);
-
 
   // Update Medicine Charges with saved medication data
   useEffect(() => {
@@ -8257,126 +8148,6 @@ Format the response as JSON:
     }
   };
 
-  // Advance Payment Modal Handlers
-  const handleAdvancePaymentChange = (field: string, value: any) => {
-    setAdvancePaymentForm(prev => {
-      const updated = {
-        ...prev,
-        [field]: value
-      };
-
-      // Update remark text when showRefundField changes
-      if (field === 'showRefundField') {
-        updated.remark = `Being cash received towards from pt. ${patientData.name || 'Patient'} against R. No.: `;
-      }
-
-      return updated;
-    });
-  };
-
-  const handleAdvancePaymentSave = async () => {
-    const paymentAmount = parseFloat(advancePaymentForm.paymentAmount) || 0;
-    const refundAmount = parseFloat(advancePaymentForm.refundAmount) || 0;
-
-    console.log('💰 handleAdvancePaymentSave called with:');
-    console.log('  - paymentAmount:', paymentAmount);
-    console.log('  - refundAmount:', refundAmount);
-    console.log('  - showRefundField:', advancePaymentForm.showRefundField);
-
-    let successMessages = [];
-
-    // Always process advance payment if amount is entered
-    if (paymentAmount > 0) {
-      successMessages.push(`Advance payment of ₹${paymentAmount} recorded`);
-    }
-
-    // Process refund if checkbox is checked and amount is entered
-    if (advancePaymentForm.showRefundField && refundAmount > 0) {
-      successMessages.push(`Refund of ₹${refundAmount} recorded`);
-    }
-
-    if (successMessages.length > 0) {
-      // Check if billData.id is available before saving
-      if (!billData?.id) {
-        toast.error('Bill ID not found. Please save the bill first before adding advance payments.');
-        return;
-      }
-
-      // Save to database after updating state
-      try {
-        console.log('💾 About to save financial summary with billId:', billData.id);
-        console.log('💰 Current financialSummaryData before save:', financialSummaryData);
-        console.log('💰 Specifically advance payment fields:');
-        console.log('  - totalAmount.advancePayment:', financialSummaryData.totalAmount.advancePayment);
-        console.log('  - amountPaid.advancePayment:', financialSummaryData.amountPaid.advancePayment);
-        console.log('  - refundedAmount.advancePayment:', financialSummaryData.refundedAmount.advancePayment);
-
-        // Calculate updated financial data
-        let updatedData = { ...financialSummaryData };
-
-        // Apply payment updates
-        if (paymentAmount > 0) {
-          const currentAmountPaid = parseFloat(updatedData.amountPaid.advancePayment) || 0;
-          const currentTotalAmount = parseFloat(updatedData.totalAmount.advancePayment) || 0;
-          updatedData = {
-            ...updatedData,
-            totalAmount: {
-              ...updatedData.totalAmount,
-              advancePayment: (currentTotalAmount + paymentAmount).toString()
-            },
-            amountPaid: {
-              ...updatedData.amountPaid,
-              advancePayment: (currentAmountPaid + paymentAmount).toString()
-            }
-          };
-        }
-
-        // Apply refund updates
-        if (advancePaymentForm.showRefundField && refundAmount > 0) {
-          const currentRefundAmount = parseFloat(updatedData.refundedAmount.advancePayment) || 0;
-          updatedData = {
-            ...updatedData,
-            refundedAmount: {
-              ...updatedData.refundedAmount,
-              advancePayment: (currentRefundAmount + refundAmount).toString()
-            }
-          };
-        }
-
-        console.log('💾 About to save updated data:', updatedData);
-
-        // Save with the updated data
-        await saveFinancialSummary(updatedData);
-
-        // Update the state after successful save
-        setFinancialSummaryData(updatedData);
-        toast.success(successMessages.join(' and ') + ' successfully and saved to database!');
-
-        // Close modal and reset form only after successful save
-        setShowAdvancePaymentModal(false);
-        setAdvancePaymentForm({
-          returnedAmount: '0.00',
-          showRefundField: false,
-          paymentAmount: '',
-          refundAmount: '',
-          paymentDate: new Date().toISOString().slice(0, 16),
-          paymentMode: 'Cash',
-          remark: `Being cash received towards from pt. ${patientData.name || 'Patient'} against R. No.: `
-        });
-      } catch (error) {
-        console.error('Error saving financial summary:', error);
-        toast.error('Failed to save to database. Please try again or use the Save Financial Summary button.');
-      }
-    } else {
-      toast.error('Please enter at least one amount to save.');
-      return;
-    }
-  };
-
-  const handleAdvancePaymentClose = () => {
-    setShowAdvancePaymentModal(false);
-  };
-
   const findParentSection = (mainIndex: number) => {
     for (let i = mainIndex - 1; i >= 0; i--) {
       if (invoiceItems[i].type === 'section') {
@@ -10321,44 +10092,6 @@ Dr. Murali B K
                 )}
               </Button>
             </div>
-
-            {/* Document Management Buttons */}
-            {!isLeftSidebarCollapsed && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsPhotosModalOpen(true)}
-                  className="text-xs"
-                >
-                  Photos Documents
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsSignModalOpen(true)}
-                  className="text-xs"
-                >
-                  Sign Documents
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsHospitalStampModalOpen(true)}
-                  className="text-xs"
-                >
-                  Hospital Stamp
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsDrSurgeonStampModalOpen(true)}
-                  className="text-xs"
-                >
-                  Dr/Surgeon Stamp
-                </Button>
-              </div>
-            )}
           </div>
 
           {!isLeftSidebarCollapsed && (
@@ -10996,6 +10729,18 @@ Dr. Murali B K
                               placeholder="Type of anaesthesia"
                               value={otNotesData.anaesthesia}
                               onChange={(e) => setOtNotesData({ ...otNotesData, anaesthesia: e.target.value })}
+                            />
+                          </div>
+
+                          {/* Implant Field */}
+                          <div className="mb-3">
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Implant</label>
+                            <input
+                              type="text"
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              placeholder="Implant details"
+                              value={otNotesData.implant}
+                              onChange={(e) => setOtNotesData({ ...otNotesData, implant: e.target.value })}
                             />
                           </div>
 
@@ -13844,13 +13589,35 @@ Dr. Murali B K
                   </div>
                 </div> */}
 
-                {/* Financial Summary Table with Row Type Column */}
-                <div className="no-print overflow-x-auto">
-                  {/* Single Unified Table */}
+                {/* Financial Summary Table with Vertical Row Labels */}
+                <div className="flex no-print">
+                  {/* Vertical Row Labels Sidebar */}
+                  <div className="flex flex-col mr-2">
+                  <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
+                      {/* Total Amount */}
+                    </div>
+                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
+                      Total Amount
+                    </div>
+                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
+                      Discount
+                    </div>
+                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
+                      Amount Paid
+                    </div>
+                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
+                      Refunded Amount
+                    </div>
+                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center">
+                      Balance
+                    </div>
+                  </div>
+
+                  {/* Main Table */}
+                  <div className="flex-1 overflow-x-auto w-full">
                     <table className="w-full border-collapse border border-gray-300 text-sm min-w-full">
                       <thead>
                         <tr className="bg-blue-100">
-                          <th className="border border-gray-300 p-3 text-center font-bold w-32">Row Type</th>
                           <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Advance Payment</th>
                           <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Clinical Services</th>
                           <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Laboratory Services</th>
@@ -13871,7 +13638,6 @@ Dr. Murali B K
                       </thead>
                       <tbody>
                         <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 bg-gray-100 text-sm font-medium text-center">Total Amount</td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
                             <input
                               type="number"
@@ -13891,38 +13657,22 @@ Dr. Murali B K
                             />
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <div className="relative">
-                              <input
-                                type="number"
-                                value={financialSummaryData.totalAmount.laboratoryServices}
-                                onChange={(e) => handleFinancialSummaryChange('totalAmount', 'laboratoryServices', e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center bg-green-50 border-green-300"
-                                placeholder="0"
-                                title={`Auto-calculated from ${savedLabData.length} lab tests`}
-                              />
-                              {savedLabData.length > 0 && (
-                                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                                  <span className="text-white text-xs">✓</span>
-                                </div>
-                              )}
-                            </div>
+                            <input
+                              type="number"
+                              value={financialSummaryData.totalAmount.laboratoryServices}
+                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'laboratoryServices', e.target.value)}
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
+                              placeholder="0"
+                            />
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <div className="relative">
-                              <input
-                                type="number"
-                                value={financialSummaryData.totalAmount.radiology}
-                                onChange={(e) => handleFinancialSummaryChange('totalAmount', 'radiology', e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center bg-blue-50 border-blue-300"
-                                placeholder="0"
-                                title={`Auto-calculated from ${savedRadiologyData.length} radiology tests`}
-                              />
-                              {savedRadiologyData.length > 0 && (
-                                <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center">
-                                  <span className="text-white text-xs">✓</span>
-                                </div>
-                              )}
-                            </div>
+                            <input
+                              type="number"
+                              value={financialSummaryData.totalAmount.radiology}
+                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'radiology', e.target.value)}
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
+                              placeholder="0"
+                            />
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
                             <input
@@ -14026,23 +13776,14 @@ Dr. Murali B K
                           <td className="border border-gray-300 p-2 font-bold">
                             <input
                               type="number"
-                              value={(() => {
-                                const fields = ['advancePayment', 'clinicalServices', 'laboratoryServices', 'radiology', 'pharmacy', 'implant', 'blood', 'surgery', 'mandatoryServices', 'physiotherapy', 'consultation', 'surgeryInternalReport', 'implantCost', 'private', 'accommodationCharges'];
-                                const total = fields.reduce((sum, field) => {
-                                  return sum + (parseFloat(financialSummaryData.totalAmount[field as keyof typeof financialSummaryData.totalAmount] || '0') || 0);
-                                }, 0);
-                                return total.toString();
-                              })()}
+                              value={financialSummaryData.totalAmount.total}
                               onChange={(e) => handleFinancialSummaryChange('totalAmount', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold bg-yellow-50 border-yellow-300"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
                               placeholder="0"
-                              title="Auto-calculated sum of all columns"
-                              readOnly
                             />
                           </td>
                         </tr>
                         <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 bg-gray-100 text-sm font-medium text-center">Discount</td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
                             <input
                               type="number"
@@ -14181,23 +13922,14 @@ Dr. Murali B K
                           <td className="border border-gray-300 p-2 font-bold">
                             <input
                               type="number"
-                              value={(() => {
-                                const fields = ['advancePayment', 'clinicalServices', 'laboratoryServices', 'radiology', 'pharmacy', 'implant', 'blood', 'surgery', 'mandatoryServices', 'physiotherapy', 'consultation', 'surgeryInternalReport', 'implantCost', 'private', 'accommodationCharges'];
-                                const total = fields.reduce((sum, field) => {
-                                  return sum + (parseFloat(financialSummaryData.discount[field as keyof typeof financialSummaryData.discount] || '0') || 0);
-                                }, 0);
-                                return total.toString();
-                              })()}
+                              value={financialSummaryData.discount.total}
                               onChange={(e) => handleFinancialSummaryChange('discount', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold bg-yellow-50 border-yellow-300"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
                               placeholder="0"
-                              title="Auto-calculated sum of all discount columns"
-                              readOnly
                             />
                           </td>
                         </tr>
                         <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 bg-gray-100 text-sm font-medium text-center">Amount Paid</td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
                             <input
                               type="number"
@@ -14336,23 +14068,14 @@ Dr. Murali B K
                           <td className="border border-gray-300 p-2 font-bold">
                             <input
                               type="number"
-                              value={(() => {
-                                const fields = ['advancePayment', 'clinicalServices', 'laboratoryServices', 'radiology', 'pharmacy', 'implant', 'blood', 'surgery', 'mandatoryServices', 'physiotherapy', 'consultation', 'surgeryInternalReport', 'implantCost', 'private', 'accommodationCharges'];
-                                const total = fields.reduce((sum, field) => {
-                                  return sum + (parseFloat(financialSummaryData.amountPaid[field as keyof typeof financialSummaryData.amountPaid] || '0') || 0);
-                                }, 0);
-                                return total.toString();
-                              })()}
+                              value={financialSummaryData.amountPaid.total}
                               onChange={(e) => handleFinancialSummaryChange('amountPaid', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold bg-yellow-50 border-yellow-300"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
                               placeholder="0"
-                              title="Auto-calculated sum of all amount paid columns"
-                              readOnly
                             />
                           </td>
                         </tr>
                         <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 bg-gray-100 text-sm font-medium text-center">Refunded Amount</td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
                             <input
                               type="number"
@@ -14491,23 +14214,14 @@ Dr. Murali B K
                           <td className="border border-gray-300 p-2 font-bold">
                             <input
                               type="number"
-                              value={(() => {
-                                const fields = ['advancePayment', 'clinicalServices', 'laboratoryServices', 'radiology', 'pharmacy', 'implant', 'blood', 'surgery', 'mandatoryServices', 'physiotherapy', 'consultation', 'surgeryInternalReport', 'implantCost', 'private', 'accommodationCharges'];
-                                const total = fields.reduce((sum, field) => {
-                                  return sum + (parseFloat(financialSummaryData.refundedAmount[field as keyof typeof financialSummaryData.refundedAmount] || '0') || 0);
-                                }, 0);
-                                return total.toString();
-                              })()}
+                              value={financialSummaryData.refundedAmount.total}
                               onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold bg-yellow-50 border-yellow-300"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
                               placeholder="0"
-                              title="Auto-calculated sum of all refunded amount columns"
-                              readOnly
                             />
                           </td>
                         </tr>
                         <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 bg-gray-100 text-sm font-medium text-center">Balance</td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
                             <input
                               type="number"
@@ -14646,38 +14360,21 @@ Dr. Murali B K
                           <td className="border border-gray-300 p-2 font-bold">
                             <input
                               type="number"
-                              value={(() => {
-                                const fields = ['advancePayment', 'clinicalServices', 'laboratoryServices', 'radiology', 'pharmacy', 'implant', 'blood', 'surgery', 'mandatoryServices', 'physiotherapy', 'consultation', 'surgeryInternalReport', 'implantCost', 'private', 'accommodationCharges'];
-                                const total = fields.reduce((sum, field) => {
-                                  return sum + (parseFloat(financialSummaryData.balance[field as keyof typeof financialSummaryData.balance] || '0') || 0);
-                                }, 0);
-                                return total.toString();
-                              })()}
+                              value={financialSummaryData.balance.total}
                               onChange={(e) => handleFinancialSummaryChange('balance', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold bg-yellow-50 border-yellow-300"
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
                               placeholder="0"
-                              title="Auto-calculated sum of all balance columns"
-                              readOnly
                             />
                           </td>
                         </tr>
                       </tbody>
                     </table>
+                  </div>
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap gap-2 mt-4 justify-center">
-                  <button
-                    onClick={() => {
-                      // Update remark with current patient name when opening modal
-                      setAdvancePaymentForm(prev => ({
-                        ...prev,
-                        remark: `Being cash received towards from pt. ${patientData.name || 'Patient'} against R. No.: `
-                      }));
-                      setShowAdvancePaymentModal(true);
-                    }}
-                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-                  >
+                  <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
                     Advance Payment
                   </button>
                   <button
@@ -16716,175 +16413,8 @@ Dr. Murali B K
       {/* Document Modals */}
       {visitId && (
         <>
-          <DocumentModal
-            visitId={visitId}
-            docType="photos"
-            options={photosOptions}
-            title="Photos Documents"
-            isOpen={isPhotosModalOpen}
-            onClose={() => setIsPhotosModalOpen(false)}
-          />
-          <DocumentModal
-            visitId={visitId}
-            docType="sign"
-            options={signOptions}
-            title="Sign Documents"
-            isOpen={isSignModalOpen}
-            onClose={() => setIsSignModalOpen(false)}
-          />
-          <DocumentModal
-            visitId={visitId}
-            docType="hospital_stamp"
-            options={hospitalStampOptions}
-            title="Hospital Stamp Documents"
-            isOpen={isHospitalStampModalOpen}
-            onClose={() => setIsHospitalStampModalOpen(false)}
-          />
-          <DocumentModal
-            visitId={visitId}
-            docType="dr_surgeon_stamp"
-            options={drSurgeonStampOptions}
-            title="Dr/Surgeon Stamp Documents"
-            isOpen={isDrSurgeonStampModalOpen}
-            onClose={() => setIsDrSurgeonStampModalOpen(false)}
-          />
         </>
       )}
-
-      {/* Advance Payment Modal */}
-      <AlertDialog open={showAdvancePaymentModal} onOpenChange={setShowAdvancePaymentModal}>
-        <AlertDialogContent className="max-w-lg">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-lg font-semibold text-center">
-              Advance Payment
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Returned Amount */}
-            <div className="flex items-center space-x-4">
-              <Label htmlFor="returnedAmount" className="text-sm font-medium w-32">
-                Returned Amount:
-              </Label>
-              <span className="text-sm font-medium">{advancePaymentForm.returnedAmount}</span>
-            </div>
-
-            {/* Advance Payment Amount - Always visible */}
-            <div className="space-y-2">
-              <Label htmlFor="paymentAmount" className="text-sm font-medium">
-                Advance Payment Amount:
-              </Label>
-              <Input
-                id="paymentAmount"
-                type="number"
-                step="0.01"
-                value={advancePaymentForm.paymentAmount}
-                onChange={(e) => handleAdvancePaymentChange('paymentAmount', e.target.value)}
-                className="w-full"
-                placeholder="Enter advance payment amount"
-              />
-            </div>
-
-            {/* Show Refund Field Checkbox */}
-            <div className="flex items-center space-x-4">
-              <Checkbox
-                id="showRefundField"
-                checked={advancePaymentForm.showRefundField}
-                onCheckedChange={(checked) => handleAdvancePaymentChange('showRefundField', checked)}
-              />
-              <Label htmlFor="showRefundField" className="text-sm font-medium">
-                Is Refund:
-              </Label>
-            </div>
-
-            {/* Refund Amount - Shows when checkbox is checked */}
-            {advancePaymentForm.showRefundField && (
-              <div className="space-y-2">
-                <Label htmlFor="refundAmount" className="text-sm font-medium">
-                  Refund Amount:
-                </Label>
-                <Input
-                  id="refundAmount"
-                  type="number"
-                  step="0.01"
-                  value={advancePaymentForm.refundAmount}
-                  onChange={(e) => {
-                    handleAdvancePaymentChange('refundAmount', e.target.value);
-                    // Update returned amount when refund amount changes
-                    handleAdvancePaymentChange('returnedAmount', e.target.value);
-                  }}
-                  className="w-full"
-                  placeholder="Enter refund amount"
-                />
-              </div>
-            )}
-
-            {/* Payment Date */}
-            <div className="space-y-2">
-              <Label htmlFor="paymentDate" className="text-sm font-medium">
-                Payment Date*
-              </Label>
-              <Input
-                id="paymentDate"
-                type="datetime-local"
-                value={advancePaymentForm.paymentDate}
-                onChange={(e) => handleAdvancePaymentChange('paymentDate', e.target.value)}
-                className="w-full"
-              />
-            </div>
-
-            {/* Mode Of Payment */}
-            <div className="space-y-2">
-              <Label htmlFor="paymentMode" className="text-sm font-medium">
-                Mode Of Payment*
-              </Label>
-              <Select
-                value={advancePaymentForm.paymentMode}
-                onValueChange={(value) => handleAdvancePaymentChange('paymentMode', value)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select payment mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Cash">Cash</SelectItem>
-                  <SelectItem value="Card">Card</SelectItem>
-                  <SelectItem value="Online">Online</SelectItem>
-                  <SelectItem value="UPI">UPI</SelectItem>
-                  <SelectItem value="Cheque">Cheque</SelectItem>
-                  <SelectItem value="DD">DD</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Remark */}
-            <div className="space-y-2">
-              <Label htmlFor="remark" className="text-sm font-medium">
-                Remark
-              </Label>
-              <Textarea
-                id="remark"
-                value={advancePaymentForm.remark}
-                onChange={(e) => handleAdvancePaymentChange('remark', e.target.value)}
-                className="w-full min-h-[80px]"
-                placeholder={`Being cash received towards from pt. ${patientData.name || 'Patient'} against R. No.:`}
-              />
-            </div>
-          </div>
-
-          <AlertDialogFooter className="flex justify-end space-x-2">
-            <AlertDialogCancel onClick={handleAdvancePaymentClose}>
-              Close
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleAdvancePaymentSave}
-              disabled={isFinancialSummarySaving}
-              className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
-              {isFinancialSummarySaving ? 'Saving...' : 'Save'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

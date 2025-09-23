@@ -16,6 +16,9 @@ export const useVisitSurgeries = (visitId: string | undefined) => {
           id,
           status,
           sanction_status,
+          implant,
+          anaesthetist_name,
+          anaesthesia_type,
           cghs_surgery(
             id,
             name,
@@ -57,6 +60,23 @@ export const useUpdateSurgeryStatus = () => {
 
     if (error) {
       console.error('Error updating surgery status:', error);
+      throw error;
+    }
+  };
+};
+
+export const useUpdateSurgeryDetails = () => {
+  return async (surgeryId: string, details: { implant?: string; anaesthetist_name?: string; anaesthesia_type?: string }) => {
+    const { error } = await supabase
+      .from('visit_surgeries')
+      .update({
+        ...details,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', surgeryId);
+
+    if (error) {
+      console.error('Error updating surgery details:', error);
       throw error;
     }
   };

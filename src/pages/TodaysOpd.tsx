@@ -5,7 +5,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Printer, Search, ClipboardList } from 'lucide-react';
 import { OpdStatisticsCards } from '@/components/opd/OpdStatisticsCards';
 import { OpdPatientTable } from '@/components/opd/OpdPatientTable';
@@ -13,7 +12,6 @@ import { OpdPatientTable } from '@/components/opd/OpdPatientTable';
 const TodaysOpd = () => {
   const { hospitalConfig } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('opd');
 
   // Fetch OPD patients
   const { data: opdPatients = [], isLoading } = useQuery({
@@ -31,6 +29,7 @@ const TodaysOpd = () => {
             id,
             name,
             gender,
+            age,
             date_of_birth,
             patients_id,
             insurance_person_no
@@ -43,8 +42,7 @@ const TodaysOpd = () => {
       // Only apply hospital filter if hospitalConfig exists
       if (hospitalConfig?.name) {
         console.log('Applying hospital filter:', hospitalConfig.name);
-        // Try without hospital filter first to debug
-        // query = query.eq('hospital_name', hospitalConfig.name);
+        query = query.eq('patients.hospital_name', hospitalConfig.name);
       }
 
       const { data, error } = await query;
@@ -154,53 +152,24 @@ const TodaysOpd = () => {
         </CardHeader>
       </Card>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-[400px] grid-cols-3">
-          <TabsTrigger value="opd" className="data-[state=active]:bg-black data-[state=active]:text-white">
-            OPD
-          </TabsTrigger>
-          <TabsTrigger value="laboratory">Laboratory</TabsTrigger>
-          <TabsTrigger value="radiology">Radiology</TabsTrigger>
-        </TabsList>
+      {/* Statistics Cards */}
+      <OpdStatisticsCards statistics={statistics} />
 
-        <TabsContent value="opd" className="space-y-6">
-          {/* Statistics Cards */}
-          <OpdStatisticsCards statistics={statistics} />
-
-          {/* Patients Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>OPD PATIENTS</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="flex justify-center items-center h-32">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                </div>
-              ) : (
-                <OpdPatientTable patients={filteredPatients} />
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="laboratory" className="space-y-6">
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-center text-muted-foreground">Laboratory module coming soon...</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="radiology" className="space-y-6">
-          <Card>
-            <CardContent className="pt-6">
-              <p className="text-center text-muted-foreground">Radiology module coming soon...</p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {/* Patients Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>OPD PATIENTS</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex justify-center items-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            <OpdPatientTable patients={filteredPatients} />
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

@@ -143,6 +143,14 @@ export const VisitDetailsSection: React.FC<VisitDetailsSectionProps> = ({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">None</SelectItem>
+              {/* If current value doesn't match any doctor, keep it as an option */}
+              {formData.appointmentWith &&
+               formData.appointmentWith !== 'none' &&
+               !doctors.some(d => d.name === formData.appointmentWith) && (
+                <SelectItem value={formData.appointmentWith}>
+                  {formData.appointmentWith} (Current)
+                </SelectItem>
+              )}
               {!isLoading && !error && doctors.length > 0 && doctors.map((doctor) => (
                 <SelectItem key={doctor.id} value={doctor.name}>
                   {doctor.name}{doctor.specialty ? ` (${doctor.specialty})` : ''}

@@ -24,7 +24,7 @@ interface MedicalInformationSectionProps {
   };
   handleInputChange: (field: string, value: string) => void;
   onDiagnosisChange?: (diagnosisString: string, diagnosisIds: string[]) => void;
-  onSurgeryChange?: (surgeryString: string, surgeryIds: string[], surgeryStatuses: { [surgeryId: string]: 'Sanctioned' | 'Not Sanctioned' }) => void;
+  onSurgeryChange?: (surgeryString: string, surgeryIds: string[], surgeryStatuses: { [surgeryId: string]: 'Sanctioned' | 'Not Sanctioned' }, surgeryDetails?: { [surgeryId: string]: { implant?: string; anaesthetistName?: string; anaesthesiaType?: string; } }) => void;
   onLabsChange?: (labsString: string, labIds: string[]) => void;
   onRadiologyChange?: (radiologyString: string, radiologyIds: string[]) => void;
   onMedicationsChange?: (medicationsString: string, medicationIds: string[]) => void;
@@ -41,10 +41,20 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
 }) => {
   const { diagnoses, isLoading: diagnosesLoading } = useDiagnoses();
   const [referees, setReferees] = useState<Array<{ id: string; name: string; specialty?: string; institution?: string }>>([]);
+  const [anaesthetists, setAnaesthetists] = useState<Array<{ id: string; name: string; specialty?: string }>>([]);
+  const [isLoadingAnaesthetists, setIsLoadingAnaesthetists] = useState(true);
   const [isLoadingReferees, setIsLoadingReferees] = useState(true);
   const [refereesError, setRefereesError] = useState<string | null>(null);
   const [selectedDiagnoses, setSelectedDiagnoses] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedSurgeries, setSelectedSurgeries] = useState<Array<{ id: string; name: string; code?: string; sanctionStatus?: 'Sanctioned' | 'Not Sanctioned' }>>([]);
+  const [selectedSurgeries, setSelectedSurgeries] = useState<Array<{
+    id: string;
+    name: string;
+    code?: string;
+    sanctionStatus?: 'Sanctioned' | 'Not Sanctioned';
+    implant?: string;
+    anaesthetistName?: string;
+    anaesthesiaType?: string;
+  }>>([]);
   const [selectedLabs, setSelectedLabs] = useState<Array<{ id: string; name: string; description?: string; category?: string }>>([]);
   const [selectedRadiology, setSelectedRadiology] = useState<Array<{ id: string; name: string; description?: string; category?: string }>>([]);
   const [selectedMedications, setSelectedMedications] = useState<Array<{ id: string; name: string; generic_name?: string; category?: string }>>([]);
@@ -94,6 +104,44 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
     };
 
     fetchReferees();
+
+    // Fetch anaesthetists from hope_consultants table
+    const fetchAnaesthetists = async () => {
+      try {
+        setIsLoadingAnaesthetists(true);
+        const { data, error } = await supabase
+          .from('hope_consultants')
+          .select('id, name, specialty')
+          .or('specialty.ilike.%anaesth%,specialty.ilike.%anesthes%')
+          .order('name');
+
+        if (error) {
+          console.error('Error fetching anaesthetists:', error);
+          setAnaesthetists([]);
+        } else {
+          // If no anaesthetists found with specialty filter, fetch all consultants
+          if (!data || data.length === 0) {
+            const { data: allConsultants, error: allError } = await supabase
+              .from('hope_consultants')
+              .select('id, name, specialty')
+              .order('name');
+
+            if (!allError) {
+              setAnaesthetists(allConsultants || []);
+            }
+          } else {
+            setAnaesthetists(data);
+          }
+        }
+      } catch (error) {
+        console.error('Exception while fetching anaesthetists:', error);
+        setAnaesthetists([]);
+      } finally {
+        setIsLoadingAnaesthetists(false);
+      }
+    };
+
+    fetchAnaesthetists();
   }, []);
 
   // Initialize selected diagnoses from formData
@@ -130,9 +178,18 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
       acc[surgery.id] = surgery.sanctionStatus || 'Not Sanctioned';
       return acc;
     }, {} as { [surgeryId: string]: 'Sanctioned' | 'Not Sanctioned' });
-    
+
+    const surgeryDetails = selectedSurgeries.reduce((acc, surgery) => {
+      acc[surgery.id] = {
+        implant: surgery.implant,
+        anaesthetistName: surgery.anaesthetistName,
+        anaesthesiaType: surgery.anaesthesiaType
+      };
+      return acc;
+    }, {} as { [surgeryId: string]: { implant?: string; anaesthetistName?: string; anaesthesiaType?: string; } });
+
     handleInputChange('surgery', surgeryString);
-    onSurgeryChange?.(surgeryString, surgeryIds, surgeryStatuses);
+    onSurgeryChange?.(surgeryString, surgeryIds, surgeryStatuses, surgeryDetails);
   }, [selectedSurgeries, handleInputChange, onSurgeryChange]);
 
   // Update formData when selectedLabs changes
@@ -178,10 +235,20 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
   };
 
   const handleSurgeryStatusChange = (surgeryId: string, status: 'Sanctioned' | 'Not Sanctioned') => {
-    setSelectedSurgeries(prev => 
-      prev.map(surgery => 
-        surgery.id === surgeryId 
+    setSelectedSurgeries(prev =>
+      prev.map(surgery =>
+        surgery.id === surgeryId
           ? { ...surgery, sanctionStatus: status }
+          : surgery
+      )
+    );
+  };
+
+  const handleSurgeryFieldChange = (surgeryId: string, field: 'implant' | 'anaesthetistName' | 'anaesthesiaType', value: string) => {
+    setSelectedSurgeries(prev =>
+      prev.map(surgery =>
+        surgery.id === surgeryId
+          ? { ...surgery, [field]: value }
           : surgery
       )
     );
@@ -320,8 +387,8 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
                   
                   <div className="flex items-center gap-2">
                     <Label className="text-sm font-medium">Sanction Status:</Label>
-                    <Select 
-                      value={surgery.sanctionStatus || 'Not Sanctioned'} 
+                    <Select
+                      value={surgery.sanctionStatus || 'Not Sanctioned'}
                       onValueChange={(value) => handleSurgeryStatusChange(surgery.id, value as 'Sanctioned' | 'Not Sanctioned')}
                     >
                       <SelectTrigger className="w-40">
@@ -336,7 +403,7 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
                         </SelectItem>
                       </SelectContent>
                     </Select>
-                    
+
                     <Button
                       variant="outline"
                       size="sm"
@@ -345,6 +412,67 @@ export const MedicalInformationSection: React.FC<MedicalInformationSectionProps>
                     >
                       <X className="h-4 w-4" />
                     </Button>
+                  </div>
+
+                  {/* New fields below sanction status */}
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 pl-4 border-l-2 border-blue-200">
+                    {/* Anaesthetist name field */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-700">Anaesthetist name</Label>
+                      <Select
+                        value={surgery.anaesthetistName || ''}
+                        onValueChange={(value) => handleSurgeryFieldChange(surgery.id, 'anaesthetistName', value)}
+                        disabled={isLoadingAnaesthetists}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder={isLoadingAnaesthetists ? "Loading..." : "Select anaesthetist"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">None</SelectItem>
+                          {!isLoadingAnaesthetists && anaesthetists.map((anaesthetist) => (
+                            <SelectItem key={anaesthetist.id} value={anaesthetist.name}>
+                              {anaesthetist.name}
+                              {anaesthetist.specialty && ` (${anaesthetist.specialty})`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Type of anaesthesia service field */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-700">Type of anes.Service</Label>
+                      <Select
+                        value={surgery.anaesthesiaType || ''}
+                        onValueChange={(value) => handleSurgeryFieldChange(surgery.id, 'anaesthesiaType', value)}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="General">General</SelectItem>
+                          <SelectItem value="Regional">Regional</SelectItem>
+                          <SelectItem value="Local">Local</SelectItem>
+                          <SelectItem value="Sedation">Sedation</SelectItem>
+                          <SelectItem value="Spinal">Spinal</SelectItem>
+                          <SelectItem value="Epidural">Epidural</SelectItem>
+                          <SelectItem value="Combined Spinal-Epidural">Combined Spinal-Epidural</SelectItem>
+                          <SelectItem value="Monitored Anesthesia Care">Monitored Anesthesia Care</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Implant field */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-700">Implant</Label>
+                      <Input
+                        type="text"
+                        placeholder="Enter implant details"
+                        value={surgery.implant || ''}
+                        onChange={(e) => handleSurgeryFieldChange(surgery.id, 'implant', e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
                   </div>
                 </div>
               ))}

@@ -18,7 +18,7 @@ export const NavigationTabs = ({ activeTab }: NavigationTabsProps) => {
         navigate('/todays-ipd');
         break;
       case 'OPD':
-        console.log('OPD page not implemented yet');
+        navigate('/todays-opd');
         break;
       case 'Patients':
         navigate('/patients');

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -110,94 +110,94 @@ export interface PackageDates {
 export const useFinancialSummary = (billId?: string, visitId?: string) => {
   const [financialSummaryData, setFinancialSummaryData] = useState<FinancialSummaryData>({
     totalAmount: {
-      advancePayment: '0',
-      clinicalServices: '0',
-      laboratoryServices: '0',
-      radiology: '0',
-      pharmacy: '0',
-      implant: '0',
-      blood: '0',
-      surgery: '0',
-      mandatoryServices: '0',
-      physiotherapy: '0',
-      consultation: '0',
-      surgeryInternalReport: '0',
-      implantCost: '0',
-      private: '0',
-      accommodationCharges: '0',
-      total: '0'
+      advancePayment: '',
+      clinicalServices: '11276',
+      laboratoryServices: '6565',
+      radiology: '28000',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '6100',
+      physiotherapy: '',
+      consultation: '10000',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '16200',
+      accommodationCharges: '',
+      total: '78141'
     },
     discount: {
-      advancePayment: '0',
-      clinicalServices: '0',
-      laboratoryServices: '0',
-      radiology: '0',
-      pharmacy: '0',
-      implant: '0',
-      blood: '0',
-      surgery: '0',
-      mandatoryServices: '0',
-      physiotherapy: '0',
-      consultation: '0',
-      surgeryInternalReport: '0',
-      implantCost: '0',
-      private: '0',
-      accommodationCharges: '0',
-      total: '0'
+      advancePayment: '',
+      clinicalServices: '2256',
+      laboratoryServices: '1315',
+      radiology: '200',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '',
+      physiotherapy: '',
+      consultation: '',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '',
+      accommodationCharges: '',
+      total: '3771'
     },
     amountPaid: {
-      advancePayment: '0',
-      clinicalServices: '0',
-      laboratoryServices: '0',
-      radiology: '0',
-      pharmacy: '0',
-      implant: '0',
-      blood: '0',
-      surgery: '0',
-      mandatoryServices: '0',
-      physiotherapy: '0',
-      consultation: '0',
-      surgeryInternalReport: '0',
-      implantCost: '0',
-      private: '0',
-      accommodationCharges: '0',
-      total: '0'
+      advancePayment: '29000',
+      clinicalServices: '',
+      laboratoryServices: '',
+      radiology: '',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '',
+      physiotherapy: '',
+      consultation: '',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '',
+      accommodationCharges: '',
+      total: '29000'
     },
     refundedAmount: {
-      advancePayment: '0',
-      clinicalServices: '0',
-      laboratoryServices: '0',
-      radiology: '0',
-      pharmacy: '0',
-      implant: '0',
-      blood: '0',
-      surgery: '0',
-      mandatoryServices: '0',
-      physiotherapy: '0',
-      consultation: '0',
-      surgeryInternalReport: '0',
-      implantCost: '0',
-      private: '0',
-      accommodationCharges: '0',
-      total: '0'
+      advancePayment: '',
+      clinicalServices: '',
+      laboratoryServices: '',
+      radiology: '',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '',
+      physiotherapy: '',
+      consultation: '',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '',
+      accommodationCharges: '',
+      total: ''
     },
     balance: {
-      advancePayment: '0',
-      clinicalServices: '0',
-      laboratoryServices: '0',
-      radiology: '0',
-      pharmacy: '0',
-      implant: '0',
-      blood: '0',
-      surgery: '0',
-      mandatoryServices: '0',
-      physiotherapy: '0',
-      consultation: '0',
-      surgeryInternalReport: '0',
-      implantCost: '0',
-      private: '0',
-      accommodationCharges: '0',
-      total: '0'
+      advancePayment: '',
+      clinicalServices: '9020',
+      laboratoryServices: '5250',
+      radiology: '27800',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '6100',
+      physiotherapy: '',
+      consultation: '10000',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '16200',
+      accommodationCharges: '',
+      total: '45370'
     }
   });
 
@@ -212,13 +212,9 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
   const [isSaving, setIsSaving] = useState(false);
 
   // Load financial summary data from database
-  const loadFinancialSummary = useCallback(async () => {
-    if (!billId) {
-      console.log('❌ No billId provided to loadFinancialSummary');
-      return;
-    }
+  const loadFinancialSummary = async () => {
+    if (!billId) return;
 
-    console.log('🔄 Loading financial summary for billId:', billId);
     setIsLoading(true);
     try {
       const { data, error } = await supabase
@@ -228,17 +224,16 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
         .single();
 
       if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
-        console.error('❌ Error loading financial summary:', error);
+        console.error('Error loading financial summary:', error);
         toast.error('Failed to load financial summary data');
         return;
       }
 
       if (data) {
-        console.log('✅ Found financial summary data:', data);
         // Convert database format to component format
         const convertedData: FinancialSummaryData = {
           totalAmount: {
-            advancePayment: data.total_amount_advance_payment?.toString() || '0',
+            advancePayment: data.total_amount_advance_payment?.toString() || '',
             clinicalServices: data.total_amount_clinical_services?.toString() || '',
             laboratoryServices: data.total_amount_laboratory_services?.toString() || '',
             radiology: data.total_amount_radiology?.toString() || '',
@@ -274,7 +269,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
             total: data.discount_total?.toString() || ''
           },
           amountPaid: {
-            advancePayment: data.amount_paid_advance_payment?.toString() || '0',
+            advancePayment: data.amount_paid_advance_payment?.toString() || '',
             clinicalServices: data.amount_paid_clinical_services?.toString() || '',
             laboratoryServices: data.amount_paid_laboratory_services?.toString() || '',
             radiology: data.amount_paid_radiology?.toString() || '',
@@ -292,7 +287,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
             total: data.amount_paid_total?.toString() || ''
           },
           refundedAmount: {
-            advancePayment: data.refunded_amount_advance_payment?.toString() || '0',
+            advancePayment: data.refunded_amount_advance_payment?.toString() || '',
             clinicalServices: data.refunded_amount_clinical_services?.toString() || '',
             laboratoryServices: data.refunded_amount_laboratory_services?.toString() || '',
             radiology: data.refunded_amount_radiology?.toString() || '',
@@ -310,7 +305,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
             total: data.refunded_amount_total?.toString() || ''
           },
           balance: {
-            advancePayment: data.balance_advance_payment?.toString() || '0',
+            advancePayment: data.balance_advance_payment?.toString() || '',
             clinicalServices: data.balance_clinical_services?.toString() || '',
             laboratoryServices: data.balance_laboratory_services?.toString() || '',
             radiology: data.balance_radiology?.toString() || '',
@@ -342,8 +337,6 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
         }
 
         console.log('✅ Financial summary loaded from database');
-      } else {
-        console.log('⚠️ No financial summary data found in database for billId:', billId);
       }
     } catch (error) {
       console.error('Error loading financial summary:', error);
@@ -351,140 +344,111 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
     } finally {
       setIsLoading(false);
     }
-  }, [billId]);
+  };
 
   // Save financial summary data to database
-  const saveFinancialSummary = async (dataToSave?: FinancialSummaryData) => {
-    const dataForSaving = dataToSave || financialSummaryData;
+  const saveFinancialSummary = async () => {
     if (!billId) {
-      console.log('❌ No billId provided to saveFinancialSummary');
       toast.error('Bill ID is required to save financial summary');
       return;
     }
 
-    console.log('💾 Saving financial summary for billId:', billId);
-    console.log('📊 Current financialSummaryData:', financialSummaryData);
     setIsSaving(true);
     try {
-      // First, validate that the bill exists
-      console.log('🔍 Validating bill exists in database...');
-      const { data: billExists, error: billCheckError } = await supabase
-        .from('bills')
-        .select('id')
-        .eq('id', billId)
-        .single();
-
-      if (billCheckError) {
-        console.error('❌ Error checking bill existence:', billCheckError);
-        if (billCheckError.code === 'PGRST116') {
-          toast.error('Error: Bill not found. Please save the bill first before adding financial data.');
-        } else {
-          toast.error(`Error validating bill: ${billCheckError.message}`);
-        }
-        return;
-      }
-
-      console.log('✅ Bill validation successful:', billExists);
       // Convert component format to database format
-      console.log('💾 About to save financial summary data:', dataForSaving);
-      console.log('💰 Advance payment values:');
-      console.log('  - totalAmount.advancePayment:', dataForSaving.totalAmount.advancePayment);
-      console.log('  - amountPaid.advancePayment:', dataForSaving.amountPaid.advancePayment);
-      console.log('  - refundedAmount.advancePayment:', dataForSaving.refundedAmount.advancePayment);
-
       const dbData = {
         bill_id: billId,
-        visit_id: null, // Set to null for now since visitId is not in UUID format
-
+        visit_id: visitId,
+        
         // Total Amount Row
-        total_amount_advance_payment: parseFloat(dataForSaving.totalAmount.advancePayment) || 0,
-        total_amount_clinical_services: parseFloat(dataForSaving.totalAmount.clinicalServices) || 0,
-        total_amount_laboratory_services: parseFloat(dataForSaving.totalAmount.laboratoryServices) || 0,
-        total_amount_radiology: parseFloat(dataForSaving.totalAmount.radiology) || 0,
-        total_amount_pharmacy: parseFloat(dataForSaving.totalAmount.pharmacy) || 0,
-        total_amount_implant: parseFloat(dataForSaving.totalAmount.implant) || 0,
-        total_amount_blood: parseFloat(dataForSaving.totalAmount.blood) || 0,
-        total_amount_surgery: parseFloat(dataForSaving.totalAmount.surgery) || 0,
-        total_amount_mandatory_services: parseFloat(dataForSaving.totalAmount.mandatoryServices) || 0,
-        total_amount_physiotherapy: parseFloat(dataForSaving.totalAmount.physiotherapy) || 0,
-        total_amount_consultation: parseFloat(dataForSaving.totalAmount.consultation) || 0,
-        total_amount_surgery_internal_report: parseFloat(dataForSaving.totalAmount.surgeryInternalReport) || 0,
-        total_amount_implant_cost: parseFloat(dataForSaving.totalAmount.implantCost) || 0,
-        total_amount_private: parseFloat(dataForSaving.totalAmount.private) || 0,
-        total_amount_accommodation_charges: parseFloat(dataForSaving.totalAmount.accommodationCharges) || 0,
-        total_amount_total: parseFloat(dataForSaving.totalAmount.total) || 0,
+        total_amount_advance_payment: parseFloat(financialSummaryData.totalAmount.advancePayment) || 0,
+        total_amount_clinical_services: parseFloat(financialSummaryData.totalAmount.clinicalServices) || 0,
+        total_amount_laboratory_services: parseFloat(financialSummaryData.totalAmount.laboratoryServices) || 0,
+        total_amount_radiology: parseFloat(financialSummaryData.totalAmount.radiology) || 0,
+        total_amount_pharmacy: parseFloat(financialSummaryData.totalAmount.pharmacy) || 0,
+        total_amount_implant: parseFloat(financialSummaryData.totalAmount.implant) || 0,
+        total_amount_blood: parseFloat(financialSummaryData.totalAmount.blood) || 0,
+        total_amount_surgery: parseFloat(financialSummaryData.totalAmount.surgery) || 0,
+        total_amount_mandatory_services: parseFloat(financialSummaryData.totalAmount.mandatoryServices) || 0,
+        total_amount_physiotherapy: parseFloat(financialSummaryData.totalAmount.physiotherapy) || 0,
+        total_amount_consultation: parseFloat(financialSummaryData.totalAmount.consultation) || 0,
+        total_amount_surgery_internal_report: parseFloat(financialSummaryData.totalAmount.surgeryInternalReport) || 0,
+        total_amount_implant_cost: parseFloat(financialSummaryData.totalAmount.implantCost) || 0,
+        total_amount_private: parseFloat(financialSummaryData.totalAmount.private) || 0,
+        total_amount_accommodation_charges: parseFloat(financialSummaryData.totalAmount.accommodationCharges) || 0,
+        total_amount_total: parseFloat(financialSummaryData.totalAmount.total) || 0,
         
         // Discount Row
-        discount_advance_payment: parseFloat(dataForSaving.discount.advancePayment) || 0,
-        discount_clinical_services: parseFloat(dataForSaving.discount.clinicalServices) || 0,
-        discount_laboratory_services: parseFloat(dataForSaving.discount.laboratoryServices) || 0,
-        discount_radiology: parseFloat(dataForSaving.discount.radiology) || 0,
-        discount_pharmacy: parseFloat(dataForSaving.discount.pharmacy) || 0,
-        discount_implant: parseFloat(dataForSaving.discount.implant) || 0,
-        discount_blood: parseFloat(dataForSaving.discount.blood) || 0,
-        discount_surgery: parseFloat(dataForSaving.discount.surgery) || 0,
-        discount_mandatory_services: parseFloat(dataForSaving.discount.mandatoryServices) || 0,
-        discount_physiotherapy: parseFloat(dataForSaving.discount.physiotherapy) || 0,
-        discount_consultation: parseFloat(dataForSaving.discount.consultation) || 0,
-        discount_surgery_internal_report: parseFloat(dataForSaving.discount.surgeryInternalReport) || 0,
-        discount_implant_cost: parseFloat(dataForSaving.discount.implantCost) || 0,
-        discount_private: parseFloat(dataForSaving.discount.private) || 0,
-        discount_accommodation_charges: parseFloat(dataForSaving.discount.accommodationCharges) || 0,
-        discount_total: parseFloat(dataForSaving.discount.total) || 0,
+        discount_advance_payment: parseFloat(financialSummaryData.discount.advancePayment) || 0,
+        discount_clinical_services: parseFloat(financialSummaryData.discount.clinicalServices) || 0,
+        discount_laboratory_services: parseFloat(financialSummaryData.discount.laboratoryServices) || 0,
+        discount_radiology: parseFloat(financialSummaryData.discount.radiology) || 0,
+        discount_pharmacy: parseFloat(financialSummaryData.discount.pharmacy) || 0,
+        discount_implant: parseFloat(financialSummaryData.discount.implant) || 0,
+        discount_blood: parseFloat(financialSummaryData.discount.blood) || 0,
+        discount_surgery: parseFloat(financialSummaryData.discount.surgery) || 0,
+        discount_mandatory_services: parseFloat(financialSummaryData.discount.mandatoryServices) || 0,
+        discount_physiotherapy: parseFloat(financialSummaryData.discount.physiotherapy) || 0,
+        discount_consultation: parseFloat(financialSummaryData.discount.consultation) || 0,
+        discount_surgery_internal_report: parseFloat(financialSummaryData.discount.surgeryInternalReport) || 0,
+        discount_implant_cost: parseFloat(financialSummaryData.discount.implantCost) || 0,
+        discount_private: parseFloat(financialSummaryData.discount.private) || 0,
+        discount_accommodation_charges: parseFloat(financialSummaryData.discount.accommodationCharges) || 0,
+        discount_total: parseFloat(financialSummaryData.discount.total) || 0,
         
         // Amount Paid Row
-        amount_paid_advance_payment: parseFloat(dataForSaving.amountPaid.advancePayment) || 0,
-        amount_paid_clinical_services: parseFloat(dataForSaving.amountPaid.clinicalServices) || 0,
-        amount_paid_laboratory_services: parseFloat(dataForSaving.amountPaid.laboratoryServices) || 0,
-        amount_paid_radiology: parseFloat(dataForSaving.amountPaid.radiology) || 0,
-        amount_paid_pharmacy: parseFloat(dataForSaving.amountPaid.pharmacy) || 0,
-        amount_paid_implant: parseFloat(dataForSaving.amountPaid.implant) || 0,
-        amount_paid_blood: parseFloat(dataForSaving.amountPaid.blood) || 0,
-        amount_paid_surgery: parseFloat(dataForSaving.amountPaid.surgery) || 0,
-        amount_paid_mandatory_services: parseFloat(dataForSaving.amountPaid.mandatoryServices) || 0,
-        amount_paid_physiotherapy: parseFloat(dataForSaving.amountPaid.physiotherapy) || 0,
-        amount_paid_consultation: parseFloat(dataForSaving.amountPaid.consultation) || 0,
-        amount_paid_surgery_internal_report: parseFloat(dataForSaving.amountPaid.surgeryInternalReport) || 0,
-        amount_paid_implant_cost: parseFloat(dataForSaving.amountPaid.implantCost) || 0,
-        amount_paid_private: parseFloat(dataForSaving.amountPaid.private) || 0,
-        amount_paid_accommodation_charges: parseFloat(dataForSaving.amountPaid.accommodationCharges) || 0,
-        amount_paid_total: parseFloat(dataForSaving.amountPaid.total) || 0,
+        amount_paid_advance_payment: parseFloat(financialSummaryData.amountPaid.advancePayment) || 0,
+        amount_paid_clinical_services: parseFloat(financialSummaryData.amountPaid.clinicalServices) || 0,
+        amount_paid_laboratory_services: parseFloat(financialSummaryData.amountPaid.laboratoryServices) || 0,
+        amount_paid_radiology: parseFloat(financialSummaryData.amountPaid.radiology) || 0,
+        amount_paid_pharmacy: parseFloat(financialSummaryData.amountPaid.pharmacy) || 0,
+        amount_paid_implant: parseFloat(financialSummaryData.amountPaid.implant) || 0,
+        amount_paid_blood: parseFloat(financialSummaryData.amountPaid.blood) || 0,
+        amount_paid_surgery: parseFloat(financialSummaryData.amountPaid.surgery) || 0,
+        amount_paid_mandatory_services: parseFloat(financialSummaryData.amountPaid.mandatoryServices) || 0,
+        amount_paid_physiotherapy: parseFloat(financialSummaryData.amountPaid.physiotherapy) || 0,
+        amount_paid_consultation: parseFloat(financialSummaryData.amountPaid.consultation) || 0,
+        amount_paid_surgery_internal_report: parseFloat(financialSummaryData.amountPaid.surgeryInternalReport) || 0,
+        amount_paid_implant_cost: parseFloat(financialSummaryData.amountPaid.implantCost) || 0,
+        amount_paid_private: parseFloat(financialSummaryData.amountPaid.private) || 0,
+        amount_paid_accommodation_charges: parseFloat(financialSummaryData.amountPaid.accommodationCharges) || 0,
+        amount_paid_total: parseFloat(financialSummaryData.amountPaid.total) || 0,
         
         // Refunded Amount Row
-        refunded_amount_advance_payment: parseFloat(dataForSaving.refundedAmount.advancePayment) || 0,
-        refunded_amount_clinical_services: parseFloat(dataForSaving.refundedAmount.clinicalServices) || 0,
-        refunded_amount_laboratory_services: parseFloat(dataForSaving.refundedAmount.laboratoryServices) || 0,
-        refunded_amount_radiology: parseFloat(dataForSaving.refundedAmount.radiology) || 0,
-        refunded_amount_pharmacy: parseFloat(dataForSaving.refundedAmount.pharmacy) || 0,
-        refunded_amount_implant: parseFloat(dataForSaving.refundedAmount.implant) || 0,
-        refunded_amount_blood: parseFloat(dataForSaving.refundedAmount.blood) || 0,
-        refunded_amount_surgery: parseFloat(dataForSaving.refundedAmount.surgery) || 0,
-        refunded_amount_mandatory_services: parseFloat(dataForSaving.refundedAmount.mandatoryServices) || 0,
-        refunded_amount_physiotherapy: parseFloat(dataForSaving.refundedAmount.physiotherapy) || 0,
-        refunded_amount_consultation: parseFloat(dataForSaving.refundedAmount.consultation) || 0,
-        refunded_amount_surgery_internal_report: parseFloat(dataForSaving.refundedAmount.surgeryInternalReport) || 0,
-        refunded_amount_implant_cost: parseFloat(dataForSaving.refundedAmount.implantCost) || 0,
-        refunded_amount_private: parseFloat(dataForSaving.refundedAmount.private) || 0,
-        refunded_amount_accommodation_charges: parseFloat(dataForSaving.refundedAmount.accommodationCharges) || 0,
-        refunded_amount_total: parseFloat(dataForSaving.refundedAmount.total) || 0,
+        refunded_amount_advance_payment: parseFloat(financialSummaryData.refundedAmount.advancePayment) || 0,
+        refunded_amount_clinical_services: parseFloat(financialSummaryData.refundedAmount.clinicalServices) || 0,
+        refunded_amount_laboratory_services: parseFloat(financialSummaryData.refundedAmount.laboratoryServices) || 0,
+        refunded_amount_radiology: parseFloat(financialSummaryData.refundedAmount.radiology) || 0,
+        refunded_amount_pharmacy: parseFloat(financialSummaryData.refundedAmount.pharmacy) || 0,
+        refunded_amount_implant: parseFloat(financialSummaryData.refundedAmount.implant) || 0,
+        refunded_amount_blood: parseFloat(financialSummaryData.refundedAmount.blood) || 0,
+        refunded_amount_surgery: parseFloat(financialSummaryData.refundedAmount.surgery) || 0,
+        refunded_amount_mandatory_services: parseFloat(financialSummaryData.refundedAmount.mandatoryServices) || 0,
+        refunded_amount_physiotherapy: parseFloat(financialSummaryData.refundedAmount.physiotherapy) || 0,
+        refunded_amount_consultation: parseFloat(financialSummaryData.refundedAmount.consultation) || 0,
+        refunded_amount_surgery_internal_report: parseFloat(financialSummaryData.refundedAmount.surgeryInternalReport) || 0,
+        refunded_amount_implant_cost: parseFloat(financialSummaryData.refundedAmount.implantCost) || 0,
+        refunded_amount_private: parseFloat(financialSummaryData.refundedAmount.private) || 0,
+        refunded_amount_accommodation_charges: parseFloat(financialSummaryData.refundedAmount.accommodationCharges) || 0,
+        refunded_amount_total: parseFloat(financialSummaryData.refundedAmount.total) || 0,
         
         // Balance Row
-        balance_advance_payment: parseFloat(dataForSaving.balance.advancePayment) || 0,
-        balance_clinical_services: parseFloat(dataForSaving.balance.clinicalServices) || 0,
-        balance_laboratory_services: parseFloat(dataForSaving.balance.laboratoryServices) || 0,
-        balance_radiology: parseFloat(dataForSaving.balance.radiology) || 0,
-        balance_pharmacy: parseFloat(dataForSaving.balance.pharmacy) || 0,
-        balance_implant: parseFloat(dataForSaving.balance.implant) || 0,
-        balance_blood: parseFloat(dataForSaving.balance.blood) || 0,
-        balance_surgery: parseFloat(dataForSaving.balance.surgery) || 0,
-        balance_mandatory_services: parseFloat(dataForSaving.balance.mandatoryServices) || 0,
-        balance_physiotherapy: parseFloat(dataForSaving.balance.physiotherapy) || 0,
-        balance_consultation: parseFloat(dataForSaving.balance.consultation) || 0,
-        balance_surgery_internal_report: parseFloat(dataForSaving.balance.surgeryInternalReport) || 0,
-        balance_implant_cost: parseFloat(dataForSaving.balance.implantCost) || 0,
-        balance_private: parseFloat(dataForSaving.balance.private) || 0,
-        balance_accommodation_charges: parseFloat(dataForSaving.balance.accommodationCharges) || 0,
-        balance_total: parseFloat(dataForSaving.balance.total) || 0,
+        balance_advance_payment: parseFloat(financialSummaryData.balance.advancePayment) || 0,
+        balance_clinical_services: parseFloat(financialSummaryData.balance.clinicalServices) || 0,
+        balance_laboratory_services: parseFloat(financialSummaryData.balance.laboratoryServices) || 0,
+        balance_radiology: parseFloat(financialSummaryData.balance.radiology) || 0,
+        balance_pharmacy: parseFloat(financialSummaryData.balance.pharmacy) || 0,
+        balance_implant: parseFloat(financialSummaryData.balance.implant) || 0,
+        balance_blood: parseFloat(financialSummaryData.balance.blood) || 0,
+        balance_surgery: parseFloat(financialSummaryData.balance.surgery) || 0,
+        balance_mandatory_services: parseFloat(financialSummaryData.balance.mandatoryServices) || 0,
+        balance_physiotherapy: parseFloat(financialSummaryData.balance.physiotherapy) || 0,
+        balance_consultation: parseFloat(financialSummaryData.balance.consultation) || 0,
+        balance_surgery_internal_report: parseFloat(financialSummaryData.balance.surgeryInternalReport) || 0,
+        balance_implant_cost: parseFloat(financialSummaryData.balance.implantCost) || 0,
+        balance_private: parseFloat(financialSummaryData.balance.private) || 0,
+        balance_accommodation_charges: parseFloat(financialSummaryData.balance.accommodationCharges) || 0,
+        balance_total: parseFloat(financialSummaryData.balance.total) || 0,
         
         // Package dates
         package_start_date: packageDates.start_date || null,
@@ -494,58 +458,31 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
       };
 
       // Check if financial summary already exists
-      console.log('🔍 Checking if financial summary exists for billId:', billId);
-      const { data: existingData, error: checkError } = await supabase
+      const { data: existingData } = await supabase
         .from('financial_summary')
         .select('id')
         .eq('bill_id', billId)
         .single();
 
-      if (checkError && checkError.code !== 'PGRST116') {
-        console.error('❌ Error checking existing financial summary:', checkError);
-        toast.error(`Database check failed: ${checkError.message}`);
-        return;
-      }
-
-      console.log('📋 Data to save:', dbData);
-
       let result;
       if (existingData) {
-        console.log('🔄 Updating existing financial summary record');
+        // Update existing record
         result = await supabase
           .from('financial_summary')
           .update(dbData)
           .eq('bill_id', billId)
           .select();
       } else {
-        console.log('➕ Inserting new financial summary record');
+        // Insert new record
         result = await supabase
           .from('financial_summary')
           .insert(dbData)
           .select();
       }
 
-      console.log('💾 Save result:', result);
-
       if (result.error) {
-        console.error('❌ Supabase save error:', result.error);
-        console.error('❌ Error details:', {
-          code: result.error.code,
-          message: result.error.message,
-          details: result.error.details,
-          hint: result.error.hint
-        });
-
-        // Provide specific error messages for common issues
-        if (result.error.code === '23503') {
-          toast.error('Error: Bill ID not found. Please save the bill first before adding financial data.');
-        } else if (result.error.code === '42501') {
-          toast.error('Error: Permission denied. Please check your access rights.');
-        } else if (result.error.code === '22P02') {
-          toast.error('Error: Invalid data format. Please contact support.');
-        } else {
-          toast.error(`Database error: ${result.error.message}`);
-        }
+        console.error('Error saving financial summary:', result.error);
+        toast.error('Failed to save financial summary data');
         return;
       }
 
@@ -575,32 +512,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
     if (billId) {
       loadFinancialSummary();
     }
-  }, [billId, loadFinancialSummary]);
-
-  // Test database connectivity and permissions
-  const testDatabaseConnection = async () => {
-    console.log('🧪 Testing database connectivity...');
-    try {
-      // Test basic read access
-      const { data, error } = await supabase
-        .from('financial_summary')
-        .select('id')
-        .limit(1);
-
-      if (error) {
-        console.error('❌ Database connectivity test failed:', error);
-        toast.error(`Database connection failed: ${error.message}`);
-        return false;
-      }
-
-      console.log('✅ Database connectivity test successful');
-      return true;
-    } catch (error) {
-      console.error('❌ Database connectivity test error:', error);
-      toast.error('Database connection error');
-      return false;
-    }
-  };
+  }, [billId]);
 
   return {
     financialSummaryData,
@@ -611,7 +523,6 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
     isSaving,
     saveFinancialSummary,
     handleFinancialSummaryChange,
-    loadFinancialSummary,
-    testDatabaseConnection
+    loadFinancialSummary
   };
 };

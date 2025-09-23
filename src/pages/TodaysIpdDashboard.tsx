@@ -1141,6 +1141,7 @@ const TodaysIpdDashboard = () => {
             hospital_name
           )
         `)
+        .eq('patient_type', 'IPD')
         .order('sr_no', { ascending: true, nullsFirst: false })
         .order('visit_date', { ascending: true });
       

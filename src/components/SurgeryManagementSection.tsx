@@ -111,7 +111,10 @@ export const SurgeryManagementSection: React.FC<SurgeryManagementSectionProps> =
           visit_id: visitId,
           surgery_id: surgeryData.id,
           status: 'planned',
-          sanction_status: 'Not Sanctioned'
+          sanction_status: 'Not Sanctioned',
+          implant: '',
+          anaesthetist_name: '',
+          anaesthesia_type: ''
         });
 
       if (insertError) throw insertError;
