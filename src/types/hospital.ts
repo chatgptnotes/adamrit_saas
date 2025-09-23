@@ -24,6 +24,8 @@ export interface HospitalConfig {
     hasAccounting: boolean;
     hasHopeSurgeons: boolean;
     hasHopeConsultants: boolean;
+    hasAyushmanSurgeons: boolean;
+    hasAyushmanConsultants: boolean;
     hasCghsSurgery: boolean;
   };
   theme: {
@@ -60,6 +62,8 @@ export const HOSPITAL_CONFIGS: Record<HospitalType, HospitalConfig> = {
       hasAccounting: true,
       hasHopeSurgeons: true,
       hasHopeConsultants: true,
+      hasAyushmanSurgeons: false,
+      hasAyushmanConsultants: false,
       hasCghsSurgery: false,
     },
     theme: {
@@ -94,6 +98,8 @@ export const HOSPITAL_CONFIGS: Record<HospitalType, HospitalConfig> = {
       hasAccounting: true,
       hasHopeSurgeons: false,
       hasHopeConsultants: false,
+      hasAyushmanSurgeons: true,
+      hasAyushmanConsultants: true,
       hasCghsSurgery: false,
     },
     theme: {

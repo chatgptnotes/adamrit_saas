@@ -99,13 +99,23 @@ export const menuItems = [
     icon: MapPin,
   },
   {
-    title: "Hope Surgeons", 
+    title: "Hope Surgeons",
     url: "/hope-surgeons",
     icon: Stethoscope,
   },
   {
     title: "Hope Consultants",
-    url: "/hope-consultants", 
+    url: "/hope-consultants",
+    icon: UserCog,
+  },
+  {
+    title: "Ayushman Surgeons",
+    url: "/ayushman-surgeons",
+    icon: Stethoscope,
+  },
+  {
+    title: "Ayushman Consultants",
+    url: "/ayushman-consultants",
     icon: UserCog,
   },
   {

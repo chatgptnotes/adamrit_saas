@@ -18,7 +18,9 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
     medicationCount = 0,
     refereesCount = 0,
     hopeSurgeonsCount = 0,
-    hopeConsultantsCount = 0
+    hopeConsultantsCount = 0,
+    ayushmanSurgeonsCount = 0,
+    ayushmanConsultantsCount = 0
   } = props;
 
   return useMemo(() => 
@@ -42,6 +44,10 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
             return isFeatureEnabled(hospitalType, 'hasHopeSurgeons');
           case "Hope Consultants":
             return isFeatureEnabled(hospitalType, 'hasHopeConsultants');
+          case "Ayushman Surgeons":
+            return isFeatureEnabled(hospitalType, 'hasAyushmanSurgeons');
+          case "Ayushman Consultants":
+            return isFeatureEnabled(hospitalType, 'hasAyushmanConsultants');
           case "CGHS Surgery":
             return isFeatureEnabled(hospitalType, 'hasCghsSurgery');
           default:
@@ -64,11 +70,13 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
                item.title === "Medications" ? medicationCount :
                item.title === "Referees" ? refereesCount :
                item.title === "Hope Surgeons" ? hopeSurgeonsCount :
-               item.title === "Hope Consultants" ? hopeConsultantsCount : 0
+               item.title === "Hope Consultants" ? hopeConsultantsCount :
+               item.title === "Ayushman Surgeons" ? ayushmanSurgeonsCount :
+               item.title === "Ayushman Consultants" ? ayushmanConsultantsCount : 0
       })), [
         hospitalType, diagnosesCount, patientsCount, usersCount, complicationsCount,
         cghsSurgeryCount, labCount, radiologyCount, medicationCount,
-        refereesCount, hopeSurgeonsCount, hopeConsultantsCount
+        refereesCount, hopeSurgeonsCount, hopeConsultantsCount, ayushmanSurgeonsCount, ayushmanConsultantsCount
       ]
     );
 };
