@@ -47,6 +47,8 @@ const MandatoryService = lazy(() => import("../pages/MandatoryService"));
 const MandatoryServiceCreate = lazy(() => import("../pages/MandatoryServiceCreate"));
 const ClinicalServices = lazy(() => import("../pages/ClinicalServices"));
 const ClinicalServiceCreate = lazy(() => import("../pages/ClinicalServiceCreate"));
+const ExternalRequisition = lazy(() => import("../pages/ExternalRequisition"));
+const ExternalRequisitionCreate = lazy(() => import("../pages/ExternalRequisitionCreate"));
 const GatePassPrintPage = lazy(() => import("../pages/GatePassPrint"));
 const DischargeSummaryPrint = lazy(() => import("../pages/DischargeSummaryPrint"));
 
@@ -97,6 +99,8 @@ export const AppRoutes = () => {
         <Route path="/mandatory-service-create" element={<Suspense fallback={<PageLoader />}><MandatoryServiceCreate /></Suspense>} />
         <Route path="/clinical-services" element={<Suspense fallback={<PageLoader />}><ClinicalServices /></Suspense>} />
         <Route path="/clinical-service-create" element={<Suspense fallback={<PageLoader />}><ClinicalServiceCreate /></Suspense>} />
+        <Route path="/external-requisition" element={<Suspense fallback={<PageLoader />}><ExternalRequisition /></Suspense>} />
+        <Route path="/external-requisition-create" element={<Suspense fallback={<PageLoader />}><ExternalRequisitionCreate /></Suspense>} />
         <Route path="/gate-pass/:visitId" element={<Suspense fallback={<PageLoader />}><GatePassPrintPage /></Suspense>} />
         <Route path="/discharge-summary/:visitId" element={<Suspense fallback={<PageLoader />}><DischargeSummaryPrint /></Suspense>} />
 
