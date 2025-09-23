@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldCheck, ArrowLeft, Save } from 'lucide-react';
+import { HeartHandshake, ArrowLeft, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { CreateMandatoryServiceData } from '@/types/mandatoryService';
+import { CreateClinicalServiceData } from '@/types/clinicalService';
 import { toast } from 'sonner';
 
-const MandatoryServiceCreate = () => {
+const ClinicalServiceCreate = () => {
   const navigate = useNavigate();
   const { hospitalConfig, user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
@@ -33,18 +33,18 @@ const MandatoryServiceCreate = () => {
 
     try {
       // Prepare data for database insertion
-      const serviceData: CreateMandatoryServiceData = {
+      const serviceData: CreateClinicalServiceData = {
         service_name: formData.serviceName,
         tpa_rate: formData.tpaRate ? parseFloat(formData.tpaRate) : null,
         private_rate: formData.privateRate ? parseFloat(formData.privateRate) : null,
         nabh_rate: formData.nabhRate ? parseFloat(formData.nabhRate) : null,
         non_nabh_rate: formData.nonNabhRate ? parseFloat(formData.nonNabhRate) : null,
-        hospital_name: hospitalConfig.name // Auto-set based on logged-in user
+        hospital_name: hospitalConfig.name.toLowerCase() // Auto-set based on logged-in user (lowercase)
         // Removed created_by to avoid foreign key constraint issues
       };
 
       const { data, error } = await supabase
-        .from('mandatory_services')
+        .from('clinical_services')
         .insert([serviceData])
         .select();
 
@@ -52,24 +52,24 @@ const MandatoryServiceCreate = () => {
         throw error;
       }
 
-      toast.success('Mandatory service created successfully!');
-      navigate('/mandatory-service');
+      toast.success('Clinical service created successfully!');
+      navigate('/clinical-services');
     } catch (error) {
-      console.error('Error creating mandatory service:', error);
-      toast.error('Failed to create mandatory service. Please try again.');
+      console.error('Error creating clinical service:', error);
+      toast.error('Failed to create clinical service. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleCancel = () => {
-    navigate('/mandatory-service');
+    navigate('/clinical-services');
   };
 
   return (
     <div className="container mx-auto px-4 py-6">
       <div className="mb-6 flex items-center gap-4">
-        <button 
+        <button
           onClick={handleCancel}
           className="p-2 text-gray-600 hover:text-gray-800"
         >
@@ -77,11 +77,11 @@ const MandatoryServiceCreate = () => {
         </button>
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-            <ShieldCheck className="h-8 w-8 text-blue-600" />
-            Create Mandatory Service
+            <HeartHandshake className="h-8 w-8 text-blue-600" />
+            Create Clinical Service
           </h1>
           <p className="text-gray-600 mt-2">
-            Set up a new mandatory service requirement
+            Set up a new clinical service requirement
           </p>
         </div>
       </div>
@@ -202,4 +202,4 @@ const MandatoryServiceCreate = () => {
   );
 };
 
-export default MandatoryServiceCreate;
+export default ClinicalServiceCreate;

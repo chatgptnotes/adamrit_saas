@@ -1,4 +1,4 @@
-export interface MandatoryService {
+export interface ClinicalService {
   id: string;
   service_name: string;
   tpa_rate?: number | null;
@@ -12,7 +12,7 @@ export interface MandatoryService {
   created_by?: string | null;
 }
 
-export interface CreateMandatoryServiceData {
+export interface CreateClinicalServiceData {
   service_name: string;
   tpa_rate?: number;
   private_rate?: number;

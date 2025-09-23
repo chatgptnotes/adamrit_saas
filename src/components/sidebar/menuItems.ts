@@ -1,5 +1,5 @@
 
-import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt } from 'lucide-react';
+import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake } from 'lucide-react';
 
 export const menuItems = [
   {
@@ -37,6 +37,11 @@ export const menuItems = [
     title: "Mandatory Service",
     url: "/mandatory-service",
     icon: ShieldCheck,
+  },
+  {
+    title: "Clinical Services",
+    url: "/clinical-services",
+    icon: HeartHandshake,
   },
   {
     title: "Diagnoses",

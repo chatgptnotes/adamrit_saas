@@ -2,21 +2,21 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldCheck, AlertCircle, CheckCircle, Plus, Edit, Eye, Trash2, X } from 'lucide-react';
+import { HeartHandshake, AlertCircle, Plus, Edit, Eye, Trash2, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { MandatoryService as MandatoryServiceType } from '@/types/mandatoryService';
+import { ClinicalService } from '@/types/clinicalService';
 import { toast } from 'sonner';
 
-const MandatoryService = () => {
+const ClinicalServices = () => {
   const navigate = useNavigate();
   const { hospitalConfig } = useAuth();
   const queryClient = useQueryClient();
 
   // State for modals and forms
-  const [viewingService, setViewingService] = useState<MandatoryServiceType | null>(null);
-  const [editingService, setEditingService] = useState<MandatoryServiceType | null>(null);
-  const [deletingService, setDeletingService] = useState<MandatoryServiceType | null>(null);
+  const [viewingService, setViewingService] = useState<ClinicalService | null>(null);
+  const [editingService, setEditingService] = useState<ClinicalService | null>(null);
+  const [deletingService, setDeletingService] = useState<ClinicalService | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editFormData, setEditFormData] = useState({
     serviceName: '',
@@ -27,31 +27,71 @@ const MandatoryService = () => {
     status: 'Active'
   });
 
-  // Fetch mandatory services from database filtered by hospital
-  const { data: mandatoryServices, isLoading, error } = useQuery({
-    queryKey: ['mandatory-services', hospitalConfig.name],
+  // Fetch clinical services from database filtered by hospital
+  const { data: clinicalServices, isLoading, error } = useQuery({
+    queryKey: ['clinical-services', hospitalConfig.name],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('mandatory_services')
+      console.log('=== CLINICAL SERVICES DEBUG ===');
+      console.log('1. Hospital Config Name:', hospitalConfig.name);
+      console.log('2. Lowercase version:', hospitalConfig.name.toLowerCase());
+
+      // First, test if we can get ANY clinical services (no filter)
+      console.log('3. Testing query without filter...');
+      const { data: allData, error: allError } = await supabase
+        .from('clinical_services')
         .select('*')
-        .eq('hospital_name', hospitalConfig.name)
         .order('created_at', { ascending: false });
+
+      console.log('4. All clinical services (no filter):', {
+        count: allData?.length || 0,
+        error: allError,
+        hospitalNames: allData?.map(item => `"${item.hospital_name}"`)
+      });
+
+      // Now try with exact hospital filter
+      console.log('5. Testing query WITH hospital filter...');
+      const { data, error } = await supabase
+        .from('clinical_services')
+        .select('*')
+        .eq('hospital_name', hospitalConfig.name.toLowerCase())
+        .order('created_at', { ascending: false });
+
+      console.log('6. Filtered query result:', {
+        count: data?.length || 0,
+        error: error,
+        data: data
+      });
+
+      // Test a specific hospital name to see if it works
+      console.log('7. Testing with hardcoded "ayushman"...');
+      const { data: testData, error: testError } = await supabase
+        .from('clinical_services')
+        .select('*')
+        .eq('hospital_name', 'ayushman')
+        .order('created_at', { ascending: false });
+
+      console.log('8. Hardcoded "ayushman" result:', {
+        count: testData?.length || 0,
+        error: testError
+      });
+
+      console.log('=== END DEBUG ===');
 
       if (error) {
         throw error;
       }
 
-      return data as MandatoryServiceType[];
+      return data as ClinicalService[];
     },
     enabled: !!hospitalConfig.name
   });
 
   // Handler functions for actions
-  const handleView = (service: MandatoryServiceType) => {
+  const handleView = (service: ClinicalService) => {
     setViewingService(service);
   };
 
-  const handleEdit = (service: MandatoryServiceType) => {
+  const handleEdit = (service: ClinicalService) => {
     setEditingService(service);
     setEditFormData({
       serviceName: service.service_name,
@@ -63,7 +103,7 @@ const MandatoryService = () => {
     });
   };
 
-  const handleDelete = (service: MandatoryServiceType) => {
+  const handleDelete = (service: ClinicalService) => {
     setDeletingService(service);
   };
 
@@ -73,18 +113,18 @@ const MandatoryService = () => {
     setIsDeleting(true);
     try {
       const { error } = await supabase
-        .from('mandatory_services')
+        .from('clinical_services')
         .delete()
         .eq('id', deletingService.id);
 
       if (error) throw error;
 
-      toast.success('Service deleted successfully');
-      queryClient.invalidateQueries({ queryKey: ['mandatory-services'] });
+      toast.success('Clinical service deleted successfully');
+      queryClient.invalidateQueries({ queryKey: ['clinical-services'] });
       setDeletingService(null);
     } catch (error) {
-      console.error('Error deleting service:', error);
-      toast.error('Failed to delete service');
+      console.error('Error deleting clinical service:', error);
+      toast.error('Failed to delete clinical service');
     } finally {
       setIsDeleting(false);
     }
@@ -96,7 +136,7 @@ const MandatoryService = () => {
 
     try {
       const { error } = await supabase
-        .from('mandatory_services')
+        .from('clinical_services')
         .update({
           service_name: editFormData.serviceName,
           tpa_rate: editFormData.tpaRate ? parseFloat(editFormData.tpaRate) : null,
@@ -110,17 +150,17 @@ const MandatoryService = () => {
 
       if (error) throw error;
 
-      toast.success('Service updated successfully');
-      queryClient.invalidateQueries({ queryKey: ['mandatory-services'] });
+      toast.success('Clinical service updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['clinical-services'] });
       setEditingService(null);
     } catch (error) {
-      console.error('Error updating service:', error);
-      toast.error('Failed to update service');
+      console.error('Error updating clinical service:', error);
+      toast.error('Failed to update clinical service');
     }
   };
 
   const handleCreateService = () => {
-    navigate('/mandatory-service-create');
+    navigate('/clinical-service-create');
   };
 
   return (
@@ -128,30 +168,29 @@ const MandatoryService = () => {
       <div className="mb-6 flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-            <ShieldCheck className="h-8 w-8 text-blue-600" />
-            Mandatory Service
+            <HeartHandshake className="h-8 w-8 text-blue-600" />
+            Clinical Services
           </h1>
           <p className="text-gray-600 mt-2">
-            Manage and track mandatory service requirements and compliance
+            Manage and track clinical service requirements and compliance
           </p>
         </div>
-        <button 
+        <button
           onClick={handleCreateService}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 transition-colors"
         >
           <Plus className="h-4 w-4" />
-          Create Mandatory Service
+          Create Clinical Service
         </button>
       </div>
 
-
-      {/* Mandatory Services Table */}
+      {/* Clinical Services Table */}
       <Card className="mt-6">
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            <span>Mandatory Services</span>
+            <span>Clinical Services</span>
             <span className="text-sm font-normal text-gray-500">
-              {isLoading ? 'Loading...' : `${mandatoryServices?.length || 0} services`}
+              {isLoading ? 'Loading...' : `${clinicalServices?.length || 0} services`}
             </span>
           </CardTitle>
         </CardHeader>
@@ -159,14 +198,14 @@ const MandatoryService = () => {
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <span className="ml-3 text-gray-600">Loading mandatory services...</span>
+              <span className="ml-3 text-gray-600">Loading clinical services...</span>
             </div>
           ) : error ? (
             <div className="flex items-center justify-center py-8 text-red-600">
               <AlertCircle className="h-5 w-5 mr-2" />
-              Error loading mandatory services. Please try again.
+              Error loading clinical services. Please try again.
             </div>
-          ) : mandatoryServices && mandatoryServices.length > 0 ? (
+          ) : clinicalServices && clinicalServices.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
@@ -182,13 +221,13 @@ const MandatoryService = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {mandatoryServices.map((service) => (
+                  {clinicalServices.map((service) => (
                     <tr key={service.id} className="border-b hover:bg-gray-50">
                       <td className="p-3 font-medium text-gray-900">{service.service_name}</td>
                       <td className="p-3">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          service.status === 'Active' 
-                            ? 'bg-green-100 text-green-800' 
+                          service.status === 'Active'
+                            ? 'bg-green-100 text-green-800'
                             : service.status === 'Completed'
                             ? 'bg-blue-100 text-blue-800'
                             : 'bg-gray-100 text-gray-800'
@@ -243,16 +282,16 @@ const MandatoryService = () => {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-gray-500">
-              <ShieldCheck className="h-12 w-12 mb-4 text-gray-300" />
-              <p className="text-lg font-medium mb-2">No mandatory services found</p>
+              <HeartHandshake className="h-12 w-12 mb-4 text-gray-300" />
+              <p className="text-lg font-medium mb-2">No clinical services found</p>
               <p className="text-sm text-center">
-                Create your first mandatory service for {hospitalConfig.fullName}
+                Create your first clinical service for {hospitalConfig.fullName}
               </p>
-              <button 
+              <button
                 onClick={handleCreateService}
                 className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
-                Create Mandatory Service
+                Create Clinical Service
               </button>
             </div>
           )}
@@ -492,9 +531,8 @@ const MandatoryService = () => {
           </div>
         </div>
       )}
-
     </div>
   );
 };
 
-export default MandatoryService;
+export default ClinicalServices;
