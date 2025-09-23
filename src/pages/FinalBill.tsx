@@ -1365,6 +1365,105 @@ const FinalBill = () => {
     description: ''
   });
   const [isGeneratingSurgeryNotes, setIsGeneratingSurgeryNotes] = useState(false);
+  const [isSavingOtNotes, setIsSavingOtNotes] = useState(false);
+
+  // Function to fetch saved OT Notes from database
+  const fetchSavedOtNotes = async () => {
+    if (!visitId) return;
+
+    try {
+      console.log('Fetching saved OT Notes for visit:', visitId);
+
+      // First get the visit UUID
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.log('No visit found for fetching OT Notes');
+        return;
+      }
+
+      // Fetch OT Notes for this visit
+      const { data: otNotesRecord, error: otNotesError } = await supabase
+        .from('ot_notes')
+        .select('*')
+        .eq('visit_id', visitData.id)
+        .single();
+
+      if (otNotesError) {
+        if (otNotesError.code !== 'PGRST116') { // Not a "no rows" error
+          console.error('Error fetching OT Notes:', otNotesError);
+        }
+        return;
+      }
+
+      if (otNotesRecord) {
+        console.log('Found saved OT Notes:', otNotesRecord);
+
+        // Format the date for datetime-local input
+        let formattedDate = '';
+        if (otNotesRecord.date) {
+          // Convert timestamp to datetime-local format (YYYY-MM-DDTHH:mm)
+          const dateObj = new Date(otNotesRecord.date);
+          const year = dateObj.getFullYear();
+          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+          const day = String(dateObj.getDate()).padStart(2, '0');
+          const hours = String(dateObj.getHours()).padStart(2, '0');
+          const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+          formattedDate = `${year}-${month}-${day}T${hours}:${minutes}`;
+          console.log('Formatted date for input:', formattedDate);
+        }
+
+        // Update the form with saved data
+        setOtNotesData({
+          date: formattedDate,
+          procedure: otNotesRecord.procedure_performed || '',
+          surgeon: otNotesRecord.surgeon || '',
+          anaesthetist: otNotesRecord.anaesthetist || '',
+          anaesthesia: otNotesRecord.anaesthesia || '',
+          implant: otNotesRecord.implant || '',
+          description: otNotesRecord.description || ''
+        });
+
+        console.log('OT Notes form populated with saved data');
+      }
+    } catch (error) {
+      console.error('Error in fetchSavedOtNotes:', error);
+    }
+  };
+
+  // Load saved OT Notes when page loads or visitId changes
+  useEffect(() => {
+    if (visitId) {
+      fetchSavedOtNotes();
+    }
+  }, [visitId]);
+
+  // Auto-populate OT Notes procedure from surgery data
+  useEffect(() => {
+    if (patientInfo && patientInfo.surgeries && patientInfo.surgeries.length > 0) {
+      const firstSurgery = patientInfo.surgeries[0];
+      const surgeryName = firstSurgery.cghs_surgery?.name || '';
+      const surgeryCode = firstSurgery.cghs_surgery?.code || '';
+
+      setOtNotesData(prev => ({
+        ...prev,
+        procedure: surgeryName ? `${surgeryName} (${surgeryCode})` : prev.procedure
+      }));
+    } else if (savedSurgeries && savedSurgeries.length > 0) {
+      const firstSurgery = savedSurgeries[0];
+      const surgeryName = firstSurgery.name || '';
+      const surgeryCode = firstSurgery.code || '';
+
+      setOtNotesData(prev => ({
+        ...prev,
+        procedure: surgeryName ? `${surgeryName} (${surgeryCode})` : prev.procedure
+      }));
+    }
+  }, [patientInfo, savedSurgeries]);
 
   // State for treatment log data (simplified - no date functionality)
   const [treatmentLogData, setTreatmentLogData] = useState<{ [key: number]: { date: string, accommodation: string, medication: string, labAndRadiology: string } }>({});
@@ -3480,6 +3579,164 @@ INSTRUCTIONS:
       setOtNotesData({ ...otNotesData, description: fallbackNotes });
     } finally {
       setIsGeneratingSurgeryNotes(false);
+    }
+  };
+
+  // Function to save OT Notes to new simplified ot_notes table
+  const handleSaveOtNotes = async () => {
+    console.log("Starting OT Notes save...");
+    console.log("Current visitId:", visitId);
+    console.log("OT Notes Data:", otNotesData);
+
+    if (!visitId) {
+      toast.error("Visit ID not available. Please ensure you're on a valid visit page.");
+      console.error("No visitId found");
+      return;
+    }
+
+    if (!otNotesData.procedure || !otNotesData.surgeon || !otNotesData.date) {
+      toast.error("Please fill in required fields: Procedure, Surgeon, and Date");
+      console.error("Missing required fields:", {
+        procedure: otNotesData.procedure,
+        surgeon: otNotesData.surgeon,
+        date: otNotesData.date
+      });
+      return;
+    }
+
+    setIsSavingOtNotes(true);
+    toast.info("Saving OT Notes...");
+
+    try {
+      // First get the visit and patient information
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id, patient_id, patients(name)')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.error('Error fetching visit:', visitError);
+        toast.error("Failed to get visit information. Please check console for details.");
+        setIsSavingOtNotes(false);
+        return;
+      }
+
+      console.log("Visit data found:", visitData);
+
+      // Extract patient name from the joined data
+      const patientName = visitData.patients?.name || patientData.name || 'Unknown';
+
+      // Get surgery details from patientInfo if available
+      let surgeryDetails = {
+        surgery_name: '',
+        surgery_code: '',
+        surgery_rate: 0,
+        surgery_status: 'Sanctioned'
+      };
+
+      // First check patientInfo.surgeries (contains cghs_surgery object)
+      if (patientInfo && patientInfo.surgeries && patientInfo.surgeries.length > 0) {
+        const surgery = patientInfo.surgeries[0];
+        surgeryDetails = {
+          surgery_name: surgery.cghs_surgery?.name || surgery.surgery_name || otNotesData.procedure,
+          surgery_code: surgery.cghs_surgery?.code || surgery.surgery_code || '',
+          surgery_rate: parseFloat(surgery.cghs_surgery?.NABH_NABL_Rate) || surgery.surgery_rate || 0,
+          surgery_status: surgery.sanction_status || surgery.surgery_status || 'Sanctioned'
+        };
+      }
+      // If no patientInfo surgeries, check savedSurgeries
+      else if (savedSurgeries && savedSurgeries.length > 0) {
+        const surgery = savedSurgeries[0];
+        surgeryDetails = {
+          surgery_name: surgery.name || otNotesData.procedure,
+          surgery_code: surgery.code || '',
+          surgery_rate: parseFloat(surgery.nabh_nabl_rate) || parseFloat(surgery.NABH_NABL_Rate) || 0,
+          surgery_status: surgery.sanction_status || 'Sanctioned'
+        };
+      }
+
+      console.log("Surgery details extracted:", surgeryDetails);
+
+      // Check if OT notes already exist for this visit
+      const { data: existingNotes, error: checkError } = await supabase
+        .from('ot_notes')
+        .select('id')
+        .eq('visit_id', visitData.id)
+        .single();
+
+      console.log("Existing notes check:", { existingNotes, checkError });
+
+      // Prepare the data for saving
+      const otNotesDataToSave = {
+        visit_id: visitData.id,
+        patient_id: visitData.patient_id,
+        patient_name: patientName,
+
+        // Surgery details
+        surgery_name: surgeryDetails.surgery_name,
+        surgery_code: surgeryDetails.surgery_code,
+        surgery_rate: surgeryDetails.surgery_rate,
+        surgery_status: surgeryDetails.surgery_status,
+
+        // Main form fields
+        date: otNotesData.date,
+        procedure_performed: otNotesData.procedure,
+        surgeon: otNotesData.surgeon,
+        anaesthetist: otNotesData.anaesthetist,
+        anaesthesia: otNotesData.anaesthesia,
+        implant: otNotesData.implant,
+
+        // Description
+        description: otNotesData.description,
+
+        // Meta fields
+        ai_generated: false,
+        is_saved: true,
+        saved_at: new Date().toISOString()
+      };
+
+      console.log("Data to save to ot_notes table:", otNotesDataToSave);
+
+      let saveResult;
+
+      if (existingNotes) {
+        // Update existing record
+        console.log("Updating existing OT notes record with ID:", existingNotes.id);
+
+        saveResult = await supabase
+          .from('ot_notes')
+          .update(otNotesDataToSave)
+          .eq('id', existingNotes.id);
+      } else {
+        // Insert new record
+        console.log("Inserting new OT notes record...");
+
+        saveResult = await supabase
+          .from('ot_notes')
+          .insert(otNotesDataToSave);
+      }
+
+      if (saveResult.error) {
+        console.error('Error saving OT notes:', saveResult.error);
+        toast.error(`Failed to save OT notes: ${saveResult.error.message}`);
+        setIsSavingOtNotes(false);
+        return;
+      }
+
+      console.log("OT Notes saved successfully!", saveResult);
+      toast.success("✅ OT Notes saved successfully to database!");
+
+      // Keep the form populated with saved data
+      // Don't clear the form so user can see their saved content
+      // If you want to reload from database to confirm save:
+      await fetchSavedOtNotes();
+
+    } catch (error) {
+      console.error('Unexpected error saving OT notes:', error);
+      toast.error("An unexpected error occurred. Please check console for details.");
+    } finally {
+      setIsSavingOtNotes(false);
     }
   };
 
@@ -6679,6 +6936,10 @@ INSTRUCTIONS:
 
       console.log('Deleting surgery with ID:', surgeryId);
 
+      // Find the surgery that's being deleted to check if it's in OT Notes
+      const surgeryBeingDeleted = savedSurgeries?.find(s => s.id === surgeryId) ||
+                                   patientInfo?.surgeries?.find((s: any) => s.surgery_id === surgeryId);
+
       // Find the surgery record in visit_surgeries table
       const { error: deleteError } = await supabase
         .from('visit_surgeries' as any)
@@ -6697,6 +6958,46 @@ INSTRUCTIONS:
       // Refresh the saved surgeries list
       if (visitId) {
         await fetchSavedSurgeriesFromVisit(visitId);
+      }
+
+      // Refresh patient info to update OT Notes Surgery Details section
+      await fetchPatientInfo();
+
+      // Clear OT Notes procedure field if the deleted surgery was populated there
+      if (surgeryBeingDeleted) {
+        const deletedSurgeryName = surgeryBeingDeleted.name ||
+                                   surgeryBeingDeleted.cghs_surgery?.name || '';
+        const deletedSurgeryCode = surgeryBeingDeleted.code ||
+                                   surgeryBeingDeleted.cghs_surgery?.code || '';
+
+        // Check if the current procedure contains the deleted surgery
+        const expectedProcedure = deletedSurgeryName ?
+          `${deletedSurgeryName} (${deletedSurgeryCode})` : '';
+
+        if (otNotesData.procedure === expectedProcedure ||
+            otNotesData.procedure.includes(deletedSurgeryName)) {
+          // Clear the procedure field or set to the next available surgery
+          const remainingSurgeries = patientInfo?.surgeries?.filter(
+            (s: any) => s.surgery_id !== surgeryId
+          ) || [];
+
+          if (remainingSurgeries.length > 0) {
+            // Set to the first remaining surgery
+            const nextSurgery = remainingSurgeries[0];
+            const nextSurgeryName = nextSurgery.cghs_surgery?.name || '';
+            const nextSurgeryCode = nextSurgery.cghs_surgery?.code || '';
+            setOtNotesData(prev => ({
+              ...prev,
+              procedure: nextSurgeryName ? `${nextSurgeryName} (${nextSurgeryCode})` : ''
+            }));
+          } else {
+            // No surgeries left, clear the procedure field
+            setOtNotesData(prev => ({
+              ...prev,
+              procedure: ''
+            }));
+          }
+        }
       }
     } catch (error) {
       console.error('Error in deleteSurgery:', error);
@@ -7606,8 +7907,36 @@ Format the response as JSON:
         return;
       }
 
-      // Prepare data for insertion
-      const surgeriesToSave = selectedSurgeries.map((surgery) => ({
+      // First, check which surgeries already exist for this visit
+      const { data: existingSurgeries, error: checkError } = await supabase
+        .from('visit_surgeries' as any)
+        .select('surgery_id')
+        .eq('visit_id', visitData.id);
+
+      if (checkError) {
+        console.error('Error checking existing surgeries:', checkError);
+        toast.error('Failed to check existing surgeries');
+        return;
+      }
+
+      const existingSurgeryIds = new Set(existingSurgeries?.map(s => s.surgery_id) || []);
+
+      // Filter out surgeries that already exist
+      const newSurgeries = selectedSurgeries.filter(surgery => !existingSurgeryIds.has(surgery.id));
+      const duplicateSurgeries = selectedSurgeries.filter(surgery => existingSurgeryIds.has(surgery.id));
+
+      if (duplicateSurgeries.length > 0) {
+        const duplicateNames = duplicateSurgeries.map(s => s.name).join(', ');
+        toast.warning(`The following surgeries are already added: ${duplicateNames}`);
+      }
+
+      if (newSurgeries.length === 0) {
+        toast.info('All selected surgeries are already added to this visit');
+        return;
+      }
+
+      // Prepare data for insertion (only new surgeries)
+      const surgeriesToSave = newSurgeries.map((surgery) => ({
         visit_id: visitData.id,
         surgery_id: surgery.id,
         is_primary: false, // Don't automatically set as primary - let user choose
@@ -7616,12 +7945,11 @@ Format the response as JSON:
         notes: null
       }));
 
-      console.log('Surgeries to save:', surgeriesToSave);
+      console.log('New surgeries to save:', surgeriesToSave);
 
       // Insert directly using Supabase client
       try {
-        // Don't delete existing surgeries - just add new ones
-        // Insert new surgeries
+        // Insert only new surgeries
         const { data, error: insertError } = await supabase
           .from('visit_surgeries' as any)
           .insert(surgeriesToSave)
@@ -7631,16 +7959,16 @@ Format the response as JSON:
           console.error('Error inserting surgeries:', insertError);
           toast.error(`Failed to save surgeries: ${insertError.message}`);
         } else {
-          toast.success(`${selectedSurgeries.length} surgeries saved to visit ${visitId} successfully!`);
+          toast.success(`${newSurgeries.length} new ${newSurgeries.length === 1 ? 'surgery' : 'surgeries'} saved to visit successfully!`);
           console.log('Saved surgeries data:', data);
 
           console.log('About to clear selected surgeries...');
           // Clear selected surgeries after successful save
           setSelectedSurgeries([]);
 
-          // Generate clinical recommendations for each saved surgery
-          console.log('Generating clinical recommendations for surgeries...');
-          for (const surgery of selectedSurgeries) {
+          // Generate clinical recommendations for each newly saved surgery
+          console.log('Generating clinical recommendations for new surgeries...');
+          for (const surgery of newSurgeries) {
             try {
               const diagnosisText = getDiagnosisText();
               const recommendations = await generateClinicalRecommendations(surgery.name, diagnosisText);
@@ -10690,7 +11018,17 @@ Dr. Murali B K
                             </div>
                           </div>
 
-
+                          {/* Procedure Field */}
+                          <div className="mb-3">
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Procedure Performed</label>
+                            <input
+                              type="text"
+                              className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              placeholder="Enter procedure name"
+                              value={otNotesData.procedure}
+                              onChange={(e) => setOtNotesData({ ...otNotesData, procedure: e.target.value })}
+                            />
+                          </div>
 
                           {/* Surgeon Field */}
                           <div className="mb-3">
@@ -10723,13 +11061,24 @@ Dr. Murali B K
                           {/* Anaesthesia Field */}
                           <div className="mb-3">
                             <label className="block text-xs font-medium text-gray-600 mb-1">Anaesthesia</label>
-                            <input
-                              type="text"
+                            <select
                               className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                              placeholder="Type of anaesthesia"
                               value={otNotesData.anaesthesia}
                               onChange={(e) => setOtNotesData({ ...otNotesData, anaesthesia: e.target.value })}
-                            />
+                            >
+                              <option value="">Select Anaesthesia Type</option>
+                              <option value="General Anesthesia">General Anesthesia</option>
+                              <option value="Regional Anesthesia">Regional Anesthesia</option>
+                              <option value="Local Anesthesia">Local Anesthesia</option>
+                              <option value="Spinal Anesthesia">Spinal Anesthesia</option>
+                              <option value="Epidural Anesthesia">Epidural Anesthesia</option>
+                              <option value="Combined Spinal-Epidural">Combined Spinal-Epidural</option>
+                              <option value="Sedation/MAC">Sedation/MAC (Monitored Anesthesia Care)</option>
+                              <option value="Nerve Block">Nerve Block</option>
+                              <option value="Topical Anesthesia">Topical Anesthesia</option>
+                              <option value="IV Sedation">IV Sedation</option>
+                              <option value="Conscious Sedation">Conscious Sedation</option>
+                            </select>
                           </div>
 
                           {/* Implant Field */}
@@ -10780,8 +11129,31 @@ Dr. Murali B K
                               }}
                             />
 
-                            {/* Print OT Notes Button */}
-                            <div className="mt-2 flex justify-end">
+                            {/* Save, Refresh and Print OT Notes Buttons */}
+                            <div className="mt-2 flex justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  fetchSavedOtNotes();
+                                  toast.info('Refreshing OT Notes...');
+                                }}
+                                className="px-3 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700 flex items-center gap-1"
+                                title="Reload saved OT Notes from database"
+                              >
+                                🔄 Refresh
+                              </button>
+                              <button
+                                onClick={handleSaveOtNotes}
+                                disabled={isSavingOtNotes}
+                                className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {isSavingOtNotes ? (
+                                  <>
+                                    <span className="inline-block animate-spin">⏳</span> Saving...
+                                  </>
+                                ) : (
+                                  <>💾 Save OT Notes</>
+                                )}
+                              </button>
                               <button
                                 onClick={() => {
                                   const printWindow = window.open('', '_blank');
@@ -13127,14 +13499,6 @@ Dr. Murali B K
                           className="hover:bg-green-50 hover:border-green-300"
                         >
                           📁 Upload Image
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleAddOTNotes}
-                          className="hover:bg-yellow-50 hover:border-yellow-300"
-                        >
-                          ✏️ OT Notes
                         </Button>
                         {/* <Button
                           variant="outline"
