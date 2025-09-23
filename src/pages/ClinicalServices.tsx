@@ -31,51 +31,11 @@ const ClinicalServices = () => {
   const { data: clinicalServices, isLoading, error } = useQuery({
     queryKey: ['clinical-services', hospitalConfig.name],
     queryFn: async () => {
-      console.log('=== CLINICAL SERVICES DEBUG ===');
-      console.log('1. Hospital Config Name:', hospitalConfig.name);
-      console.log('2. Lowercase version:', hospitalConfig.name.toLowerCase());
-
-      // First, test if we can get ANY clinical services (no filter)
-      console.log('3. Testing query without filter...');
-      const { data: allData, error: allError } = await supabase
-        .from('clinical_services')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      console.log('4. All clinical services (no filter):', {
-        count: allData?.length || 0,
-        error: allError,
-        hospitalNames: allData?.map(item => `"${item.hospital_name}"`)
-      });
-
-      // Now try with exact hospital filter
-      console.log('5. Testing query WITH hospital filter...');
       const { data, error } = await supabase
         .from('clinical_services')
         .select('*')
-        .eq('hospital_name', hospitalConfig.name.toLowerCase())
+        .eq('hospital_name', hospitalConfig.name)
         .order('created_at', { ascending: false });
-
-      console.log('6. Filtered query result:', {
-        count: data?.length || 0,
-        error: error,
-        data: data
-      });
-
-      // Test a specific hospital name to see if it works
-      console.log('7. Testing with hardcoded "ayushman"...');
-      const { data: testData, error: testError } = await supabase
-        .from('clinical_services')
-        .select('*')
-        .eq('hospital_name', 'ayushman')
-        .order('created_at', { ascending: false });
-
-      console.log('8. Hardcoded "ayushman" result:', {
-        count: testData?.length || 0,
-        error: testError
-      });
-
-      console.log('=== END DEBUG ===');
 
       if (error) {
         throw error;

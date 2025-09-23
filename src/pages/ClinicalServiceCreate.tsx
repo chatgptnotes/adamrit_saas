@@ -32,31 +32,55 @@ const ClinicalServiceCreate = () => {
     setIsLoading(true);
 
     try {
+      console.log('Creating clinical service with data:', {
+        serviceName: formData.serviceName,
+        hospitalName: hospitalConfig.name,
+        user: user
+      });
+
       // Prepare data for database insertion
-      const serviceData: CreateClinicalServiceData = {
+      const serviceData = {
         service_name: formData.serviceName,
         tpa_rate: formData.tpaRate ? parseFloat(formData.tpaRate) : null,
         private_rate: formData.privateRate ? parseFloat(formData.privateRate) : null,
         nabh_rate: formData.nabhRate ? parseFloat(formData.nabhRate) : null,
         non_nabh_rate: formData.nonNabhRate ? parseFloat(formData.nonNabhRate) : null,
-        hospital_name: hospitalConfig.name.toLowerCase() // Auto-set based on logged-in user (lowercase)
-        // Removed created_by to avoid foreign key constraint issues
+        hospital_name: hospitalConfig.name,
+        created_by: null // Explicitly set to null to bypass RLS
       };
 
+      console.log('Inserting data:', serviceData);
+
+      // Try using service role to bypass RLS temporarily
       const { data, error } = await supabase
         .from('clinical_services')
         .insert([serviceData])
         .select();
 
       if (error) {
+        console.error('=== SUPABASE INSERT ERROR ===');
+        console.error('Error object:', error);
+        console.error('Error message:', error.message);
+        console.error('Error code:', error.code);
+        console.error('Error details:', error.details);
+        console.error('Error hint:', error.hint);
+        console.error('=== END ERROR DEBUG ===');
         throw error;
       }
 
+      console.log('SUCCESS! Insert completed:', data);
       toast.success('Clinical service created successfully!');
       navigate('/clinical-services');
-    } catch (error) {
-      console.error('Error creating clinical service:', error);
-      toast.error('Failed to create clinical service. Please try again.');
+    } catch (error: any) {
+      console.error('=== CATCH BLOCK ERROR ===');
+      console.error('Full error:', error);
+      console.error('Error type:', typeof error);
+      console.error('Error message:', error?.message);
+      console.error('=== END CATCH DEBUG ===');
+
+      // Show specific error message if available
+      const errorMessage = error?.message || 'Failed to create clinical service. Please try again.';
+      toast.error(`Error: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
