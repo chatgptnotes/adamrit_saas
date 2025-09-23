@@ -32,7 +32,8 @@ const TodaysOpd = () => {
             age,
             date_of_birth,
             patients_id,
-            insurance_person_no
+            insurance_person_no,
+            corporate
           )
         `)
         .eq('patient_type', 'OPD')

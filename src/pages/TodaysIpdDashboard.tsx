@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDebounce } from 'use-debounce';
 import { Badge } from '@/components/ui/badge';
-import { Eye, FileText, Search, Calendar, DollarSign, Trash2, FolderOpen, FolderX, CheckCircle, XCircle, Clock, MinusCircle, RotateCcw, Printer, Filter } from 'lucide-react';
+import { Eye, FileText, Search, Calendar, DollarSign, Trash2, FolderOpen, FolderX, CheckCircle, XCircle, Clock, MinusCircle, RotateCcw, Printer, Filter, MessageSquare } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -54,6 +54,11 @@ const TodaysIpdDashboard = () => {
   const [bunchNumberInputs, setBunchNumberInputs] = useState({});
   const [bunchFilter, setBunchFilter] = useState('');
   const [referralLetterStatus, setReferralLetterStatus] = useState<Record<string, boolean>>({});
+  const [commentDialogs, setCommentDialogs] = useState<Record<string, boolean>>({});
+  const [commentTexts, setCommentTexts] = useState<Record<string, string>>({});
+  const [originalComments, setOriginalComments] = useState<Record<string, string>>({});
+  const [savingComments, setSavingComments] = useState<Record<string, boolean>>({});
+  const [savedComments, setSavedComments] = useState<Record<string, boolean>>({});
   const navigate = useNavigate();
 
   const { diagnoses, updatePatient } = usePatients();
@@ -1138,7 +1143,8 @@ const TodaysIpdDashboard = () => {
             id,
             name,
             patients_id,
-            hospital_name
+            hospital_name,
+            corporate
           )
         `)
         .eq('patient_type', 'IPD')
@@ -1374,6 +1380,93 @@ const TodaysIpdDashboard = () => {
     setShowEditPatientDialog(false);
     setSelectedPatientForEdit(null);
   };
+
+  // Comment handlers
+  const handleCommentClick = (visit: any) => {
+    const existingComment = visit.comments || '';
+
+    // Load existing comment if any
+    setCommentTexts(prev => ({
+      ...prev,
+      [visit.visit_id]: existingComment
+    }));
+
+    // Store original comment to track changes
+    setOriginalComments(prev => ({
+      ...prev,
+      [visit.visit_id]: existingComment
+    }));
+
+    // Open dialog for this visit
+    setCommentDialogs(prev => ({
+      ...prev,
+      [visit.visit_id]: true
+    }));
+  };
+
+  const handleCommentChange = (visitId: string, text: string) => {
+    setCommentTexts(prev => ({
+      ...prev,
+      [visitId]: text
+    }));
+  };
+
+  // Debounced function to auto-save comments
+  const [debouncedCommentTexts] = useDebounce(commentTexts, 1500); // 1.5 seconds delay
+
+  // Auto-save comments when debounced value changes
+  useEffect(() => {
+    Object.entries(debouncedCommentTexts).forEach(async ([visitId, text]) => {
+      // Only save if dialog is open and text has actually changed from original
+      const originalText = originalComments[visitId] || '';
+      const hasChanged = text !== originalText;
+
+      if (commentDialogs[visitId] && text !== undefined && hasChanged) {
+        console.log('🔄 Attempting to save comment for visit:', visitId, 'Text:', text, 'Original:', originalText);
+        setSavingComments(prev => ({ ...prev, [visitId]: true }));
+
+        try {
+          const { error, data } = await supabase
+            .from('visits')
+            .update({ comments: text })
+            .eq('visit_id', visitId)
+            .select();
+
+          if (error) {
+            console.error('❌ Error saving comment:', error);
+            console.error('Error details:', {
+              visitId,
+              text,
+              errorMessage: error.message,
+              errorCode: error.code
+            });
+            alert(`Failed to save comment: ${error.message}`);
+            setSavingComments(prev => ({ ...prev, [visitId]: false }));
+          } else {
+            console.log('✅ Comment saved successfully for visit:', visitId, 'Response:', data);
+            // Update the original comment after successful save
+            setOriginalComments(prev => ({ ...prev, [visitId]: text }));
+            // Show saved indicator
+            setSavingComments(prev => ({ ...prev, [visitId]: false }));
+            setSavedComments(prev => ({ ...prev, [visitId]: true }));
+            // Hide saved indicator after 2 seconds
+            setTimeout(() => {
+              setSavedComments(prev => ({ ...prev, [visitId]: false }));
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('❌ Exception while saving comment:', error);
+          console.error('Exception details:', {
+            visitId,
+            text,
+            error: error.message || error
+          });
+          alert(`Failed to save comment: ${error.message || error}`);
+          setSavingComments(prev => ({ ...prev, [visitId]: false }));
+        }
+      }
+    });
+  }, [debouncedCommentTexts, commentDialogs, originalComments]);
 
   const handleSrNoSubmit = async (visitId: string, value: string) => {
     try {
@@ -1871,6 +1964,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Visit Type</TableHead>
                 <TableHead className="font-semibold">Doctor</TableHead>
                 <TableHead className="font-semibold">Diagnosis</TableHead>
+                <TableHead className="font-semibold">Corporate</TableHead>
                 <TableHead className="font-semibold">Admission Date</TableHead>
                 <TableHead className="font-semibold">Days Admitted</TableHead>
                 <TableHead className="font-semibold">Discharge Date</TableHead>
@@ -1905,6 +1999,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead>
                   <ColumnFilter options={additionalApprovalsOptions} selected={additionalApprovalsFilter} onChange={setAdditionalApprovalsFilter} />
                 </TableHead>
+                <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
@@ -2082,6 +2177,9 @@ const TodaysIpdDashboard = () => {
                     General
                   </TableCell>
                   <TableCell>
+                    {visit.patients?.corporate || '—'}
+                  </TableCell>
+                  <TableCell>
                     {visit.admission_date ? format(new Date(visit.admission_date), 'MMM dd, yyyy HH:mm') : '—'}
                   </TableCell>
                   <TableCell>
@@ -2110,6 +2208,15 @@ const TodaysIpdDashboard = () => {
                          <div className="absolute inset-0 rounded-full bg-blue-500/20 animate-ping"></div>
                          <div className="absolute inset-0 rounded-full bg-blue-500/10 animate-ping animation-delay-75"></div>
                          <FileText className="h-5 w-5 text-blue-600 relative z-10 animate-bounce" />
+                       </Button>
+                       <Button
+                         variant="ghost"
+                         size="sm"
+                         className="h-8 w-8 p-0 hover:bg-green-50"
+                         onClick={() => handleCommentClick(visit)}
+                         title="View/Add Comments"
+                       >
+                         <MessageSquare className="h-4 w-4 text-green-600" />
                        </Button>
                        {/* Show Revoke Discharge button only for discharged patients */}
                        {visit.discharge_date && (
@@ -2183,6 +2290,50 @@ const TodaysIpdDashboard = () => {
             onSave={handleSavePatient}
           />
         )}
+
+        {/* Comment Dialogs */}
+        {filteredVisits.map((visit) => (
+          <Dialog
+            key={`comment-dialog-${visit.visit_id}`}
+            open={commentDialogs[visit.visit_id] || false}
+            onOpenChange={(open) => {
+              setCommentDialogs(prev => ({
+                ...prev,
+                [visit.visit_id]: open
+              }));
+            }}
+          >
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Comments for {visit.patients?.name || 'Patient'}</DialogTitle>
+                <DialogDescription className="text-xs">
+                  Visit ID: {visit.visit_id} | Auto-saves as you type
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="relative">
+                <textarea
+                  className="w-full min-h-[150px] p-3 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 resize-vertical"
+                  placeholder="Add your comments here..."
+                  value={commentTexts[visit.visit_id] || ''}
+                  onChange={(e) => handleCommentChange(visit.visit_id, e.target.value)}
+                />
+
+                {/* Save indicators */}
+                {savingComments[visit.visit_id] && (
+                  <div className="absolute bottom-2 right-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                    Saving...
+                  </div>
+                )}
+                {savedComments[visit.visit_id] && !savingComments[visit.visit_id] && (
+                  <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
+                    ✓ Saved
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+        ))}
 
         {/* Print Column Picker Modal */}
         <ColumnPickerModal

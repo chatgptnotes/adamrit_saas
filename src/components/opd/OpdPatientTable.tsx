@@ -1,11 +1,13 @@
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useState, useEffect } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Check, Eye, FileText, UserCheck, Trash2, DollarSign } from 'lucide-react';
+import { X, Check, Eye, FileText, UserCheck, Trash2, DollarSign, MessageSquare } from 'lucide-react';
 import { VisitRegistrationForm } from '@/components/VisitRegistrationForm';
+import { supabase } from '@/integrations/supabase/client';
+import { useDebounce } from 'use-debounce';
 
 interface Patient {
   id: string;
@@ -18,6 +20,7 @@ interface Patient {
     age?: number;
     date_of_birth?: string;
     patients_id?: string;
+    corporate?: string;
   };
   visit_type?: string;
   appointment_with?: string;
@@ -25,6 +28,7 @@ interface Patient {
   admit_to_hospital?: boolean;
   payment_received?: boolean;
   status?: string;
+  comments?: string;
 }
 
 interface OpdPatientTableProps {
@@ -38,6 +42,94 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
   const [hiddenPatients, setHiddenPatients] = useState<Set<string>>(new Set());
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedPatientForView, setSelectedPatientForView] = useState<Patient | null>(null);
+
+  // Comment state management
+  const [commentDialogs, setCommentDialogs] = useState<Record<string, boolean>>({});
+  const [commentTexts, setCommentTexts] = useState<Record<string, string>>({});
+  const [originalComments, setOriginalComments] = useState<Record<string, string>>({});
+  const [savingComments, setSavingComments] = useState<Record<string, boolean>>({});
+  const [savedComments, setSavedComments] = useState<Record<string, boolean>>({});
+
+  // Comment handlers
+  const handleCommentClick = (patient: Patient) => {
+    const existingComment = patient.comments || '';
+
+    // Load existing comment if any
+    setCommentTexts(prev => ({
+      ...prev,
+      [patient.visit_id!]: existingComment
+    }));
+
+    // Store original comment to track changes
+    setOriginalComments(prev => ({
+      ...prev,
+      [patient.visit_id!]: existingComment
+    }));
+
+    // Open dialog for this visit
+    setCommentDialogs(prev => ({
+      ...prev,
+      [patient.visit_id!]: true
+    }));
+  };
+
+  const handleCommentChange = (visitId: string, text: string) => {
+    setCommentTexts(prev => ({
+      ...prev,
+      [visitId]: text
+    }));
+  };
+
+  // Debounced function to auto-save comments
+  const [debouncedCommentTexts] = useDebounce(commentTexts, 1500); // 1.5 seconds delay
+
+  // Auto-save comments when debounced value changes
+  useEffect(() => {
+    Object.entries(debouncedCommentTexts).forEach(async ([visitId, text]) => {
+      // Only save if dialog is open and text has actually changed from original
+      const originalText = originalComments[visitId] || '';
+      const hasChanged = text !== originalText;
+
+      if (commentDialogs[visitId] && text !== undefined && hasChanged) {
+        console.log('🔄 Attempting to save comment for visit:', visitId, 'Text:', text, 'Original:', originalText);
+        setSavingComments(prev => ({ ...prev, [visitId]: true }));
+
+        try {
+          const { error, data } = await supabase
+            .from('visits')
+            .update({ comments: text })
+            .eq('visit_id', visitId)
+            .select();
+
+          if (error) {
+            console.error('❌ Error saving comment:', error);
+            console.error('Error details:', {
+              visitId,
+              text,
+              errorMessage: error.message,
+              errorCode: error.code
+            });
+            alert(`Failed to save comment: ${error.message}`);
+            setSavingComments(prev => ({ ...prev, [visitId]: false }));
+          } else {
+            console.log('✅ Comment saved successfully for visit:', visitId, 'Response:', data);
+            // Update the original comment after successful save
+            setOriginalComments(prev => ({ ...prev, [visitId]: text }));
+            // Show saved indicator
+            setSavingComments(prev => ({ ...prev, [visitId]: false }));
+            setSavedComments(prev => ({ ...prev, [visitId]: true }));
+            // Hide saved indicator after 2 seconds
+            setTimeout(() => {
+              setSavedComments(prev => ({ ...prev, [visitId]: false }));
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('❌ Exception while saving comment:', error);
+          setSavingComments(prev => ({ ...prev, [visitId]: false }));
+        }
+      }
+    });
+  }, [debouncedCommentTexts, commentDialogs, originalComments]);
 
   const calculateAge = (dateOfBirth?: string) => {
     if (!dateOfBirth) {
@@ -187,6 +279,7 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
             <TableHead className="font-medium">Visit Type</TableHead>
             <TableHead className="font-medium">Doctor</TableHead>
             <TableHead className="font-medium">Diagnosis</TableHead>
+            <TableHead className="font-medium">Corporate</TableHead>
             <TableHead className="text-center font-medium">Payment Received</TableHead>
             <TableHead className="text-center font-medium">Admit To Hospital</TableHead>
             <TableHead className="text-center font-medium">Actions</TableHead>
@@ -242,6 +335,9 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
               <TableCell>
                 {patient.diagnosis || 'General'}
               </TableCell>
+              <TableCell>
+                {patient.patients?.corporate || '-'}
+              </TableCell>
               <TableCell className="text-center">
                 {renderPaymentStatus(patient)}
               </TableCell>
@@ -275,6 +371,15 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
                     title="Edit Patient"
                   >
                     <FileText className="h-4 w-4 text-blue-600" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    onClick={() => handleCommentClick(patient)}
+                    title="View/Add Comments"
+                  >
+                    <MessageSquare className="h-4 w-4 text-green-600" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -421,6 +526,50 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
           editMode={selectedPatientForVisit.isEditMode || false}  // Set edit mode based on action
         />
       )}
+
+      {/* Comment Dialogs */}
+      {patients.map((patient) => (
+        <Dialog
+          key={patient.visit_id}
+          open={commentDialogs[patient.visit_id || ''] || false}
+          onOpenChange={(open) => {
+            setCommentDialogs(prev => ({
+              ...prev,
+              [patient.visit_id!]: open
+            }));
+          }}
+        >
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Comments for {patient.patients?.name || 'Patient'}</DialogTitle>
+              <DialogDescription className="text-xs">
+                Visit ID: {patient.visit_id} | Auto-saves as you type
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="relative">
+              <textarea
+                className="w-full min-h-[150px] p-3 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 resize-vertical"
+                placeholder="Add your comments here..."
+                value={commentTexts[patient.visit_id || ''] || ''}
+                onChange={(e) => handleCommentChange(patient.visit_id || '', e.target.value)}
+              />
+
+              {/* Save indicators */}
+              {savingComments[patient.visit_id || ''] && (
+                <div className="absolute bottom-2 right-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                  Saving...
+                </div>
+              )}
+              {savedComments[patient.visit_id || ''] && !savingComments[patient.visit_id || ''] && (
+                <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
+                  ✓ Saved
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      ))}
     </div>
   );
 };
