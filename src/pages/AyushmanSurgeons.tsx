@@ -157,7 +157,7 @@ const AyushmanSurgeons = () => {
       surgeonData.tpa_rate = parseFloat(formData.tpa_rate);
     }
     if (formData.non_nabh_rate && formData.non_nabh_rate.trim() !== '') {
-      surgeonData['non-nabh_rate'] = parseFloat(formData.non_nabh_rate);
+      surgeonData.non_nabh_rate = parseFloat(formData.non_nabh_rate);
     }
     if (formData.nabh_rate && formData.nabh_rate.trim() !== '') {
       surgeonData.nabh_rate = parseFloat(formData.nabh_rate);
@@ -183,7 +183,7 @@ const AyushmanSurgeons = () => {
         department: formData.department || undefined,
         contact_info: formData.contact_info || undefined,
         tpa_rate: formData.tpa_rate && formData.tpa_rate.trim() !== '' ? parseFloat(formData.tpa_rate) : null,
-        'non-nabh_rate': formData.non_nabh_rate && formData.non_nabh_rate.trim() !== '' ? parseFloat(formData.non_nabh_rate) : null,
+        non_nabh_rate: formData.non_nabh_rate && formData.non_nabh_rate.trim() !== '' ? parseFloat(formData.non_nabh_rate) : null,
         nabh_rate: formData.nabh_rate && formData.nabh_rate.trim() !== '' ? parseFloat(formData.nabh_rate) : null,
         private_rate: formData.private_rate && formData.private_rate.trim() !== '' ? parseFloat(formData.private_rate) : null
       };
