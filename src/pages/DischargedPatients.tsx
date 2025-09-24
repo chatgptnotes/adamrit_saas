@@ -170,8 +170,12 @@ const DischargedPatients = () => {
     refetchInterval: 60000, // Refetch every minute
   });
 
-  // Apply client-side search filter to avoid PostgREST parsing issues
+  // Apply client-side filtering to avoid PostgREST parsing issues
   const filteredVisits = visits?.filter(visit => {
+    // Filter 1: Only show fully discharged patients
+    if (visit.status?.toLowerCase() !== 'discharged') return false;
+
+    // Filter 2: Apply search if provided
     if (!searchTerm.trim()) return true;
 
     const searchLower = searchTerm.toLowerCase();
@@ -204,6 +208,18 @@ const DischargedPatients = () => {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  // Calculate days between admission and discharge
+  const calculateDaysAdmitted = (admissionDate: string | null, dischargeDate: string | null) => {
+    if (!admissionDate || !dischargeDate) return 'N/A';
+
+    const admission = new Date(admissionDate);
+    const discharge = new Date(dischargeDate);
+    const diffTime = Math.abs(discharge.getTime() - admission.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return diffDays;
   };
 
   // Get status badge variant
@@ -427,8 +443,9 @@ const DischargedPatients = () => {
                   <TableRow>
                     <TableHead>Patient Details</TableHead>
                     <TableHead>Visit Info</TableHead>
+                    <TableHead>Admission Date</TableHead>
                     <TableHead>Discharge Date</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>Days Admitted</TableHead>
                     <TableHead>Billing Status</TableHead>
                     <TableHead>Corporate</TableHead>
                   </TableRow>
@@ -463,16 +480,19 @@ const DischargedPatients = () => {
                             <Calendar className="h-3 w-3" />
                             Visit: {formatDate(visit.visit_date)}
                           </div>
-                          {visit.admission_date && (
-                            <div className="text-sm text-muted-foreground">
-                              Admitted: {formatDate(visit.admission_date)}
-                            </div>
-                          )}
                           {visit.patient_type && (
                             <Badge variant="outline" className="text-xs">
                               {visit.patient_type}
                             </Badge>
                           )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Calendar className="h-4 w-4 text-blue-600" />
+                          <span className="font-medium text-blue-700">
+                            {visit.admission_date ? formatDateTime(visit.admission_date) : 'N/A'}
+                          </span>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -484,9 +504,16 @@ const DischargedPatients = () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getStatusBadgeVariant(visit.status)}>
-                          {visit.status || 'Unknown'}
-                        </Badge>
+                        <div className="flex items-center gap-1">
+                          <span className="font-medium text-purple-700">
+                            {calculateDaysAdmitted(visit.admission_date, visit.discharge_date)}
+                            {calculateDaysAdmitted(visit.admission_date, visit.discharge_date) !== 'N/A' && (
+                              <span className="text-sm text-muted-foreground ml-1">
+                                {calculateDaysAdmitted(visit.admission_date, visit.discharge_date) === 1 ? 'day' : 'days'}
+                              </span>
+                            )}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant={getBillingStatusBadgeVariant(visit.billing_status)}>
