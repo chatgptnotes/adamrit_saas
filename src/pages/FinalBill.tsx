@@ -524,6 +524,7 @@ const FinalBill = () => {
   const queryClient = useQueryClient();
   const { hospitalConfig } = useAuth();
   const [surgeons, setSurgeons] = useState<{ id: string; name: string }[]>([]);
+  const [anaesthetists, setAnaesthetists] = useState<{ id: string; name: string }[]>([]);
   const [pathologyNote, setPathologyNote] = useState("");
   const [cghsSurgeries, setCghsSurgeries] = useState<{ id: string; name: string; NABH_NABL_Rate: string; code: string }[]>([]);
   const [vitalSigns] = useState<VitalSigns>({
@@ -548,7 +549,7 @@ const FinalBill = () => {
   useEffect(() => {
     const fetchSurgeons = async () => {
       const { data, error } = await supabase
-        .from('esic_surgeons')
+        .from('ayushman_surgeons')
         .select('id, name');
 
       if (error) {
@@ -559,7 +560,21 @@ const FinalBill = () => {
       }
     };
 
+    const fetchAnaesthetists = async () => {
+      const { data, error } = await supabase
+        .from('ayushman_anaesthetists')
+        .select('id, name');
+
+      if (error) {
+        console.error("Error fetching anaesthetists:", error);
+        toast.error("Failed to fetch anaesthetists.");
+      } else if (data) {
+        setAnaesthetists(data);
+      }
+    };
+
     fetchSurgeons();
+    fetchAnaesthetists();
   }, []);
 
   // Fetch bill preparation data when component mounts
@@ -1423,16 +1438,16 @@ const FinalBill = () => {
           console.log('Formatted date for input:', formattedDate);
         }
 
-        // Update the form with saved data
-        setOtNotesData({
+        // Update the form with saved data, but don't override procedure - let auto-populate handle it
+        setOtNotesData(prev => ({
           date: formattedDate,
-          procedure: otNotesRecord.procedure_performed || '',
+          procedure: prev.procedure || otNotesRecord.procedure_performed || '', // Keep current procedure if exists
           surgeon: otNotesRecord.surgeon || '',
           anaesthetist: otNotesRecord.anaesthetist || '',
           anaesthesia: otNotesRecord.anaesthesia || '',
           implant: otNotesRecord.implant || '',
           description: otNotesRecord.description || ''
-        });
+        }));
 
         console.log('OT Notes form populated with saved data');
       }
@@ -1450,24 +1465,45 @@ const FinalBill = () => {
 
   // Auto-populate OT Notes procedure from surgery data
   useEffect(() => {
+    console.log('Auto-populate effect running...', { 
+      patientInfoSurgeries: patientInfo?.surgeries?.length || 0, 
+      savedSurgeriesLength: savedSurgeries?.length || 0 
+    });
+    
+    let allSurgeries = [];
+
+    // First try to get surgeries from patientInfo
     if (patientInfo && patientInfo.surgeries && patientInfo.surgeries.length > 0) {
-      const firstSurgery = patientInfo.surgeries[0];
-      const surgeryName = firstSurgery.cghs_surgery?.name || '';
-      const surgeryCode = firstSurgery.cghs_surgery?.code || '';
+      console.log('Using patientInfo surgeries:', patientInfo.surgeries);
+      allSurgeries = patientInfo.surgeries.map(surgery => {
+        const surgeryName = surgery.cghs_surgery?.name || '';
+        const surgeryCode = surgery.cghs_surgery?.code || '';
+        return surgeryName ? `${surgeryName} (${surgeryCode})` : '';
+      }).filter(Boolean);
+    } 
+    // If no patientInfo surgeries, get from savedSurgeries
+    else if (savedSurgeries && savedSurgeries.length > 0) {
+      console.log('Using savedSurgeries:', savedSurgeries);
+      allSurgeries = savedSurgeries.map(surgery => {
+        const surgeryName = surgery.name || '';
+        const surgeryCode = surgery.code || '';
+        return surgeryName ? `${surgeryName} (${surgeryCode})` : '';
+      }).filter(Boolean);
+    }
 
+    console.log('All surgeries processed:', allSurgeries);
+
+    // Combine all surgeries into a single string
+    if (allSurgeries.length > 0) {
+      const combinedProcedures = allSurgeries.join(', ');
+      console.log('Setting combined procedures:', combinedProcedures);
+      // Always update procedure field with current surgery data, even if there's saved data
       setOtNotesData(prev => ({
         ...prev,
-        procedure: surgeryName ? `${surgeryName} (${surgeryCode})` : prev.procedure
+        procedure: combinedProcedures
       }));
-    } else if (savedSurgeries && savedSurgeries.length > 0) {
-      const firstSurgery = savedSurgeries[0];
-      const surgeryName = firstSurgery.name || '';
-      const surgeryCode = firstSurgery.code || '';
-
-      setOtNotesData(prev => ({
-        ...prev,
-        procedure: surgeryName ? `${surgeryName} (${surgeryCode})` : prev.procedure
-      }));
+    } else {
+      console.log('No surgeries found to populate');
     }
   }, [patientInfo, savedSurgeries]);
 
@@ -12373,8 +12409,11 @@ Dr. Murali B K
                               onChange={(e) => setOtNotesData({ ...otNotesData, surgeon: e.target.value })}
                             >
                               <option value="">Select Surgeon</option>
-                              <option value="Dr. Vijay Sarwad">Dr. Vijay Sarwad</option>
-                              <option value="Dr. Pranit Gurnule">Dr. Pranit Gurnule</option>
+                              {surgeons.map((surgeon) => (
+                                <option key={surgeon.id} value={surgeon.name}>
+                                  {surgeon.name}
+                                </option>
+                              ))}
                             </select>
                           </div>
 
@@ -12387,8 +12426,11 @@ Dr. Murali B K
                               onChange={(e) => setOtNotesData({ ...otNotesData, anaesthetist: e.target.value })}
                             >
                               <option value="">Select Anaesthetist</option>
-                              <option value="Dr. Pranit Gurnule">Dr. Pranit Gurnule</option>
-                              <option value="Dr. Vijay Sarwad">Dr. Vijay Sarwad</option>
+                              {anaesthetists.map((anaesthetist) => (
+                                <option key={anaesthetist.id} value={anaesthetist.name}>
+                                  {anaesthetist.name}
+                                </option>
+                              ))}
                             </select>
                           </div>
 
