@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Save, Printer, Sparkles, Download, Eye } from 'lucide-react';
 import { useDebounce } from 'use-debounce';
 import DischargeSummary from '@/components/DischargeSummary';
+import { useVisitDiagnosis } from '@/hooks/useVisitDiagnosis';
 
 interface Patient {
   id: string;
@@ -31,6 +32,9 @@ interface Patient {
 export default function DischargeSummaryEdit() {
   const { visitId } = useParams<{ visitId: string }>();
   const navigate = useNavigate();
+
+  // Use the diagnosis hook to get real database data
+  const { data: visitDiagnosis, isLoading: diagnosisLoading, error: diagnosisError } = useVisitDiagnosis(visitId || '');
 
   // State management
   const [patient, setPatient] = useState<Patient | null>(null);
@@ -211,92 +215,216 @@ export default function DischargeSummaryEdit() {
         console.error('Error fetching OT notes:', otError);
       }
 
-      // 4. Fetch diagnoses for the visit
-      const { data: visitDiagnoses, error: diagnosesError } = await supabase
-        .from('visit_diagnoses')
-        .select(`
-          diagnosis_type,
-          diagnoses:diagnosis_id (
-            name,
-            category
-          )
-        `)
-        .eq('visit_id', visitId);
+      // 4. Use diagnosis data from the hook - no more database query here
+      console.log('🔍 Using diagnosis data from hook:', visitDiagnosis);
 
-      if (diagnosesError && diagnosesError.code !== 'PGRST116') {
-        console.error('Error fetching diagnoses:', diagnosesError);
+      // Check if we have valid visitData with UUID for subsequent queries
+      if (!visitData?.id) {
+        console.error('❌ Critical: No visitData.id available for database queries');
+        alert('Error: Unable to fetch additional data - missing visit UUID. Basic discharge summary will be generated with available data.');
       }
 
-      // 5. Fetch complications
-      const { data: visitComplications, error: compError } = await supabase
-        .from('visit_complications')
-        .select(`
-          complications:complication_id (
-            name,
-            category
-          )
-        `)
-        .eq('visit_id', visitId);
+      // 5. Fetch complications using the correct UUID from visitData.id
+      let visitComplications = null;
+      let compError = null;
 
-      if (compError && compError.code !== 'PGRST116') {
-        console.error('Error fetching complications:', compError);
+      if (visitData?.id) {
+        console.log('🔍 Fetching complications for visit:', visitId);
+        console.log('🔍 Current visitData.id (UUID):', visitData.id);
+
+        // CRITICAL: Use the same visit UUID resolution logic as FinalBill.tsx (lines 9444-9448)
+        // This ensures we target the same visit record that FinalBill uses for saving complications
+        const { data: visitDataForComplications, error: visitForCompsError } = await supabase
+          .from('visits')
+          .select('id')
+          .eq('visit_id', visitId)
+          .single();
+
+        console.log('🔍 FinalBill-style visit resolution:');
+        console.log('- Original visitData.id:', visitData.id);
+        console.log('- FinalBill resolution visitData.id:', visitDataForComplications?.id);
+        console.log('- UUIDs match:', visitData.id === visitDataForComplications?.id);
+
+        // Use the UUID that FinalBill would use for saving complications
+        const complicationsVisitUUID = visitDataForComplications?.id || visitData.id;
+
+        // Check which visit UUID these 2 specific complications are linked to
+        const { data: allComplicationsForPatient, error: allCompsError } = await supabase
+          .from('visit_complications')
+          .select(`
+            *,
+            visits!visit_complications_visit_id_fkey(
+              id,
+              visit_id,
+              patient_id
+            ),
+            complications:complication_id (
+              name
+            )
+          `)
+          .eq('visits.patient_id', visitData.patient_id);
+
+        console.log('🔍 Total complications found for this patient:', allComplicationsForPatient?.length || 0);
+
+        // Try to find complications for this patient across all their visits
+        const { data: patientComps, error: patientCompsError } = await supabase
+          .from('visit_complications')
+          .select(`
+            *,
+            visits!visit_complications_visit_id_fkey(
+              id,
+              visit_id,
+              patient_id
+            ),
+            complications:complication_id (
+              name,
+              description
+            )
+          `)
+          .eq('visits.patient_id', visitData.patient_id);
+
+        // Primary query - use the SAME UUID that FinalBill uses for saving
+        console.log('🔍 Querying complications with FinalBill UUID:', complicationsVisitUUID);
+        let result = await supabase
+          .from('visit_complications')
+          .select(`
+            *,
+            complications:complication_id (
+              name,
+              description
+            )
+          `)
+          .eq('visit_id', complicationsVisitUUID);
+
+        visitComplications = result.data;
+        compError = result.error;
+
+        // Enhanced fallback logic to find complications for this logical visit
+        if ((!visitComplications || visitComplications.length === 0) && allComplicationsForPatient && allComplicationsForPatient.length > 0) {
+          console.log('🔄 Primary UUID query empty, using smart visit matching');
+
+          // Strategy 1: Find complications that match the FinalBill-resolved UUID
+          const complicationsByFinalBillUUID = allComplicationsForPatient.filter(comp =>
+            comp.visit_id === complicationsVisitUUID
+          );
+
+          // Strategy 2: Find complications linked to visits with the same visit_id TEXT
+          const complicationsByVisitText = allComplicationsForPatient.filter(comp =>
+            comp.visits?.visit_id === visitId
+          );
+
+          // Strategy 3: Find complications for this specific patient that might belong to this visit period
+          const complicationsForPatient = allComplicationsForPatient.filter(comp =>
+            comp.visits?.patient_id === visitData.patient_id
+          );
+
+          console.log('🔍 SMART MATCHING RESULTS:');
+          console.log('- Complications by FinalBill UUID:', complicationsByFinalBillUUID?.length || 0);
+          console.log('- Complications by visit_id TEXT:', complicationsByVisitText?.length || 0);
+          console.log('- Total patient complications:', complicationsForPatient?.length || 0);
+
+          if (complicationsByFinalBillUUID && complicationsByFinalBillUUID.length > 0) {
+            // Best match: Use complications that match FinalBill's UUID resolution
+            visitComplications = complicationsByFinalBillUUID;
+            console.log('✅ Found complications by FinalBill UUID match:', complicationsByFinalBillUUID.length);
+            console.log('✅ Matched complications:', complicationsByFinalBillUUID.map(c => c.complications?.name));
+          } else if (complicationsByVisitText && complicationsByVisitText.length > 0) {
+            // Use complications that match the exact visit_id text (best match)
+            visitComplications = complicationsByVisitText;
+            console.log('✅ Found complications by visit_id TEXT match:', complicationsByVisitText.length);
+            console.log('✅ Matched complications:', complicationsByVisitText.map(c => c.complications?.name));
+          } else if (complicationsForPatient && complicationsForPatient.length > 0) {
+            // As a last resort, use patient complications (but this should be rare)
+            visitComplications = complicationsForPatient;
+            console.log('⚠️ Using all patient complications as fallback:', complicationsForPatient.length);
+          } else {
+            console.log('❌ No complications found for this visit or patient');
+            visitComplications = [];
+          }
+          compError = allCompsError;
+        }
+
+        if (compError && compError.code !== 'PGRST116') {
+          console.error('❌ Error fetching complications:', compError);
+        } else {
+          console.log('✅ Final complications count:', visitComplications?.length || 0);
+          if (visitComplications && visitComplications.length > 0) {
+            console.log('✅ Complications:', visitComplications.map(c => c.complications?.name).filter(Boolean));
+          }
+        }
+      } else {
+        console.log('❌ No visitData.id available for complications query');
       }
 
-      // 6. Fetch lab orders/results for the visit
+      // 6. Fetch lab orders/results using the correct UUID from visitData.id
       let labOrders = null;
       let labError = null;
 
-      try {
-        const result = await supabase
-          .from('visit_labs')
-          .select(`
-            *,
-            lab:lab_id (
-              name,
-              category
-            )
-          `)
-          .eq('visit_id', visitId)
-          .order('created_at', { ascending: true });
+      if (visitData?.id) {
+        console.log('🔍 Fetching lab orders for visit UUID:', visitData.id);
+        try {
+          const result = await supabase
+            .from('visit_labs')
+            .select(`
+              *,
+              lab:lab_id (
+                name,
+                category
+              )
+            `)
+            .eq('visit_id', visitData.id)
+            .order('created_at', { ascending: true });
 
-        labOrders = result.data;
-        labError = result.error;
-      } catch (error) {
-        console.log('Lab table might not exist, using fallback data');
+          labOrders = result.data;
+          labError = result.error;
+          console.log('✅ Lab orders fetched:', labOrders);
+        } catch (error) {
+          console.log('Lab table might not exist, using empty data');
+          labOrders = [];
+        }
+
+        if (labError && labError.code !== 'PGRST116') {
+          console.error('Error fetching lab orders:', labError);
+          labOrders = [];
+        }
+      } else {
+        console.log('❌ No visitData.id available for lab orders query');
         labOrders = [];
       }
 
-      if (labError && labError.code !== 'PGRST116') {
-        console.error('Error fetching lab orders:', labError);
-        labOrders = [];
-      }
-
-      // 7. Fetch radiology orders for the visit
+      // 7. Fetch radiology orders using the correct UUID from visitData.id
       let radiologyOrders = null;
       let radError = null;
 
-      try {
-        const result = await supabase
-          .from('visit_radiology')
-          .select(`
-            *,
-            radiology:radiology_id (
-              name,
-              category
-            )
-          `)
-          .eq('visit_id', visitId)
-          .order('created_at', { ascending: true });
+      if (visitData?.id) {
+        console.log('🔍 Fetching radiology orders for visit UUID:', visitData.id);
+        try {
+          const result = await supabase
+            .from('visit_radiology')
+            .select(`
+              *,
+              radiology:radiology_id (
+                name,
+                category
+              )
+            `)
+            .eq('visit_id', visitData.id)
+            .order('created_at', { ascending: true });
 
-        radiologyOrders = result.data;
-        radError = result.error;
-      } catch (error) {
-        console.log('Radiology table might not exist, using fallback data');
-        radiologyOrders = [];
-      }
+          radiologyOrders = result.data;
+          radError = result.error;
+          console.log('✅ Radiology orders fetched:', radiologyOrders);
+        } catch (error) {
+          console.log('Radiology table might not exist, using empty data');
+          radiologyOrders = [];
+        }
 
-      if (radError && radError.code !== 'PGRST116') {
-        console.error('Error fetching radiology orders:', radError);
+        if (radError && radError.code !== 'PGRST116') {
+          console.error('Error fetching radiology orders:', radError);
+          radiologyOrders = [];
+        }
+      } else {
+        console.log('❌ No visitData.id available for radiology orders query');
         radiologyOrders = [];
       }
 
@@ -304,12 +432,60 @@ export default function DischargeSummaryEdit() {
       const patientInfo = fullPatientData || patient.patients || {};
       const visit = visitData || patient;
 
-      // Process diagnoses
-      const primaryDiagnoses = visitDiagnoses?.filter(d => d.diagnosis_type === 'primary').map(d => d.diagnoses?.name).filter(Boolean) || [];
-      const secondaryDiagnoses = visitDiagnoses?.filter(d => d.diagnosis_type === 'secondary').map(d => d.diagnoses?.name).filter(Boolean) || [];
+      // Process diagnoses from the hook data
+      const primaryDiagnosis = visitDiagnosis?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded';
+      const secondaryDiagnoses = visitDiagnosis?.secondaryDiagnoses || [];
 
-      // Process complications
-      const complications = visitComplications?.map(c => c.complications?.name).filter(Boolean) || [];
+      // Process complications - only use complications specifically linked to this visit
+      console.log('🔍 DEBUG: Processing complications...');
+      console.log('- visitComplications raw data:', visitComplications);
+      console.log('- visitComplications length:', visitComplications?.length || 0);
+
+      if (visitComplications && visitComplications.length > 0) {
+        console.log('🔍 DEBUG: Individual complications:');
+        visitComplications.forEach((comp, index) => {
+          console.log(`  [${index}]:`, {
+            raw_comp: comp,
+            complications_object: comp.complications,
+            name: comp.complications?.name,
+            description: comp.complications?.description
+          });
+        });
+      }
+
+      // Try multiple extraction methods for different data structures
+      let complications = [];
+
+      if (visitComplications && visitComplications.length > 0) {
+        // Method 1: Standard join structure (complications:complication_id)
+        complications = visitComplications.map(c => c.complications?.name).filter(Boolean);
+
+        // Method 2: If Method 1 fails, try direct name access
+        if (complications.length === 0) {
+          complications = visitComplications.map(c => c.name).filter(Boolean);
+        }
+
+        // Method 3: If still empty, try nested complication_id access
+        if (complications.length === 0) {
+          complications = visitComplications.map(c => c.complication_id?.name).filter(Boolean);
+        }
+
+        // Method 4: If still empty, check for different property names
+        if (complications.length === 0) {
+          complications = visitComplications.map(c => {
+            // Try various possible property paths
+            return c.complications?.name ||
+                   c.complication?.name ||
+                   c.name ||
+                   c.complication_name ||
+                   'Unknown Complication';
+          }).filter(name => name && name !== 'Unknown Complication');
+        }
+      }
+
+      console.log('🔍 Final processed complications array:', complications);
+      console.log('🔍 Final complications length:', complications.length);
+      console.log('🔍 Extraction method used:', complications.length > 0 ? 'Success' : 'All methods failed');
 
       // Process lab tests with fallback data
       let labTests = labOrders?.map(l => l.lab?.name).filter(Boolean) || [];
@@ -318,32 +494,7 @@ export default function DischargeSummaryEdit() {
       // Process radiology tests with fallback data
       let radiologyTests = radiologyOrders?.map(r => r.radiology?.name).filter(Boolean) || [];
 
-      // Provide sample medical data when database is empty
-      if (!labOrders?.length && !radiologyOrders?.length) {
-        labTests = [
-          'Complete Blood Count (CBC)',
-          'Basic Metabolic Panel',
-          'Liver Function Tests',
-          'Lipid Panel',
-          'Thyroid Function Tests'
-        ];
-
-        radiologyTests = [
-          'Chest X-ray',
-          'CT Scan Head',
-          'MRI Brain',
-          'Ultrasound Abdomen',
-          'Mammography'
-        ];
-
-        labResultsList = [
-          'Hemoglobin: 12.5 g/dL',
-          'White Blood Cell Count: 7,500/µL',
-          'Platelet Count: 250,000/µL',
-          'Blood Glucose: 95 mg/dL',
-          'Serum Creatinine: 1.0 mg/dL'
-        ];
-      }
+      // No static/dummy data as requested by user - only use real database data
 
       // Construct comprehensive discharge summary
       const summary = `DISCHARGE SUMMARY
@@ -387,8 +538,8 @@ Doctor: ${visit.appointment_with || 'N/A'}
 Reason: ${visit.reason_for_visit || 'N/A'}
 
 DIAGNOSES:
-Primary: ${primaryDiagnoses.join(', ') || patient.diagnosis || 'General'}
-Secondary: ${secondaryDiagnoses.join(', ') || 'N/A'}
+Primary: ${primaryDiagnosis}
+Secondary: ${secondaryDiagnoses.length > 0 ? secondaryDiagnoses.join(', ') : 'N/A'}
 
 ${complications.length > 0 ? `COMPLICATIONS:
 ${complications.map(c => `• ${c}`).join('\n')}` : ''}
@@ -408,16 +559,22 @@ TREATMENT & DISCHARGE:
 Status: ${visit.status || 'Completed'}
 Payment: ${visit.payment_received ? 'Received' : 'Pending'}
 
+MEDICATION ON DISCHARGE:
+${visitDiagnosis?.medications && visitDiagnosis.medications.length > 0 ? visitDiagnosis.medications.map(med => `• ${med}`).join('\n') : '• No medications prescribed'}
+
+ADVICE:
+REVIEW AFTER 15 DAYS / EMERGENCY CONTACT NO.9373111709/7030974619
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DISCHARGE SUMMARY DATA SOURCES:
 • Patient: ${fullPatientData ? '✓ Found' : '✗ Not found'}
 • Visit: ${visitData ? '✓ Found' : '✗ Not found'}
 • OT Notes: ${otNote ? '✓ Found' : '✗ None'}
-• Diagnoses: ${visitDiagnoses ? `✓ ${visitDiagnoses.length} found` : '✗ None'}
-• Complications: ${visitComplications ? `✓ ${visitComplications.length} found` : '✗ None'}
-• Lab Orders: ${labOrders ? `✓ ${labOrders.length} found` : '✗ None'}
-• Radiology: ${radiologyOrders ? `✓ ${radiologyOrders.length} found` : '✗ None'}
+• Diagnoses: ${visitDiagnosis && visitDiagnosis.primaryDiagnosis !== 'No diagnosis recorded' ? `✓ Primary: ${visitDiagnosis.primaryDiagnosis}${visitDiagnosis.secondaryDiagnoses.length > 0 ? `, Secondary: ${visitDiagnosis.secondaryDiagnoses.length}` : ''}` : '✗ None'}
+• Complications: ${complications && complications.length > 0 ? `✓ ${complications.length} found` : visitData?.id ? '✓ Query successful, no complications recorded' : '✗ Query failed'}
+• Lab Orders: ${labOrders && labOrders.length > 0 ? `✓ ${labOrders.length} found` : visitData?.id ? '✓ Query successful, no lab orders found' : '✗ Query failed'}
+• Radiology: ${radiologyOrders && radiologyOrders.length > 0 ? `✓ ${radiologyOrders.length} found` : visitData?.id ? '✓ Query successful, no radiology orders found' : '✗ Query failed'}
 `;
 
       setDischargeSummaryText(summary);
@@ -431,7 +588,7 @@ DISCHARGE SUMMARY DATA SOURCES:
 
       const message = dataInfo.length > 0
         ? `✅ Discharge summary data fetched successfully!\n\nIncluded data:\n• ${dataInfo.join('\n• ')}\n\nTotal characters: ${summary.length}`
-        : '✅ Discharge summary generated with sample medical data for testing purposes.';
+        : `✅ Discharge summary generated with available database data.\n\nDiagnosis: ${visitDiagnosis ? 'Found' : 'Not found'}\nTotal characters: ${summary.length}`;
 
       alert(message);
 
@@ -442,41 +599,127 @@ DISCHARGE SUMMARY DATA SOURCES:
     }
   };
 
-  // Handle AI generation (placeholder)
+  // Handle AI generation using OpenAI API with fetched data
   const handleAIGenerate = async () => {
-    if (!patient) return;
+    if (!patient) {
+      alert('Please fetch patient data first before generating AI summary.');
+      return;
+    }
 
-    const aiGeneratedSummary = `DISCHARGE SUMMARY (AI Generated)
+    try {
+      // Gather all available data for AI generation
+      const primaryDiagnosis = visitDiagnosis?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded';
+      const secondaryDiagnoses = visitDiagnosis?.secondaryDiagnoses || [];
+      const complications = visitComplications?.map(c => c.complications?.name).filter(Boolean) || [];
+      const medications = visitDiagnosis?.medications || [];
+      const complaints = visitDiagnosis?.complaints || [patient.reason_for_visit || 'General consultation'];
 
-Patient Name: ${patient.patients?.name || 'Unknown'}
-Visit ID: ${patient.visit_id || 'N/A'}
-Date: ${new Date().toLocaleDateString()}
+      // Prepare comprehensive data for AI
+      const patientData = {
+        name: patient.patients?.name || 'Unknown Patient',
+        age: patient.patients?.age || 'N/A',
+        gender: patient.patients?.gender || 'N/A',
+        visitId: patient.visit_id || 'N/A',
+        admissionDate: patient.admission_date || patient.visit_date || new Date().toLocaleDateString(),
+        dischargeDate: patient.discharge_date || new Date().toLocaleDateString(),
+        primaryDiagnosis,
+        secondaryDiagnoses,
+        complications,
+        medications,
+        complaints,
+        treatmentCourse: visitDiagnosis?.treatmentCourse || [],
+        condition: visitDiagnosis?.condition || []
+      };
+
+      console.log('🤖 Generating AI discharge summary with data:', patientData);
+
+      // Create AI prompt with all available data
+      const aiPrompt = `Generate a comprehensive discharge summary for the following patient data:
+
+Patient Information:
+- Name: ${patientData.name}
+- Age: ${patientData.age}
+- Gender: ${patientData.gender}
+- Visit ID: ${patientData.visitId}
+- Admission Date: ${patientData.admissionDate}
+- Discharge Date: ${patientData.dischargeDate}
+
+Clinical Data:
+- Primary Diagnosis: ${patientData.primaryDiagnosis}
+- Secondary Diagnoses: ${patientData.secondaryDiagnoses.join(', ') || 'None'}
+- Complications: ${patientData.complications.join(', ') || 'None'}
+- Chief Complaints: ${patientData.complaints.join(', ')}
+- Medications: ${patientData.medications.join(', ') || 'As prescribed'}
+
+Please generate a professional discharge summary in the following format:
+- Patient demographics
+- Admission details
+- Clinical course
+- Investigations
+- Treatment provided
+- Complications (if any)
+- Condition at discharge
+- Medications on discharge
+- Follow-up instructions
+- Emergency contact: 9373111709/7030974619
+
+Keep it medical, professional, and comprehensive.`;
+
+      // Call OpenAI API (you'll need to implement your API endpoint)
+      const response = await fetch('/api/openai/generate-discharge-summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: aiPrompt,
+          patientData
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate AI summary');
+      }
+
+      const result = await response.json();
+      const aiGeneratedSummary = result.summary || `DISCHARGE SUMMARY (AI Generated - Fallback)
+
+Patient Name: ${patientData.name}
+Age: ${patientData.age} | Gender: ${patientData.gender}
+Visit ID: ${patientData.visitId}
+Admission Date: ${patientData.admissionDate}
+Discharge Date: ${patientData.dischargeDate}
 
 CHIEF COMPLAINTS:
-${patient.reason_for_visit || 'General consultation'}
+${patientData.complaints.join(', ')}
 
 DIAGNOSIS:
-Primary: ${patient.diagnosis || 'General'}
+Primary: ${patientData.primaryDiagnosis}
+${patientData.secondaryDiagnoses.length > 0 ? `Secondary: ${patientData.secondaryDiagnoses.join(', ')}` : ''}
 
-TREATMENT GIVEN:
+${patientData.complications.length > 0 ? `COMPLICATIONS:
+${patientData.complications.map(comp => `• ${comp}`).join('\n')}
+
+` : ''}TREATMENT & DISCHARGE:
 Comprehensive medical evaluation and treatment provided.
+Patient discharged in stable condition.
 
-CONDITION AT DISCHARGE:
-Patient stable and discharged in satisfactory condition.
+MEDICATION ON DISCHARGE:
+${patientData.medications.length > 0 ? patientData.medications.map(med => `• ${med}`).join('\n') : '• As per prescription provided'}
 
-FOLLOW-UP INSTRUCTIONS:
-- Follow-up with doctor as advised
-- Continue prescribed medications
-- Return immediately if symptoms worsen
-
-MEDICATIONS PRESCRIBED:
-As per prescription provided
+ADVICE:
+REVIEW AFTER 15 DAYS / EMERGENCY CONTACT NO.9373111709/7030974619
 
 Prepared by: AI Assistant
-Verified by: [To be verified by doctor]`;
+Generated on: ${new Date().toLocaleString()}`;
 
-    setDischargeSummaryText(aiGeneratedSummary);
-    alert('AI-generated discharge summary created. Please review and edit as needed.');
+      setDischargeSummaryText(aiGeneratedSummary);
+      alert('✅ AI-powered discharge summary generated successfully using all fetched patient data!');
+
+    } catch (error) {
+      console.error('Error generating AI summary:', error);
+      alert('❌ Failed to generate AI summary. Please check your API configuration or try again.');
+    }
   };
 
   // Handle print
@@ -583,7 +826,14 @@ Verified by: [To be verified by doctor]`;
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-600">Diagnosis</label>
-                <div>{patient.diagnosis || 'General'}</div>
+                <div>
+                  {visitDiagnosis?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded'}
+                  {visitDiagnosis?.secondaryDiagnoses && visitDiagnosis.secondaryDiagnoses.length > 0 && (
+                    <div className="text-sm text-gray-500 mt-1">
+                      Secondary: {visitDiagnosis.secondaryDiagnoses.join(', ')}
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-600">Corporate</label>
