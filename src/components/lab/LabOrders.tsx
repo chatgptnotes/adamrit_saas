@@ -840,16 +840,17 @@ const LabOrders = () => {
       const savedResults: typeof savedLabResults = {};
       const patientInfo = selectedTestsForEntry[0];
       
+      // Save both main test data and sub-test data
       selectedTestsForEntry.forEach(testRow => {
-        const formData = labResultsForm[testRow.id];
-        if (formData) {
+        // Save main test data
+        const mainFormData = labResultsForm[testRow.id];
+        if (mainFormData) {
           savedResults[testRow.id] = {
-            ...formData,
+            ...mainFormData,
             result_status: authenticatedResult ? 'Final' : 'Preliminary',
             saved_at: new Date().toISOString(),
             patient_info: {
               ...patientInfo,
-              // Store additional patient data for print
               actual_patient_uid: results[0]?.patient_uid || 'N/A',
               actual_visit_id: results[0]?.visit_id || 'N/A',
               actual_age: results[0]?.patient_age || patientInfo?.patient_age,
@@ -863,6 +864,21 @@ const LabOrders = () => {
             authenticated: authenticatedResult
           };
         }
+
+        // Save sub-test data
+        const subTests = testSubTests[testRow.test_name] || [];
+        subTests.forEach(subTest => {
+          const subTestKey = `${testRow.id}_subtest_${subTest.id}`;
+          const subTestFormData = labResultsForm[subTestKey];
+          if (subTestFormData) {
+            savedResults[subTestKey] = {
+              ...subTestFormData,
+              result_status: authenticatedResult ? 'Final' : 'Preliminary',
+              saved_at: new Date().toISOString(),
+              authenticated: authenticatedResult
+            };
+          }
+        });
       });
       
       setSavedLabResults(savedResults);
@@ -2766,16 +2782,24 @@ const LabOrders = () => {
                     <Badge className="bg-green-600 hover:bg-green-700">✓ Saved</Badge>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="authenticated" 
-                    className="w-4 h-4"
-                    checked={authenticatedResult}
-                    onChange={(e) => setAuthenticatedResult(e.target.checked)}
-                    disabled={isFormSaved}
-                  />
-                  <label htmlFor="authenticated" className="text-sm">Authenticated Result</label>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="authenticated"
+                      className="w-4 h-4"
+                      checked={authenticatedResult}
+                      onChange={(e) => setAuthenticatedResult(e.target.checked)}
+                      disabled={isFormSaved}
+                    />
+                    <label htmlFor="authenticated" className="text-sm">Authenticated Result</label>
+                  </div>
+                  {isFormSaved && (
+                    <div className="flex items-center space-x-2 bg-green-50 px-3 py-1 rounded-full border border-green-200">
+                      <span className="text-green-600 text-sm">✓</span>
+                      <span className="text-green-800 text-sm font-medium">Saved</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2848,13 +2872,20 @@ const LabOrders = () => {
                             <div className="p-2 border-r border-gray-300 flex items-center justify-center">
                               <input
                                 type="text"
-                                className={`w-full max-w-[120px] px-2 py-1 border border-gray-300 rounded text-center text-sm ${isFormSaved ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                className={`w-full max-w-[120px] px-2 py-1 border rounded text-center text-sm ${
+                                  isFormSaved
+                                    ? 'bg-green-50 border-green-300 text-green-800 cursor-not-allowed font-medium'
+                                    : 'border-gray-300'
+                                }`}
                                 placeholder="Enter value"
                                 value={subTestFormData.result_value}
                                 onChange={(e) => handleLabResultChange(subTestKey, 'result_value', e.target.value)}
                                 disabled={isFormSaved}
                               />
                               <span className="ml-2 text-xs text-gray-600">{subTest.unit}</span>
+                              {isFormSaved && subTestFormData.result_value && (
+                                <span className="ml-2 text-green-600 text-xs">✓</span>
+                              )}
                               {subTestFormData.is_abnormal && (
                                 <span className="ml-2 text-red-500 text-xs">🔴</span>
                               )}
@@ -2940,16 +2971,30 @@ const LabOrders = () => {
                   variant="outline"
                   className="px-8"
                   onClick={() => {
+                    // Only close the dialog - keep saved data intact
                     setIsEntryModeOpen(false);
-                    setIsFormSaved(false);
-                    setSavedLabResults({});
-                    setLabResultsForm({});
-                    setAuthenticatedResult(false);
-                    setUploadedFiles([]);
                   }}
                 >
                   Back
                 </Button>
+
+                {isFormSaved && (
+                  <Button
+                    variant="outline"
+                    className="px-8 text-red-600 border-red-300 hover:bg-red-50"
+                    onClick={() => {
+                      if (confirm('Are you sure you want to clear the saved form data?')) {
+                        setIsFormSaved(false);
+                        setSavedLabResults({});
+                        setLabResultsForm({});
+                        setAuthenticatedResult(false);
+                        setUploadedFiles([]);
+                      }
+                    }}
+                  >
+                    Clear Form
+                  </Button>
+                )}
 
                 <Button
                   variant="outline"
