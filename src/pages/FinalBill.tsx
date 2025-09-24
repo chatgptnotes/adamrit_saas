@@ -2518,6 +2518,13 @@ const FinalBill = () => {
 
   // Function to generate final discharge summary using AI
   const generateFinalDischargeSummary = async () => {
+    // Check if OpenAI API key is available
+    const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      toast.error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your environment variables.');
+      return;
+    }
+
     // Check if we have patient data from internal data
     const hasInternalData = allPatientData.trim();
 
@@ -2643,10 +2650,10 @@ Data Source: Internal Hospital System Only`;
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer REMOVED_OPENAI_KEY_2'
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: 'gpt-4',
+          model: 'gpt-3.5-turbo',
           messages: [
             {
               role: 'system',
@@ -3488,6 +3495,16 @@ Generated on: ${new Date().toLocaleDateString('en-IN')}`);
       return;
     }
 
+    // Check if OpenAI API key is available
+    const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    console.log('OpenAI API Key status:', openaiApiKey ? 'Found' : 'Not found');
+    console.log('API Key preview:', openaiApiKey ? `${openaiApiKey.substring(0, 7)}...` : 'None');
+    
+    if (!openaiApiKey) {
+      toast.error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your environment variables.');
+      return;
+    }
+
     setIsGeneratingSurgeryNotes(true);
 
     try {
@@ -3578,14 +3595,17 @@ Generate a comprehensive surgical note that includes:
 
 Make it detailed and professional as if written by an experienced surgeon.`;
 
+      console.log('Sending request to OpenAI with prompt length:', surgeryPrompt.length);
+      console.log('Surgery prompt preview:', surgeryPrompt.substring(0, 200) + '...');
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer REMOVED_OPENAI_KEY_2'
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: 'gpt-4',
+          model: 'gpt-3.5-turbo',
           messages: [
             {
               role: 'system',
@@ -3602,10 +3622,18 @@ Make it detailed and professional as if written by an experienced surgeon.`;
       });
 
       if (!response.ok) {
-        throw new Error(`OpenAI API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error('OpenAI API Response Error:', response.status, errorText);
+        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('OpenAI API Response:', data);
+      
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Invalid response format from OpenAI API');
+      }
+      
       const generatedNotes = data.choices[0].message.content;
 
       // Update the description field with AI generated notes
@@ -3614,7 +3642,17 @@ Make it detailed and professional as if written by an experienced surgeon.`;
 
     } catch (error) {
       console.error('Error generating surgery notes:', error);
-      toast.error('Failed to generate surgery notes. Please try again.');
+      
+      // More detailed error handling
+      if (error.message?.includes('401')) {
+        toast.error('OpenAI API key is invalid or expired. Please check your API key.');
+      } else if (error.message?.includes('429')) {
+        toast.error('OpenAI API rate limit exceeded. Please try again later.');
+      } else if (error.message?.includes('Network')) {
+        toast.error('Network error. Please check your internet connection.');
+      } else {
+        toast.error('Failed to generate surgery notes. Please try again.');
+      }
 
       // Fallback surgery notes
       const fallbackNotes = `OPERATIVE NOTE
@@ -8377,6 +8415,13 @@ INSTRUCTIONS:
 
   // Function to generate clinical recommendations using OpenAI
   const generateClinicalRecommendations = async (surgeryName: string, diagnosisName: string = '') => {
+    // Check if OpenAI API key is available
+    const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      toast.error('OpenAI API key not configured. Please add VITE_OPENAI_API_KEY to your environment variables.');
+      throw new Error('OpenAI API key not configured');
+    }
+
     try {
       const prompt = `For a patient undergoing ${surgeryName}${diagnosisName ? ` with diagnosis of ${diagnosisName}` : ''}, provide clinical recommendations based on CGHS surgical procedures and complications knowledge:
 
@@ -8400,10 +8445,10 @@ Format the response as JSON:
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer REMOVED_OPENAI_KEY_2'
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
         },
         body: JSON.stringify({
-          model: 'gpt-4',
+          model: 'gpt-3.5-turbo',
           messages: [
             {
               role: 'system',
