@@ -1,5 +1,5 @@
 
-import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake, ExternalLink } from 'lucide-react';
+import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake, ExternalLink, UserCheck } from 'lucide-react';
 
 export const menuItems = [
   {
@@ -26,6 +26,11 @@ export const menuItems = [
     title: "Currently Admitted",
     url: "/currently-admitted",
     icon: Building2,
+  },
+  {
+    title: "Discharged Patients",
+    url: "/discharged-patients",
+    icon: UserCheck,
   },
 
   {
