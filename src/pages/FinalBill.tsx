@@ -48,6 +48,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
+import { AdvancePaymentModal } from "@/components/AdvancePaymentModal"
 
 // This component needs to be created or installed. It is not a standard shadcn/ui component.
 // You can find implementations online or build one yourself.
@@ -532,6 +533,9 @@ const FinalBill = () => {
     spo2: '98',
     respiratoryRate: '18'
   });
+
+  // Advance Payment Modal State
+  const [isAdvancePaymentModalOpen, setIsAdvancePaymentModalOpen] = useState(false);
 
   // Document Modal States - removed 4 document modals
 
@@ -1529,7 +1533,8 @@ const FinalBill = () => {
     isSaving: isFinancialSummarySaving,
     saveFinancialSummary,
     handleFinancialSummaryChange,
-    loadFinancialSummary
+    loadFinancialSummary,
+    autoPopulateFinancialData
   } = useFinancialSummary(billData?.id, visitId);
 
   // Function to load saved requisitions from database
@@ -5517,7 +5522,7 @@ INSTRUCTIONS:
       // Step 1: Get visit UUID from visit_id
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id, visit_id, mandatory_service_id, mandatory_service:mandatory_services(id, service_name, tpa_rate, private_rate, nabh_rate, non_nabh_rate)')
+        .select('id, visit_id, mandatory_service_id, mandatory_service:mandatory_services!visits_mandatory_service_id_fkey(id, service_name, tpa_rate, private_rate, nabh_rate, non_nabh_rate)')
         .eq('visit_id', visitId)
         .single();
 
@@ -16069,56 +16074,68 @@ Dr. Murali B K
                   </div>
                 </div> */}
 
-                {/* Financial Summary Table with Vertical Row Labels */}
-                <div className="flex no-print">
-                  {/* Vertical Row Labels Sidebar */}
-                  <div className="flex flex-col mr-2">
-                  <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
-                      {/* Total Amount */}
-                    </div>
-                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
-                      Total Amount
-                    </div>
-                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
-                      Discount
-                    </div>
-                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
-                      Amount Paid
-                    </div>
-                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center mb-1">
-                      Refunded Amount
-                    </div>
-                    <div className="h-12 bg-gray-100 border border-gray-300 p-2 text-sm font-medium flex items-center justify-center">
-                      Balance
-                    </div>
+                {/* Clean Financial Summary Table - Properly Aligned */}
+                <div className="no-print bg-white rounded-lg shadow-lg overflow-hidden">
+                  {/* Manual Refresh Button */}
+                  <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                    <h3 className="text-lg font-semibold text-gray-900">Financial Summary</h3>
+                    <button
+                      onClick={() => {
+                        console.log('🔄 Manual refresh triggered for visit:', visitId);
+                        if (visitId && autoPopulateFinancialData) {
+                          autoPopulateFinancialData();
+                        } else {
+                          console.error('❌ Cannot refresh: missing visitId or autoPopulateFinancialData');
+                        }
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                      disabled={isFinancialSummaryLoading}
+                    >
+                      {isFinancialSummaryLoading ? (
+                        <span className="flex items-center">
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Loading...
+                        </span>
+                      ) : (
+                        '🔄 Refresh Data'
+                      )}
+                    </button>
                   </div>
-
-                  {/* Main Table */}
-                  <div className="flex-1 overflow-x-auto w-full">
-                    <table className="w-full border-collapse border border-gray-300 text-sm min-w-full">
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse text-sm">
                       <thead>
                         <tr className="bg-blue-100">
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Advance Payment</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Clinical Services</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Laboratory Services</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Radiology</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Pharmacy</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Implant</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Blood</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Surgery</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Mandatory services</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Physiotherapy</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Consultation</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Surgery for Internal Report and Yojnas</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Implant Cost</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Private</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Accommodation charges</th>
-                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[120px]">Total</th>
+                          <th className="border border-gray-300 p-3 text-left font-bold min-w-[140px] bg-gray-50">
+                            Financial Category
+                          </th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Advance<br/>Payment</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Clinical<br/>Services</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Laboratory<br/>Services</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Radiology</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Pharmacy</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Implant</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Blood</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Surgery</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Mandatory<br/>services</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Physiotherapy</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Consultation</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[130px]">Surgery for<br/>Internal Report<br/>and Yojnas</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Implant<br/>Cost</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px]">Private</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[130px]">Accommodation<br/>charges</th>
+                          <th className="border border-gray-300 p-3 text-center font-bold min-w-[110px] bg-blue-600 text-white">Total</th>
                         </tr>
                       </thead>
                       <tbody>
-                        <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                        {/* Row 1: Total Amount */}
+                        <tr className="bg-white hover:bg-gray-50 transition-colors">
+                          <td className="border border-gray-300 p-3 font-medium text-left bg-gray-50">
+                            Total Amount
+                          </td>
+                          <td className="border border-gray-300 p-3 text-center">
                             <input
                               type="number"
                               value={financialSummaryData.totalAmount.advancePayment}
@@ -16263,8 +16280,12 @@ Dr. Murali B K
                             />
                           </td>
                         </tr>
-                        <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                        {/* Row 2: Discount */}
+                        <tr className="bg-white hover:bg-gray-50 transition-colors">
+                          <td className="border border-gray-300 p-3 font-medium text-left bg-gray-50">
+                            Discount
+                          </td>
+                          <td className="border border-gray-300 p-3 text-center">
                             <input
                               type="number"
                               value={financialSummaryData.discount.advancePayment}
@@ -16409,8 +16430,12 @@ Dr. Murali B K
                             />
                           </td>
                         </tr>
-                        <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                        {/* Row 3: Amount Paid */}
+                        <tr className="bg-white hover:bg-gray-50 transition-colors">
+                          <td className="border border-gray-300 p-3 font-medium text-left bg-gray-50">
+                            Amount Paid
+                          </td>
+                          <td className="border border-gray-300 p-3 text-center">
                             <input
                               type="number"
                               value={financialSummaryData.amountPaid.advancePayment}
@@ -16555,8 +16580,12 @@ Dr. Murali B K
                             />
                           </td>
                         </tr>
-                        <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                        {/* Row 4: Refunded Amount */}
+                        <tr className="bg-white hover:bg-gray-50 transition-colors">
+                          <td className="border border-gray-300 p-3 font-medium text-left bg-gray-50">
+                            Refunded Amount
+                          </td>
+                          <td className="border border-gray-300 p-3 text-center">
                             <input
                               type="number"
                               value={financialSummaryData.refundedAmount.advancePayment}
@@ -16701,13 +16730,17 @@ Dr. Murali B K
                             />
                           </td>
                         </tr>
-                        <tr className="bg-gray-50">
-                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                        {/* Row 5: Balance */}
+                        <tr className="bg-blue-50 hover:bg-blue-100 transition-colors">
+                          <td className="border border-gray-300 p-3 font-bold text-left bg-blue-100">
+                            Balance
+                          </td>
+                          <td className="border border-gray-300 p-3 text-center">
                             <input
                               type="number"
                               value={financialSummaryData.balance.advancePayment}
                               onChange={(e) => handleFinancialSummaryChange('balance', 'advancePayment', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
+                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center font-bold"
                               placeholder="0"
                             />
                           </td>
@@ -16854,7 +16887,10 @@ Dr. Murali B K
 
                 {/* Action Buttons */}
                 <div className="flex flex-wrap gap-2 mt-4 justify-center">
-                  <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                  <button 
+                    onClick={() => setIsAdvancePaymentModalOpen(true)}
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                  >
                     Advance Payment
                   </button>
                   <button
@@ -18887,6 +18923,63 @@ Dr. Murali B K
           additionalApprovalInvestigation={additionalApprovalInvestigation}
           extensionOfStayApproval={extensionOfStayApproval}
           patientData={patientData}
+        />
+
+        {/* Advance Payment Modal */}
+        <AdvancePaymentModal
+          isOpen={isAdvancePaymentModalOpen}
+          onClose={() => setIsAdvancePaymentModalOpen(false)}
+          visitId={visitId}
+          patientId={visitData?.patients?.id}
+          patientData={(() => {
+            try {
+              console.log('🏥 FinalBill visitData debug:', {
+                visitDataExists: !!visitData,
+                patientsExists: !!visitData?.patients,
+                patientName: visitData?.patients?.name,
+                registrationNo: visitData?.patients?.patients_id,
+                patientId: visitData?.patients?.id,
+                billNo: billData?.bill_no,
+                admissionDate: visitData?.admission_date,
+                visitDate: visitData?.visit_date
+              });
+              
+              return {
+                name: visitData?.patients?.name || undefined,
+                billNo: billData?.bill_no || undefined,
+                registrationNo: visitData?.patients?.patients_id || undefined,
+                dateOfAdmission: (() => {
+                  try {
+                    if (visitData?.admission_date) {
+                      return format(new Date(visitData.admission_date), 'dd/MM/yyyy');
+                    }
+                    if (visitData?.visit_date) {
+                      return format(new Date(visitData.visit_date), 'dd/MM/yyyy');
+                    }
+                    return undefined;
+                  } catch (dateError) {
+                    console.error('❌ Date formatting error:', dateError);
+                    return undefined;
+                  }
+                })()
+              };
+            } catch (error) {
+              console.error('❌ Error creating patient data object:', error);
+              return {
+                name: undefined,
+                billNo: undefined,
+                registrationNo: undefined,
+                dateOfAdmission: undefined
+              };
+            }
+          })()}
+          onPaymentAdded={() => {
+            // Refresh financial data after payment is added
+            if (autoPopulateFinancialData) {
+              autoPopulateFinancialData();
+            }
+            toast.success('Payment added successfully');
+          }}
         />
       </div>
 
