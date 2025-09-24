@@ -35,6 +35,7 @@ const Patients = lazy(() => import("../pages/Patients"));
 const Users = lazy(() => import("../pages/Users"));
 const Complications = lazy(() => import("../pages/Complications"));
 const CghsSurgery = lazy(() => import("../pages/CghsSurgery"));
+const CghsSurgeryMaster = lazy(() => import("../pages/CghsSurgeryMaster"));
 const Medications = lazy(() => import("../pages/Medications"));
 const EsicSurgeons = lazy(() => import("../pages/EsicSurgeons"));
 const Referees = lazy(() => import("../pages/Referees"));
@@ -111,6 +112,7 @@ export const AppRoutes = () => {
         <Route path="/users" element={<Suspense fallback={<PageLoader />}><Users /></Suspense>} />
         <Route path="/complications" element={<Suspense fallback={<PageLoader />}><Complications /></Suspense>} />
         <Route path="/cghs-surgery" element={<Suspense fallback={<PageLoader />}><CghsSurgery /></Suspense>} />
+        <Route path="/cghs-surgery-master" element={<Suspense fallback={<PageLoader />}><CghsSurgeryMaster /></Suspense>} />
         <Route path="/lab" element={<Suspense fallback={<PageLoader />}><Lab /></Suspense>} />
         <Route path="/radiology" element={<Suspense fallback={<PageLoader />}><Radiology /></Suspense>} />
         <Route path="/medications" element={<Suspense fallback={<PageLoader />}><Medications /></Suspense>} />

@@ -64,7 +64,7 @@ export const HOSPITAL_CONFIGS: Record<HospitalType, HospitalConfig> = {
       hasHopeConsultants: true,
       hasAyushmanSurgeons: false,
       hasAyushmanConsultants: false,
-      hasCghsSurgery: false,
+      hasCghsSurgery: true,
     },
     theme: {
       sidebarBg: '#059669',
@@ -100,7 +100,7 @@ export const HOSPITAL_CONFIGS: Record<HospitalType, HospitalConfig> = {
       hasHopeConsultants: false,
       hasAyushmanSurgeons: true,
       hasAyushmanConsultants: true,
-      hasCghsSurgery: false,
+      hasCghsSurgery: true,
     },
     theme: {
       sidebarBg: '#dc2626',
