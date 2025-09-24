@@ -111,42 +111,6 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
   const [financialSummaryData, setFinancialSummaryData] = useState<FinancialSummaryData>({
     totalAmount: {
       advancePayment: '',
-      clinicalServices: '11276',
-      laboratoryServices: '6565',
-      radiology: '28000',
-      pharmacy: '',
-      implant: '',
-      blood: '',
-      surgery: '',
-      mandatoryServices: '6100',
-      physiotherapy: '',
-      consultation: '10000',
-      surgeryInternalReport: '',
-      implantCost: '',
-      private: '16200',
-      accommodationCharges: '',
-      total: '78141'
-    },
-    discount: {
-      advancePayment: '',
-      clinicalServices: '2256',
-      laboratoryServices: '1315',
-      radiology: '200',
-      pharmacy: '',
-      implant: '',
-      blood: '',
-      surgery: '',
-      mandatoryServices: '',
-      physiotherapy: '',
-      consultation: '',
-      surgeryInternalReport: '',
-      implantCost: '',
-      private: '',
-      accommodationCharges: '',
-      total: '3771'
-    },
-    amountPaid: {
-      advancePayment: '29000',
       clinicalServices: '',
       laboratoryServices: '',
       radiology: '',
@@ -161,7 +125,43 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
       implantCost: '',
       private: '',
       accommodationCharges: '',
-      total: '29000'
+      total: ''
+    },
+    discount: {
+      advancePayment: '',
+      clinicalServices: '',
+      laboratoryServices: '',
+      radiology: '',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '',
+      physiotherapy: '',
+      consultation: '',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '',
+      accommodationCharges: '',
+      total: ''
+    },
+    amountPaid: {
+      advancePayment: '',
+      clinicalServices: '',
+      laboratoryServices: '',
+      radiology: '',
+      pharmacy: '',
+      implant: '',
+      blood: '',
+      surgery: '',
+      mandatoryServices: '',
+      physiotherapy: '',
+      consultation: '',
+      surgeryInternalReport: '',
+      implantCost: '',
+      private: '',
+      accommodationCharges: '',
+      total: ''
     },
     refundedAmount: {
       advancePayment: '',
@@ -183,21 +183,21 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
     },
     balance: {
       advancePayment: '',
-      clinicalServices: '9020',
-      laboratoryServices: '5250',
-      radiology: '27800',
+      clinicalServices: '',
+      laboratoryServices: '',
+      radiology: '',
       pharmacy: '',
       implant: '',
       blood: '',
       surgery: '',
-      mandatoryServices: '6100',
+      mandatoryServices: '',
       physiotherapy: '',
-      consultation: '10000',
+      consultation: '',
       surgeryInternalReport: '',
       implantCost: '',
-      private: '16200',
+      private: '',
       accommodationCharges: '',
-      total: '45370'
+      total: ''
     }
   });
 
@@ -210,6 +210,271 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Auto-calculation functions for fetching real data
+  const fetchLabTestsTotal = async (): Promise<number> => {
+    if (!visitId) {
+      console.log('🚫 No visitId provided for lab tests total');
+      return 0;
+    }
+
+    console.log('🔍 Fetching lab tests total for visit:', visitId);
+
+    try {
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('📋 Visit lookup result:', { visitData, visitError });
+
+      if (visitError || !visitData) {
+        console.error('❌ Failed to find visit for lab tests:', visitError);
+        return 0;
+      }
+
+      console.log('✅ Found visit UUID:', visitData.id, 'for visit_id:', visitId);
+
+      // Get visit_labs data using the UUID
+      const { data: visitLabsData, error: visitLabsError } = await supabase
+        .from('visit_labs')
+        .select('*')
+        .eq('visit_id', visitData.id);
+
+      console.log('📊 Visit labs query result:', { 
+        visitLabsData, 
+        visitLabsError, 
+        count: visitLabsData?.length || 0 
+      });
+
+      if (visitLabsError) {
+        console.error('❌ Visit labs query error:', visitLabsError);
+        return 0;
+      }
+
+      if (!visitLabsData || visitLabsData.length === 0) {
+        console.log('📝 No visit labs data found');
+        return 0;
+      }
+
+      // Get lab details for cost information
+      const labIds = visitLabsData.map((item: any) => item.lab_id);
+      console.log('🔍 Fetching lab details for IDs:', labIds);
+
+      const { data: labsData, error: labsError } = await supabase
+        .from('lab')
+        .select('id, name, "NABH_rates_in_rupee"')
+        .in('id', labIds);
+
+      console.log('📊 Labs details query result:', { 
+        labsData, 
+        labsError, 
+        count: labsData?.length || 0 
+      });
+
+      if (labsError) {
+        console.error('❌ Labs details query error:', labsError);
+        return 0;
+      }
+
+      if (!labsData || labsData.length === 0) {
+        console.log('📝 No lab details found for cost calculation');
+        return 0;
+      }
+
+      // Calculate total using NABH rates
+      let total = 0;
+      visitLabsData.forEach((visitLab: any, index) => {
+        const labDetail = labsData.find((l: any) => l.id === visitLab.lab_id);
+        const cost = parseFloat(labDetail?.['NABH_rates_in_rupee']?.toString() || '0') || 0;
+        total += cost;
+        
+        console.log(`💰 Lab ${index + 1}:`, { 
+          labName: labDetail?.name || 'Unknown',
+          labId: visitLab.lab_id,
+          cost: cost,
+          nabhRate: labDetail?.['NABH_rates_in_rupee']
+        });
+      });
+
+      console.log('✅ Lab tests total calculated:', total, 'from', visitLabsData.length, 'tests');
+      return total;
+    } catch (error) {
+      console.error('❌ Error fetching lab tests total:', error);
+      return 0;
+    }
+  };
+
+  const fetchClinicalServicesTotal = async (): Promise<number> => {
+    if (!visitId) return 0;
+
+    try {
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) return 0;
+
+      // Fetch clinical services from junction table
+      const { data: clinicalData, error: clinicalError } = await supabase
+        .from('visit_clinical_services')
+        .select('amount')
+        .eq('visit_id', visitData.id);
+
+      if (clinicalError || !clinicalData) return 0;
+
+      // Calculate total
+      const total = clinicalData.reduce((sum, service) => sum + (parseFloat(service.amount) || 0), 0);
+      console.log('💰 Clinical services total calculated:', total);
+      return total;
+    } catch (error) {
+      console.error('Error fetching clinical services total:', error);
+      return 0;
+    }
+  };
+
+  const fetchMandatoryServicesTotal = async (): Promise<number> => {
+    if (!visitId) return 0;
+
+    try {
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) return 0;
+
+      // Fetch mandatory services from junction table
+      const { data: mandatoryData, error: mandatoryError } = await supabase
+        .from('visit_mandatory_services')
+        .select('amount')
+        .eq('visit_id', visitData.id);
+
+      if (mandatoryError || !mandatoryData) return 0;
+
+      // Calculate total
+      const total = mandatoryData.reduce((sum, service) => sum + (parseFloat(service.amount) || 0), 0);
+      console.log('💰 Mandatory services total calculated:', total);
+      return total;
+    } catch (error) {
+      console.error('Error fetching mandatory services total:', error);
+      return 0;
+    }
+  };
+
+  const fetchRadiologyTotal = async (): Promise<number> => {
+    if (!visitId) return 0;
+
+    try {
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) return 0;
+
+      // Get visit_radiology data using the UUID
+      const { data: visitRadiologyData, error: visitRadiologyError } = await supabase
+        .from('visit_radiology')
+        .select('*')
+        .eq('visit_id', visitData.id);
+
+      if (visitRadiologyError || !visitRadiologyData || visitRadiologyData.length === 0) {
+        console.log('📝 No radiology data found for visit');
+        return 0;
+      }
+
+      // Get radiology details for cost information
+      const radiologyIds = visitRadiologyData.map((item: any) => item.radiology_id);
+      
+      const { data: radiologyDetails, error: radiologyDetailsError } = await supabase
+        .from('radiology')
+        .select('id, name, cost')
+        .in('id', radiologyIds);
+
+      if (radiologyDetailsError || !radiologyDetails) {
+        console.log('📝 No radiology details found for cost calculation');
+        return 0;
+      }
+
+      // Calculate total using radiology costs
+      let total = 0;
+      visitRadiologyData.forEach((visitRadiology: any) => {
+        const radiologyDetail = radiologyDetails.find((r: any) => r.id === visitRadiology.radiology_id);
+        const cost = parseFloat(radiologyDetail?.cost?.toString() || '0') || 0;
+        total += cost;
+      });
+      
+      console.log('💰 Radiology total calculated:', total);
+      return total;
+    } catch (error) {
+      console.error('Error fetching radiology total:', error);
+      return 0;
+    }
+  };
+
+  const fetchPharmacyTotal = async (): Promise<number> => {
+    if (!visitId) return 0;
+
+    try {
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) return 0;
+
+      // Get visit_medications data using the UUID
+      const { data: visitMedicationsData, error: visitMedicationsError } = await supabase
+        .from('visit_medications')
+        .select('*')
+        .eq('visit_id', visitData.id);
+
+      if (visitMedicationsError || !visitMedicationsData || visitMedicationsData.length === 0) {
+        console.log('📝 No medications data found for visit');
+        return 0;
+      }
+
+      // Get medication details for cost information
+      const medicationIds = visitMedicationsData.map((item: any) => item.medication_id);
+      
+      const { data: medicationDetails, error: medicationDetailsError } = await supabase
+        .from('medications')
+        .select('id, name, cost')
+        .in('id', medicationIds);
+
+      if (medicationDetailsError || !medicationDetails) {
+        console.log('📝 No medication details found for cost calculation');
+        return 0;
+      }
+
+      // Calculate total using medication costs and quantities
+      let total = 0;
+      visitMedicationsData.forEach((visitMedication: any) => {
+        const medicationDetail = medicationDetails.find((m: any) => m.id === visitMedication.medication_id);
+        const cost = parseFloat(medicationDetail?.cost?.toString() || '0') || 0;
+        const quantity = parseFloat(visitMedication.quantity?.toString() || '1') || 1;
+        total += (cost * quantity);
+      });
+      
+      console.log('💰 Pharmacy total calculated:', total);
+      return total;
+    } catch (error) {
+      console.error('Error fetching pharmacy total:', error);
+      return 0;
+    }
+  };
 
   // Load financial summary data from database
   const loadFinancialSummary = async () => {
@@ -507,12 +772,95 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
     }));
   };
 
-  // Load data when billId changes
+  // Auto-populate financial data from database
+  const autoPopulateFinancialData = async () => {
+    if (!visitId) {
+      console.log('🚫 No visitId provided for auto-population');
+      return;
+    }
+
+    console.log('🔄 Auto-populating financial data for visit:', visitId);
+    setIsLoading(true);
+
+    try {
+      // Fetch all totals in parallel
+      const [
+        labTotal,
+        clinicalTotal,
+        mandatoryTotal,
+        radiologyTotal,
+        pharmacyTotal
+      ] = await Promise.all([
+        fetchLabTestsTotal(),
+        fetchClinicalServicesTotal(), 
+        fetchMandatoryServicesTotal(),
+        fetchRadiologyTotal(),
+        fetchPharmacyTotal()
+      ]);
+
+      // Calculate grand total
+      const grandTotal = labTotal + clinicalTotal + mandatoryTotal + radiologyTotal + pharmacyTotal;
+
+      // Update financial summary data with calculated totals
+      setFinancialSummaryData(prev => ({
+        ...prev,
+        totalAmount: {
+          ...prev.totalAmount,
+          clinicalServices: clinicalTotal.toString(),
+          laboratoryServices: labTotal.toString(),
+          radiology: radiologyTotal.toString(),
+          pharmacy: pharmacyTotal.toString(),
+          mandatoryServices: mandatoryTotal.toString(),
+          total: grandTotal.toString()
+        },
+        // Auto-calculate balance (Total - Discount - Amount Paid + Refunded)
+        balance: {
+          ...prev.balance,
+          clinicalServices: (clinicalTotal - (parseFloat(prev.discount.clinicalServices) || 0) - (parseFloat(prev.amountPaid.clinicalServices) || 0) + (parseFloat(prev.refundedAmount.clinicalServices) || 0)).toString(),
+          laboratoryServices: (labTotal - (parseFloat(prev.discount.laboratoryServices) || 0) - (parseFloat(prev.amountPaid.laboratoryServices) || 0) + (parseFloat(prev.refundedAmount.laboratoryServices) || 0)).toString(),
+          radiology: (radiologyTotal - (parseFloat(prev.discount.radiology) || 0) - (parseFloat(prev.amountPaid.radiology) || 0) + (parseFloat(prev.refundedAmount.radiology) || 0)).toString(),
+          pharmacy: (pharmacyTotal - (parseFloat(prev.discount.pharmacy) || 0) - (parseFloat(prev.amountPaid.pharmacy) || 0) + (parseFloat(prev.refundedAmount.pharmacy) || 0)).toString(),
+          mandatoryServices: (mandatoryTotal - (parseFloat(prev.discount.mandatoryServices) || 0) - (parseFloat(prev.amountPaid.mandatoryServices) || 0) + (parseFloat(prev.refundedAmount.mandatoryServices) || 0)).toString(),
+          total: (grandTotal - (parseFloat(prev.discount.total) || 0) - (parseFloat(prev.amountPaid.total) || 0) + (parseFloat(prev.refundedAmount.total) || 0)).toString()
+        }
+      }));
+
+      console.log('✅ Financial data auto-populated:', {
+        labTotal,
+        clinicalTotal,
+        mandatoryTotal,
+        radiologyTotal,
+        pharmacyTotal,
+        grandTotal
+      });
+
+    } catch (error) {
+      console.error('❌ Error auto-populating financial data:', error);
+      toast.error('Failed to load financial data from database');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load data when billId or visitId changes
   useEffect(() => {
     if (billId) {
       loadFinancialSummary();
     }
   }, [billId]);
+
+  // Auto-populate when visitId changes
+  useEffect(() => {
+    if (visitId) {
+      console.log('🔄 Auto-populate triggered by visitId change:', visitId);
+      // Add small delay to ensure components are ready
+      setTimeout(() => {
+        autoPopulateFinancialData();
+      }, 500);
+    } else {
+      console.log('🚫 No visitId available for auto-populate');
+    }
+  }, [visitId]);
 
   return {
     financialSummaryData,
@@ -523,6 +871,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
     isSaving,
     saveFinancialSummary,
     handleFinancialSummaryChange,
-    loadFinancialSummary
+    loadFinancialSummary,
+    autoPopulateFinancialData
   };
 };
