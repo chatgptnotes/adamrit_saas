@@ -5514,30 +5514,72 @@ INSTRUCTIONS:
     });
 
     try {
-      // Fetch current database state with joined service details
-      const { data: visitData, error } = await supabase
+      // Step 1: Get visit UUID from visit_id
+      const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select(`
-          clinical_service_id,
-          mandatory_service_id,
-          clinical_service:clinical_services(id, service_name, tpa_rate, private_rate, nabh_rate, non_nabh_rate),
-          mandatory_service:mandatory_services(id, service_name, tpa_rate, private_rate, nabh_rate, non_nabh_rate)
-        `)
+        .select('id, visit_id, mandatory_service_id, mandatory_service:mandatory_services(id, service_name, tpa_rate, private_rate, nabh_rate, non_nabh_rate)')
         .eq('visit_id', visitId)
         .single();
 
-      if (error) {
-        console.error('❌ [STATE VERIFICATION] Database error:', error);
+      if (visitError || !visitData) {
+        console.error('❌ [STATE VERIFICATION] Visit not found:', visitError);
         return;
       }
 
-      // Parse database data from UUID foreign key joins
+      console.log('📍 [STATE VERIFICATION] Visit found:', {
+        visitUuid: visitData.id,
+        visitTextId: visitData.visit_id
+      });
+
+      // Step 2: Get clinical services from junction table
+      const { data: clinicalServicesData, error: clinicalError } = await supabase
+        .from('visit_clinical_services')
+        .select(`
+          id,
+          clinical_service_id,
+          quantity,
+          rate_used,
+          rate_type,
+          amount,
+          external_requisition,
+          selected_at,
+          clinical_services!clinical_service_id (
+            id,
+            service_name,
+            tpa_rate,
+            private_rate,
+            nabh_rate,
+            non_nabh_rate
+          )
+        `)
+        .eq('visit_id', visitData.id)
+        .order('selected_at', { ascending: false });
+
+      if (clinicalError) {
+        console.error('❌ [STATE VERIFICATION] Clinical services junction error:', clinicalError);
+      }
+
+      // Parse database data from junction table and foreign keys
       let dbClinicalServices = [];
       let dbMandatoryServices = [];
 
-      // Handle clinical service from foreign key join
-      if (visitData?.clinical_service) {
-        dbClinicalServices = [visitData.clinical_service];
+      // Handle clinical services from junction table
+      if (clinicalServicesData && clinicalServicesData.length > 0) {
+        dbClinicalServices = clinicalServicesData.map(item => ({
+          id: item.clinical_services?.id,
+          service_name: item.clinical_services?.service_name,
+          tpa_rate: item.clinical_services?.tpa_rate,
+          private_rate: item.clinical_services?.private_rate,
+          nabh_rate: item.clinical_services?.nabh_rate,
+          non_nabh_rate: item.clinical_services?.non_nabh_rate,
+          quantity: item.quantity,
+          rate_used: item.rate_used,
+          rate_type: item.rate_type,
+          amount: item.amount,
+          external_requisition: item.external_requisition,
+          selected_at: item.selected_at,
+          junction_id: item.id
+        }));
       }
 
       // Handle mandatory service from foreign key join
@@ -5551,7 +5593,23 @@ INSTRUCTIONS:
         dbMandatoryCount: dbMandatoryServices.length,
         stateMandatoryCount: savedMandatoryServicesData.length,
         clinicalMatch: dbClinicalServices.length === savedClinicalServicesData.length,
-        mandatoryMatch: dbMandatoryServices.length === savedMandatoryServicesData.length
+        mandatoryMatch: dbMandatoryServices.length === savedMandatoryServicesData.length,
+        
+        // Junction table debugging
+        junctionTableResults: {
+          found: clinicalServicesData ? clinicalServicesData.length : 0,
+          hasError: !!clinicalError,
+          sampleService: clinicalServicesData?.[0]?.clinical_services?.service_name || 'NONE'
+        },
+        
+        // Data sources
+        clinicalSource: 'JUNCTION_TABLE',
+        mandatorySource: 'FOREIGN_KEY',
+        
+        visitInfo: {
+          uuid: visitData.id,
+          textId: visitData.visit_id
+        }
       });
 
       // If state doesn't match database, update state
@@ -5902,13 +5960,35 @@ INSTRUCTIONS:
     console.log('🔍 [CLINICAL SERVICES FETCH] Current savedClinicalServicesData state:', savedClinicalServicesData.length);
 
     try {
-      // Get clinical services from visits table using UUID foreign key join
-      console.log('🔍 [CLINICAL SERVICES FETCH] Querying database...');
+      // Step 1: Get visit UUID first
+      console.log('🔍 [CLINICAL SERVICES FETCH] Step 1: Getting visit UUID...');
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.error('❌ [CLINICAL SERVICES FETCH] Visit not found:', visitError);
+        return;
+      }
+
+      console.log('🔍 [CLINICAL SERVICES FETCH] Visit found:', visitData);
+
+      // Step 2: Get clinical services from junction table (hybrid approach)
+      console.log('🔍 [CLINICAL SERVICES FETCH] Step 2: Fetching from junction table...');
+      const { data: clinicalServicesData, error: clinicalError } = await supabase
+        .from('visit_clinical_services')
         .select(`
+          id,
           clinical_service_id,
-          clinical_service:clinical_services(
+          quantity,
+          rate_used,
+          rate_type,
+          amount,
+          external_requisition,
+          selected_at,
+          clinical_services!clinical_service_id (
             id,
             service_name,
             tpa_rate,
@@ -5917,61 +5997,61 @@ INSTRUCTIONS:
             non_nabh_rate
           )
         `)
-        .eq('visit_id', visitId)
-        .single();
+        .eq('visit_id', visitData.id)
+        .order('selected_at', { ascending: false });
 
-      console.log('🔍 [CLINICAL SERVICES FETCH] Database response:', {
-        visitData,
-        visitError,
-        hasData: !!visitData,
-        hasError: !!visitError
+      console.log('🔍 [CLINICAL SERVICES FETCH] Junction table response:', {
+        clinicalServicesData,
+        clinicalError,
+        hasData: !!clinicalServicesData,
+        dataCount: clinicalServicesData?.length || 0
       });
 
-      if (visitError) {
-        console.error('❌ [CLINICAL SERVICES FETCH] Database error:', visitError);
+      if (clinicalError) {
+        console.error('❌ [CLINICAL SERVICES FETCH] Junction table error:', clinicalError);
         return;
       }
 
-      if (!visitData) {
-        console.warn('⚠️ [CLINICAL SERVICES FETCH] No visit data found for visitId:', visitId);
-        return;
-      }
+      // Process junction table data
+      let processedClinicalServicesData = [];
 
-      // Handle clinical service from UUID foreign key join
-      console.log('🔍 [CLINICAL SERVICES FETCH] Raw clinical service from DB:', {
-        clinicalServiceId: visitData.clinical_service_id,
-        hasClinicalService: !!visitData.clinical_service,
-        serviceName: visitData.clinical_service?.service_name
-      });
-
-      let clinicalServicesData = [];
-
-      if (visitData?.clinical_service) {
-        // Convert joined service data to expected format
-        const serviceData = {
-          id: visitData.clinical_service.id,
-          service_name: visitData.clinical_service.service_name,
-          private_rate: visitData.clinical_service.private_rate,
-          tpa_rate: visitData.clinical_service.tpa_rate,
-          nabh_rate: visitData.clinical_service.nabh_rate,
-          non_nabh_rate: visitData.clinical_service.non_nabh_rate,
-          // Note: selectedRate and other selection details would need to be stored separately
-          // or fetched from junction table if using that approach
-        };
-        clinicalServicesData = [serviceData];
-        console.log('✅ [CLINICAL SERVICES FETCH] Clinical service found via join:', serviceData);
+      if (clinicalServicesData && clinicalServicesData.length > 0) {
+        processedClinicalServicesData = clinicalServicesData.map(item => {
+          const serviceData = {
+            id: item.clinical_services?.id,
+            service_name: item.clinical_services?.service_name,
+            tpa_rate: item.clinical_services?.tpa_rate,
+            private_rate: item.clinical_services?.private_rate,
+            nabh_rate: item.clinical_services?.nabh_rate,
+            non_nabh_rate: item.clinical_services?.non_nabh_rate,
+            // Junction table specific data
+            quantity: item.quantity,
+            rate_used: item.rate_used,
+            rate_type: item.rate_type,
+            amount: item.amount,
+            external_requisition: item.external_requisition,
+            selected_at: item.selected_at,
+            junction_id: item.id,
+            // For compatibility with existing UI
+            selectedRate: item.rate_used,
+            rateType: item.rate_type
+          };
+          console.log('📋 [CLINICAL SERVICES FETCH] Processed service:', serviceData);
+          return serviceData;
+        });
+        console.log('✅ [CLINICAL SERVICES FETCH] Clinical services found via junction table:', processedClinicalServicesData.length);
       } else {
-        console.log('ℹ️ [CLINICAL SERVICES FETCH] No clinical service found for this visit');
-        clinicalServicesData = [];
+        console.log('ℹ️ [CLINICAL SERVICES FETCH] No clinical services found in junction table');
+        processedClinicalServicesData = [];
       }
 
       console.log('🎯 [CLINICAL SERVICES FETCH] Final data to set in state:', {
-        count: clinicalServicesData.length,
-        data: clinicalServicesData,
-        sample: clinicalServicesData[0] || 'no items'
+        count: processedClinicalServicesData.length,
+        data: processedClinicalServicesData,
+        sample: processedClinicalServicesData[0] || 'no items'
       });
 
-      setSavedClinicalServicesData(clinicalServicesData);
+      setSavedClinicalServicesData(processedClinicalServicesData);
       setClinicalServicesInitialized(true);
 
       console.log('✅ [CLINICAL SERVICES FETCH] State updated successfully');
@@ -5980,7 +6060,7 @@ INSTRUCTIONS:
       setTimeout(() => {
         console.log('🔍 [CLINICAL SERVICES FETCH] State verification (after setState):', {
           currentStateLength: savedClinicalServicesData.length,
-          expectedLength: clinicalServicesData.length
+          expectedLength: processedClinicalServicesData.length
         });
       }, 100);
 
@@ -5998,14 +6078,38 @@ INSTRUCTIONS:
     }
 
     console.log('🔍 [MANDATORY SERVICES FETCH] Starting fetch for visit:', visitId);
+    console.log('🔍 [MANDATORY SERVICES FETCH] Current savedMandatoryServicesData state:', savedMandatoryServicesData.length);
 
     try {
-      // Get mandatory services from visits table using UUID foreign key join
+      // Step 1: Get visit UUID first
+      console.log('🔍 [MANDATORY SERVICES FETCH] Step 1: Getting visit UUID...');
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.error('❌ [MANDATORY SERVICES FETCH] Visit not found:', visitError);
+        return;
+      }
+
+      console.log('🔍 [MANDATORY SERVICES FETCH] Visit found:', visitData);
+
+      // Step 2: Get mandatory services from junction table (hybrid approach)
+      console.log('🔍 [MANDATORY SERVICES FETCH] Step 2: Fetching from junction table...');
+      const { data: mandatoryServicesData, error: mandatoryError } = await supabase
+        .from('visit_mandatory_services')
         .select(`
+          id,
           mandatory_service_id,
-          mandatory_service:mandatory_services(
+          quantity,
+          rate_used,
+          rate_type,
+          amount,
+          external_requisition,
+          selected_at,
+          mandatory_services!mandatory_service_id (
             id,
             service_name,
             tpa_rate,
@@ -6014,54 +6118,71 @@ INSTRUCTIONS:
             non_nabh_rate
           )
         `)
-        .eq('visit_id', visitId)
-        .single();
+        .eq('visit_id', visitData.id)
+        .order('selected_at', { ascending: false });
 
-      console.log('🔍 [MANDATORY SERVICES FETCH] Database response:', {
-        visitData,
-        visitError,
-        hasData: !!visitData,
-        hasError: !!visitError
+      console.log('🔍 [MANDATORY SERVICES FETCH] Junction table response:', {
+        mandatoryServicesData,
+        mandatoryError,
+        hasData: !!mandatoryServicesData,
+        dataCount: mandatoryServicesData?.length || 0
       });
 
-      if (visitError) {
-        console.error('❌ [MANDATORY SERVICES FETCH] Database error:', visitError);
+      if (mandatoryError) {
+        console.error('❌ [MANDATORY SERVICES FETCH] Junction table error:', mandatoryError);
         return;
       }
 
-      console.log('🔍 [MANDATORY SERVICES FETCH] Raw mandatory service from DB:', {
-        mandatoryServiceId: visitData?.mandatory_service_id,
-        hasMandatoryService: !!visitData?.mandatory_service,
-        serviceName: visitData?.mandatory_service?.service_name
-      });
+      // Process junction table data
+      let processedMandatoryServicesData = [];
 
-      let mandatoryServicesData = [];
-      if (visitData?.mandatory_service) {
-        // Convert joined service data to expected format
-        const serviceData = {
-          id: visitData.mandatory_service.id,
-          service_name: visitData.mandatory_service.service_name,
-          private_rate: visitData.mandatory_service.private_rate,
-          tpa_rate: visitData.mandatory_service.tpa_rate,
-          nabh_rate: visitData.mandatory_service.nabh_rate,
-          non_nabh_rate: visitData.mandatory_service.non_nabh_rate,
-          // Note: selectedRate and other selection details would need to be stored separately
-          // or fetched from junction table if using that approach
-        };
-        mandatoryServicesData = [serviceData];
-        console.log('✅ [MANDATORY SERVICES FETCH] Mandatory service found via join:', serviceData);
+      if (mandatoryServicesData && mandatoryServicesData.length > 0) {
+        processedMandatoryServicesData = mandatoryServicesData.map(item => {
+          const serviceData = {
+            id: item.mandatory_services?.id,
+            service_name: item.mandatory_services?.service_name,
+            tpa_rate: item.mandatory_services?.tpa_rate,
+            private_rate: item.mandatory_services?.private_rate,
+            nabh_rate: item.mandatory_services?.nabh_rate,
+            non_nabh_rate: item.mandatory_services?.non_nabh_rate,
+            // Junction table specific data
+            quantity: item.quantity,
+            rate_used: item.rate_used,
+            rate_type: item.rate_type,
+            amount: item.amount,
+            external_requisition: item.external_requisition,
+            selected_at: item.selected_at,
+            junction_id: item.id,
+            // For compatibility with existing UI
+            selectedRate: item.rate_used,
+            rateType: item.rate_type
+          };
+          console.log('📋 [MANDATORY SERVICES FETCH] Processed service:', serviceData);
+          return serviceData;
+        });
+        console.log('✅ [MANDATORY SERVICES FETCH] Mandatory services found via junction table:', processedMandatoryServicesData.length);
       } else {
-        console.log('ℹ️ [MANDATORY SERVICES FETCH] No mandatory service found for this visit');
-        mandatoryServicesData = [];
+        console.log('ℹ️ [MANDATORY SERVICES FETCH] No mandatory services found in junction table');
+        processedMandatoryServicesData = [];
       }
 
-      console.log('✅ [MANDATORY SERVICES FETCH] Final data to set in state:', mandatoryServicesData);
-      setSavedMandatoryServicesData(mandatoryServicesData);
+      console.log('🎯 [MANDATORY SERVICES FETCH] Final data to set in state:', {
+        count: processedMandatoryServicesData.length,
+        data: processedMandatoryServicesData,
+        sample: processedMandatoryServicesData[0] || 'no items'
+      });
+
+      setSavedMandatoryServicesData(processedMandatoryServicesData);
       setMandatoryServicesInitialized(true);
 
-      // Add a delay to ensure state update and log the result
+      console.log('✅ [MANDATORY SERVICES FETCH] State updated successfully');
+
+      // Verify state will be updated in next render
       setTimeout(() => {
-        console.log('🔍 [MANDATORY SERVICES FETCH] State updated, current savedMandatoryServicesData length should be:', mandatoryServicesData.length);
+        console.log('🔍 [MANDATORY SERVICES FETCH] State verification (after setState):', {
+          currentStateLength: savedMandatoryServicesData.length,
+          expectedLength: processedMandatoryServicesData.length
+        });
       }, 100);
 
     } catch (error) {
@@ -6104,10 +6225,10 @@ INSTRUCTIONS:
     }
 
     try {
-      // Get current clinical service from visits table
+      // Get visit data for hybrid deletion
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('clinical_service_id')
+        .select('id, clinical_service_id')
         .eq('visit_id', visitId)
         .single();
 
@@ -6123,7 +6244,23 @@ INSTRUCTIONS:
         return;
       }
 
-      // Remove clinical service by setting foreign key to null
+      // Hybrid deletion: remove from both junction table and foreign key
+      console.log('🗑️ [CLINICAL DELETE] Starting hybrid deletion...');
+      
+      // Step 1: Delete from junction table
+      const { error: junctionDeleteError } = await supabase
+        .from('visit_clinical_services')
+        .delete()
+        .eq('visit_id', visitData.id)
+        .eq('clinical_service_id', serviceId);
+
+      if (junctionDeleteError) {
+        console.error('Error deleting from junction table:', junctionDeleteError);
+        toast.error('Failed to delete from junction table');
+        return;
+      }
+
+      // Step 2: Remove clinical service by setting foreign key to null
       const { error: updateError } = await supabase
         .from('visits')
         .update({
@@ -6132,10 +6269,12 @@ INSTRUCTIONS:
         .eq('visit_id', visitId);
 
       if (updateError) {
-        console.error('Error updating clinical services:', updateError);
+        console.error('Error updating clinical services FK:', updateError);
         toast.error('Failed to delete clinical service');
         return;
       }
+
+      console.log('✅ [CLINICAL DELETE] Hybrid deletion completed');
 
       // Refresh saved clinical services data
       await fetchSavedClinicalServicesData();
@@ -6153,10 +6292,10 @@ INSTRUCTIONS:
     }
 
     try {
-      // Get current mandatory services from visits table
+      // Get visit data for hybrid deletion
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('mandatory_service_id')
+        .select('id, mandatory_service_id')
         .eq('visit_id', visitId)
         .single();
 
@@ -6172,7 +6311,23 @@ INSTRUCTIONS:
         return;
       }
 
-      // Remove mandatory service by setting foreign key to null
+      // Hybrid deletion: remove from both junction table and foreign key
+      console.log('🗑️ [MANDATORY DELETE] Starting hybrid deletion...');
+      
+      // Step 1: Delete from junction table
+      const { error: junctionDeleteError } = await supabase
+        .from('visit_mandatory_services')
+        .delete()
+        .eq('visit_id', visitData.id)
+        .eq('mandatory_service_id', serviceId);
+
+      if (junctionDeleteError) {
+        console.error('Error deleting from junction table:', junctionDeleteError);
+        toast.error('Failed to delete from junction table');
+        return;
+      }
+
+      // Step 2: Remove mandatory service by setting foreign key to null
       const { error: updateError } = await supabase
         .from('visits')
         .update({
@@ -6181,10 +6336,12 @@ INSTRUCTIONS:
         .eq('visit_id', visitId);
 
       if (updateError) {
-        console.error('Error updating mandatory services:', updateError);
+        console.error('Error updating mandatory services FK:', updateError);
         toast.error('Failed to delete mandatory service');
         return;
       }
+
+      console.log('✅ [MANDATORY DELETE] Hybrid deletion completed');
 
       // Refresh saved mandatory services data
       await fetchSavedMandatoryServicesData();
@@ -13653,23 +13810,63 @@ Dr. Murali B K
                                         selected_at: new Date().toISOString()
                                       };
 
-                                      // Use UUID foreign key approach instead of JSONB
-                                      console.log('🔄 [MANDATORY SAVE] Using UUID foreign key assignment');
+                                      // Use hybrid approach: junction table + foreign key
+                                      console.log('🔄 [MANDATORY SAVE] Using hybrid approach (junction + FK)');
 
-                                      // Simply assign the service UUID to mandatory_service_id
+                                      // Step 1: Insert into junction table
+                                      console.log('💾 [MANDATORY SAVE] Step 1: Inserting into junction table...');
+                                      const junctionData = {
+                                        visit_id: visitData.id,
+                                        mandatory_service_id: service.id,
+                                        quantity: 1,
+                                        rate_used: parseFloat(service.selectedRate),
+                                        rate_type: service.rateType,
+                                        amount: parseFloat(service.selectedRate)
+                                      };
+                                      
+                                      console.log('💾 [MANDATORY SAVE] Junction data to insert:', junctionData);
+                                      console.log('💾 [MANDATORY SAVE] Visit UUID:', visitData.id);
+                                      console.log('💾 [MANDATORY SAVE] Service UUID:', service.id);
+
+                                      const { data: junctionResult, error: junctionError } = await supabase
+                                        .from('visit_mandatory_services')
+                                        .upsert(junctionData, { 
+                                          onConflict: 'visit_id,mandatory_service_id',
+                                          ignoreDuplicates: false 
+                                        })
+                                        .select();
+
+                                      console.log('💾 [MANDATORY SAVE] Junction table result:', {
+                                        junctionResult,
+                                        junctionError
+                                      });
+
+                                      if (junctionError) {
+                                        console.error('❌ [MANDATORY SAVE] Junction table insert failed:', {
+                                          error: junctionError,
+                                          message: junctionError.message,
+                                          details: junctionError.details,
+                                          hint: junctionError.hint,
+                                          code: junctionError.code,
+                                          junctionData
+                                        });
+                                        toast.error(`Failed to save mandatory service in junction table: ${junctionError.message}`);
+                                        return;
+                                      }
+
+                                      console.log('✅ [MANDATORY SAVE] Junction table insert successful!', {
+                                        insertedData: junctionResult,
+                                        rowCount: junctionResult?.length || 0
+                                      });
+
+                                      // Step 2: Update visits table foreign key
+                                      console.log('💾 [MANDATORY SAVE] Step 2: Updating visits FK...');
                                       const updateData = {
                                         mandatory_service_id: service.id
                                       };
+                                      
+                                      console.log('💾 [MANDATORY SAVE] FK update data:', updateData);
 
-                                      console.log('💾 [MANDATORY SAVE] Preparing database update:', {
-                                        targetVisitId: visitId,
-                                        targetDbId: visitData.id,
-                                        serviceId: service.id,
-                                        updateData
-                                      });
-
-                                      // Update visits table with mandatory service UUID foreign key
-                                      console.log('🔄 [MANDATORY SAVE] Executing database UPDATE...');
                                       const { data: updateResult, error: updateError } = await supabase
                                         .from('visits')
                                         .update(updateData)
@@ -13833,6 +14030,15 @@ Dr. Murali B K
                                   className="p-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
                                   onClick={async () => {
                                     console.log('🏥 Clinical service selected:', service);
+                                    console.log('🏥 [DEBUG] Current visitId:', visitId);
+                                    console.log('🏥 [DEBUG] Current URL:', window.location.href);
+                                    
+                                    // Critical validation first
+                                    if (!visitId) {
+                                      console.error('❌ [CRITICAL] No visitId found!');
+                                      toast.error('No visit ID found. Please check the URL.');
+                                      return;
+                                    }
 
                                     // Show immediate feedback
                                     toast.info(`Saving clinical service "${service.service_name}"...`);
@@ -13916,22 +14122,63 @@ Dr. Murali B K
                                         return;
                                       }
 
-                                      // Use UUID foreign key approach instead of JSONB
-                                      console.log('🔄 [CLINICAL SAVE] Using UUID foreign key assignment');
+                                      // Use hybrid approach: junction table + foreign key
+                                      console.log('🔄 [CLINICAL SAVE] Using hybrid approach (junction + FK)');
 
-                                      // Simply assign the service UUID to clinical_service_id
+                                      // Step 1: Insert into junction table
+                                      console.log('💾 [CLINICAL SAVE] Step 1: Inserting into junction table...');
+                                      const junctionData = {
+                                        visit_id: visitData.id,
+                                        clinical_service_id: service.id,
+                                        quantity: 1,
+                                        rate_used: parseFloat(service.selectedRate),
+                                        rate_type: service.rateType,
+                                        amount: parseFloat(service.selectedRate)
+                                      };
+                                      
+                                      console.log('💾 [CLINICAL SAVE] Junction data to insert:', junctionData);
+                                      console.log('💾 [CLINICAL SAVE] Visit UUID:', visitData.id);
+                                      console.log('💾 [CLINICAL SAVE] Service UUID:', service.id);
+
+                                      const { data: junctionResult, error: junctionError } = await supabase
+                                        .from('visit_clinical_services')
+                                        .upsert(junctionData, { 
+                                          onConflict: 'visit_id,clinical_service_id',
+                                          ignoreDuplicates: false 
+                                        })
+                                        .select();
+
+                                      console.log('💾 [CLINICAL SAVE] Junction table result:', {
+                                        junctionResult,
+                                        junctionError
+                                      });
+
+                                      if (junctionError) {
+                                        console.error('❌ [CLINICAL SAVE] Junction table insert failed:', {
+                                          error: junctionError,
+                                          message: junctionError.message,
+                                          details: junctionError.details,
+                                          hint: junctionError.hint,
+                                          code: junctionError.code,
+                                          junctionData
+                                        });
+                                        toast.error(`Failed to save clinical service in junction table: ${junctionError.message}`);
+                                        return;
+                                      }
+
+                                      console.log('✅ [CLINICAL SAVE] Junction table insert successful!', {
+                                        insertedData: junctionResult,
+                                        rowCount: junctionResult?.length || 0
+                                      });
+
+                                      // Step 2: Update visits table foreign key
+                                      console.log('💾 [CLINICAL SAVE] Step 2: Updating visits FK...');
                                       const updateData = {
                                         clinical_service_id: service.id
                                       };
-                                      console.log('💾 [CLINICAL SAVE] Preparing database update:', {
-                                        targetVisitId: visitId,
-                                        targetDbId: visitData.id,
-                                        serviceId: service.id,
-                                        updateData
-                                      });
-
-                                      // Update visits table with clinical service UUID foreign key
-                                      console.log('🔄 [CLINICAL SAVE] Executing database UPDATE...');
+                                      
+                                      console.log('💾 [CLINICAL SAVE] FK update data:', updateData);
+                                      
                                       const { data: updateResult, error: updateError } = await supabase
                                         .from('visits')
                                         .update(updateData)

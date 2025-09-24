@@ -238,60 +238,158 @@ const Invoice = () => {
     enabled: !!visitId
   });
 
-  // Fetch mandatory services based on patient type
+  // Fetch mandatory services from junction table (actual saved services for this visit)
   const { data: mandatoryServicesData } = useQuery({
-    queryKey: ['invoice-mandatory-services', visitData?.category, visitData?.patients?.category],
+    queryKey: ['invoice-mandatory-services-junction', visitId],
     queryFn: async () => {
-      console.log('=== MANDATORY SERVICES DEBUG ===');
-      console.log('Full visitData:', visitData);
-      console.log('visitData.category:', visitData?.category);
-      console.log('visitData.patients:', visitData?.patients);
-      console.log('visitData.patients.category:', visitData?.patients?.category);
+      console.log('=== MANDATORY SERVICES JUNCTION FETCH ===');
+      console.log('Fetching mandatory services for visitId:', visitId);
 
-      // Try to get category from different possible fields
-      const patientCategory = visitData?.category || visitData?.patients?.category || visitData?.patients?.patient_category || 'Private';
-      console.log('Detected patient category:', patientCategory);
-
-      if (!patientCategory) {
-        console.log('No patient category found in any field');
+      if (!visitId) {
+        console.log('No visitId provided');
         return [];
       }
 
-      // Determine which services to fetch based on patient type
-      let serviceNames = [];
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', visitId)
+        .single();
 
-      // Check if patient has admission_date (IPD) or not (OPD)
-      const isIPD = visitData?.admission_date && visitData.admission_date !== null;
-      console.log('Patient type - isIPD:', isIPD);
-
-      if (isIPD) {
-        // IPD patients get Nursing Charges and Doctor Charges
-        serviceNames = ['Nursing Charges', 'Doctor Charges'];
-        console.log('Fetching IPD mandatory services:', serviceNames);
-      } else {
-        // OPD patients get First Consultation and Registration Charges
-        serviceNames = ['First Consultation', 'Registration Charges'];
-        console.log('Fetching OPD mandatory services:', serviceNames);
+      if (visitError || !visitData) {
+        console.error('Visit not found for mandatory services:', visitError);
+        return [];
       }
 
-      const { data, error } = await supabase
-        .from('mandatory_services')
-        .select('*')
-        .eq('status', 'Active')
-        .in('service_name', serviceNames)
-        .order('service_name', { ascending: true });
+      console.log('Visit found:', visitData);
 
-      console.log('Mandatory services query result:', { data, error });
+      // Fetch from junction table
+      const { data, error } = await supabase
+        .from('visit_mandatory_services')
+        .select(`
+          id,
+          quantity,
+          rate_used,
+          rate_type,
+          amount,
+          selected_at,
+          mandatory_services!mandatory_service_id (
+            id,
+            service_name,
+            tpa_rate,
+            private_rate,
+            nabh_rate,
+            non_nabh_rate
+          )
+        `)
+        .eq('visit_id', visitData.id)
+        .order('selected_at', { ascending: false });
+
+      console.log('Mandatory services junction query result:', { data, error });
 
       if (error) {
-        console.error('Error fetching mandatory services:', error);
+        console.error('Error fetching mandatory services from junction table:', error);
         return [];
       }
 
-      console.log('Mandatory services data fetched successfully:', data);
-      return data || [];
+      // Map junction data to expected format
+      const mappedData = (data || []).map(item => ({
+        id: item.mandatory_services?.id,
+        service_name: item.mandatory_services?.service_name,
+        tpa_rate: item.mandatory_services?.tpa_rate,
+        private_rate: item.mandatory_services?.private_rate,
+        nabh_rate: item.mandatory_services?.nabh_rate,
+        non_nabh_rate: item.mandatory_services?.non_nabh_rate,
+        // Junction table specific data
+        quantity: item.quantity,
+        rate_used: item.rate_used,
+        rate_type: item.rate_type,
+        amount: item.amount,
+        selected_at: item.selected_at
+      }));
+
+      console.log('Mandatory services data mapped:', mappedData);
+      return mappedData;
     },
-    enabled: !!visitData // Enable when visitData is available, regardless of category
+    enabled: !!visitId
+  });
+
+  // Fetch clinical services from junction table (actual saved services for this visit)
+  const { data: clinicalServicesData } = useQuery({
+    queryKey: ['invoice-clinical-services-junction', visitId],
+    queryFn: async () => {
+      console.log('=== CLINICAL SERVICES JUNCTION FETCH ===');
+      console.log('Fetching clinical services for visitId:', visitId);
+
+      if (!visitId) {
+        console.log('No visitId provided');
+        return [];
+      }
+
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.error('Visit not found for clinical services:', visitError);
+        return [];
+      }
+
+      console.log('Visit found:', visitData);
+
+      // Fetch from junction table
+      const { data, error } = await supabase
+        .from('visit_clinical_services')
+        .select(`
+          id,
+          quantity,
+          rate_used,
+          rate_type,
+          amount,
+          selected_at,
+          clinical_services!clinical_service_id (
+            id,
+            service_name,
+            tpa_rate,
+            private_rate,
+            nabh_rate,
+            non_nabh_rate
+          )
+        `)
+        .eq('visit_id', visitData.id)
+        .order('selected_at', { ascending: false });
+
+      console.log('Clinical services junction query result:', { data, error });
+
+      if (error) {
+        console.error('Error fetching clinical services from junction table:', error);
+        return [];
+      }
+
+      // Map junction data to expected format
+      const mappedData = (data || []).map(item => ({
+        id: item.clinical_services?.id,
+        service_name: item.clinical_services?.service_name,
+        tpa_rate: item.clinical_services?.tpa_rate,
+        private_rate: item.clinical_services?.private_rate,
+        nabh_rate: item.clinical_services?.nabh_rate,
+        non_nabh_rate: item.clinical_services?.non_nabh_rate,
+        // Junction table specific data
+        quantity: item.quantity,
+        rate_used: item.rate_used,
+        rate_type: item.rate_type,
+        amount: item.amount,
+        selected_at: item.selected_at
+      }));
+
+      console.log('Clinical services data mapped:', mappedData);
+      return mappedData;
+    },
+    enabled: !!visitId
   });
 
   // Show loading state
@@ -488,37 +586,84 @@ const Invoice = () => {
     // Lab and radiology charges should only show when specifically selected from dropdown
     // They are NOT included in "All Charges" view anymore
 
-    // Add mandatory services for Private/OPD and IPD patients
-    console.log('=== MANDATORY SERVICES INTEGRATION ===');
+    // Add mandatory services from junction table (actual saved services with correct rates)
+    console.log('=== MANDATORY SERVICES INTEGRATION (JUNCTION TABLE) ===');
     console.log('mandatoryServicesData:', mandatoryServicesData);
     console.log('mandatoryServicesData length:', mandatoryServicesData?.length);
 
-    // Try to get category from different possible fields
-    const patientCategory = visitData?.category || visitData?.patients?.category || visitData?.patients?.patient_category || 'Private';
-    console.log('Using patient category for rate calculation:', patientCategory);
-
     if (mandatoryServicesData && mandatoryServicesData.length > 0) {
-      console.log('Adding mandatory services for patient category:', patientCategory);
+      console.log('Adding mandatory services from junction table');
       mandatoryServicesData.forEach((mandatoryService) => {
-        console.log('Processing mandatory service:', mandatoryService);
-        const rate = getMandatoryServiceRate(mandatoryService, patientCategory);
-        console.log('Calculated rate for', mandatoryService.service_name, ':', rate);
+        console.log('Processing saved mandatory service:', mandatoryService);
+        
+        // Use rate_used from junction table (actual rate that was selected and saved)
+        const rate = mandatoryService.rate_used || mandatoryService.amount || 0;
+        const quantity = mandatoryService.quantity || 1;
+        const amount = mandatoryService.amount || (rate * quantity);
+        
+        console.log('Junction table service data:', {
+          name: mandatoryService.service_name,
+          rate: rate,
+          quantity: quantity,
+          amount: amount,
+          rateType: mandatoryService.rate_type
+        });
 
-        if (rate > 0) { // Only add services with valid rates
+        if (rate > 0) {
           console.log('Adding mandatory service to invoice:', mandatoryService.service_name, 'Rate:', rate);
           services.push({
             srNo: srNo++,
             item: mandatoryService.service_name,
             rate: rate,
-            qty: 1,
-            amount: rate
+            qty: quantity,
+            amount: amount
           });
         } else {
           console.log('Skipping mandatory service (rate = 0):', mandatoryService.service_name);
         }
       });
     } else {
-      console.log('No mandatory services data found or empty array');
+      console.log('No mandatory services found in junction table for this visit');
+    }
+
+    // Add clinical services from junction table (actual saved services with correct rates)
+    console.log('=== CLINICAL SERVICES INTEGRATION (JUNCTION TABLE) ===');
+    console.log('clinicalServicesData:', clinicalServicesData);
+    console.log('clinicalServicesData length:', clinicalServicesData?.length);
+
+    if (clinicalServicesData && clinicalServicesData.length > 0) {
+      console.log('Adding clinical services from junction table');
+      clinicalServicesData.forEach((clinicalService) => {
+        console.log('Processing saved clinical service:', clinicalService);
+        
+        // Use rate_used from junction table (actual rate that was selected and saved)
+        const rate = clinicalService.rate_used || clinicalService.amount || 0;
+        const quantity = clinicalService.quantity || 1;
+        const amount = clinicalService.amount || (rate * quantity);
+        
+        console.log('Junction table clinical service data:', {
+          name: clinicalService.service_name,
+          rate: rate,
+          quantity: quantity,
+          amount: amount,
+          rateType: clinicalService.rate_type
+        });
+
+        if (rate > 0) {
+          console.log('Adding clinical service to invoice:', clinicalService.service_name, 'Rate:', rate);
+          services.push({
+            srNo: srNo++,
+            item: clinicalService.service_name,
+            rate: rate,
+            qty: quantity,
+            amount: amount
+          });
+        } else {
+          console.log('Skipping clinical service (rate = 0):', clinicalService.service_name);
+        }
+      });
+    } else {
+      console.log('No clinical services found in junction table for this visit');
     }
 
     return services;
