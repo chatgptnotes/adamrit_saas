@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuCheckboxItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Loader2, Search, Edit, Users, Calendar, Clock, FileText, Building2, Shield, AlertTriangle, Filter } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
@@ -637,6 +637,7 @@ const CurrentlyAdmittedPatients = () => {
   const { hospitalConfig } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [selectedVisitForDischarge, setSelectedVisitForDischarge] = useState<Visit | null>(null);
   
 
 
@@ -1007,24 +1008,15 @@ const CurrentlyAdmittedPatients = () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1"
-                            >
-                              <Shield className="h-4 w-4" />
-                              {visit.discharge_date ? 'Manage Discharge' : 'Start Discharge'}
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                            <DialogHeader>
-                              <DialogTitle>Discharge Workflow Management</DialogTitle>
-                            </DialogHeader>
-                            <DischargeWorkflowPanel visit={visit} />
-                          </DialogContent>
-                        </Dialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-1"
+                          onClick={() => setSelectedVisitForDischarge(visit)}
+                        >
+                          <Shield className="h-4 w-4" />
+                          {visit.discharge_date ? 'Manage Discharge' : 'Start Discharge'}
+                        </Button>
                       </TableCell>
                       <TableCell>
                         <Button
@@ -1101,6 +1093,38 @@ const CurrentlyAdmittedPatients = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Discharge Workflow Modal */}
+      <Dialog
+        open={!!selectedVisitForDischarge}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedVisitForDischarge(null);
+          }
+        }}
+      >
+        <DialogContent
+          className="max-w-4xl max-h-[90vh] overflow-y-auto"
+          onInteractOutside={(e) => {
+            // Prevent modal from closing when clicking outside
+            e.preventDefault();
+          }}
+          onEscapeKeyDown={(e) => {
+            // Prevent modal from closing on Escape key
+            e.preventDefault();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Discharge Workflow Management</DialogTitle>
+          </DialogHeader>
+          {selectedVisitForDischarge && (
+            <DischargeWorkflowPanel
+              visit={selectedVisitForDischarge}
+              onClose={() => setSelectedVisitForDischarge(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
