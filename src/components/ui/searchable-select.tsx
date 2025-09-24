@@ -41,8 +41,19 @@ export function SearchableSelect({
   className,
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
+  const [search, setSearch] = React.useState("")
 
   const selectedOption = options.find((option) => option.value === value)
+
+  // Filter options based on search
+  const filteredOptions = React.useMemo(() => {
+    if (!search) return options
+    const searchLower = search.toLowerCase()
+    return options.filter((option) =>
+      option.label.toLowerCase().includes(searchLower) ||
+      option.value.toLowerCase().includes(searchLower)
+    )
+  }, [options, search])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -51,32 +62,41 @@ export function SearchableSelect({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn("w-full justify-between", className)}
+          className={cn("w-full justify-between text-left", className)}
         >
-          {selectedOption ? selectedOption.label : placeholder}
+          <span className="truncate">
+            {selectedOption ? selectedOption.label : placeholder}
+          </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[400px] p-0 z-[9999] max-h-[400px]"
+        className="w-[400px] p-0 z-[9999]"
         align="start"
         side="bottom"
         sideOffset={4}
         collisionPadding={10}
       >
-        <Command className="max-h-[380px]">
-          <CommandInput placeholder={searchPlaceholder} />
-          <CommandList>
-            <CommandEmpty>{emptyText}</CommandEmpty>
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder={searchPlaceholder}
+            className="border-0"
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList className="max-h-[300px] overflow-y-auto">
+            <CommandEmpty className="py-6 text-center text-sm text-muted-foreground">{emptyText}</CommandEmpty>
             <CommandGroup>
-              {options.map((option) => (
+              {filteredOptions.map((option) => (
                 <CommandItem
                   key={option.value}
-                  value={option.label}
+                  value={option.value}
                   onSelect={() => {
                     onValueChange?.(option.value)
+                    setSearch("")
                     setOpen(false)
                   }}
+                  className="px-3 py-2 hover:bg-gray-100 cursor-pointer rounded-sm"
                 >
                   <Check
                     className={cn(
