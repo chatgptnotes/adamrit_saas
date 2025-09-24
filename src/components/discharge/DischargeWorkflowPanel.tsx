@@ -59,6 +59,7 @@ interface DischargeChecklist {
 
 interface DischargeWorkflowPanelProps {
   visit: Visit;
+  onClose?: () => void;
 }
 
 const DISCHARGE_MODES = [
@@ -69,7 +70,7 @@ const DISCHARGE_MODES = [
   { value: 'discharge_on_request', label: 'Discharge on Request' }
 ];
 
-export const DischargeWorkflowPanel: React.FC<DischargeWorkflowPanelProps> = ({ visit }) => {
+export const DischargeWorkflowPanel: React.FC<DischargeWorkflowPanelProps> = ({ visit, onClose }) => {
   const [dischargeDate, setDischargeDate] = useState<Date | undefined>(
     visit.discharge_date ? new Date(visit.discharge_date) : undefined
   );
@@ -465,46 +466,6 @@ export const DischargeWorkflowPanel: React.FC<DischargeWorkflowPanelProps> = ({ 
               </div>
             )}
             
-            {/* Debug Info */}
-            <div className="bg-gray-100 p-3 rounded text-xs">
-              <strong>Debug Info:</strong> 
-              Checklist Enabled: {isChecklistEnabled.toString()}, 
-              Discharge Date: {dischargeDate ? 'Set' : 'Not Set'}, 
-              Loading: {checklistLoading.toString()}, 
-              Checklist Data: {JSON.stringify(checklist, null, 2)}
-            </div>
-            
-            {/* Test Button */}
-            <div className="bg-yellow-100 p-3 rounded text-xs space-y-2">
-              <strong>Test Functionality:</strong>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => {
-                    console.log('🧪 Test Doctor Signature clicked');
-                    handleChecklistUpdate('doctor_signature', true);
-                  }}
-                  className="bg-blue-500 text-white px-2 py-1 rounded text-xs"
-                >
-                  Test Doctor Signature
-                </button>
-                <button 
-                  onClick={() => {
-                    console.log('🧪 Complete All Checkboxes clicked');
-                    const allFields = [
-                      'doctor_signature', 'discharge_summary_uploaded', 'nurse_clearance',
-                      'pharmacy_clearance', 'final_bill_generated', 'final_bill_printed',
-                      'payment_verified', 'patient_signature', 'security_verification'
-                    ];
-                    allFields.forEach(field => {
-                      handleChecklistUpdate(field as keyof DischargeChecklist, true);
-                    });
-                  }}
-                  className="bg-green-500 text-white px-2 py-1 rounded text-xs"
-                >
-                  Complete All Checkboxes
-                </button>
-              </div>
-            </div>
             
             <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${!isChecklistEnabled ? 'opacity-50 pointer-events-none' : ''}`}>
               {[
@@ -743,6 +704,28 @@ export const DischargeWorkflowPanel: React.FC<DischargeWorkflowPanelProps> = ({ 
               </div>
             </div>
           )}
+
+          {/* Action Buttons */}
+          <div className="flex justify-end gap-3 pt-6 border-t">
+            <Button
+              variant="outline"
+              onClick={onClose}
+              className="min-w-[100px]"
+            >
+              Close
+            </Button>
+            <Button
+              onClick={() => {
+                toast({
+                  title: "Changes Saved",
+                  description: "All discharge workflow changes have been saved successfully.",
+                });
+              }}
+              className="min-w-[100px] bg-green-600 hover:bg-green-700 text-white"
+            >
+              Save Changes
+            </Button>
+          </div>
 
           {/* Show what's needed for gate pass */}
           {!canGenerateGatePass && dischargeDate && (
