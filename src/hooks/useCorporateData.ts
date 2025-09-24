@@ -18,14 +18,7 @@ interface UseCorporateDataReturn {
 }
 
 export const useCorporateData = (): UseCorporateDataReturn => {
-  const [corporateOptions, setCorporateOptions] = useState<SearchableSelectOption[]>([
-    // Default basic options (always available)
-    { value: "private", label: "Private" },
-    { value: "esic", label: "ESIC" },
-    { value: "cghs", label: "CGHS" },
-    { value: "echs", label: "ECHS" },
-    { value: "insurance", label: "Insurance" },
-  ]);
+  const [corporateOptions, setCorporateOptions] = useState<SearchableSelectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,11 +27,19 @@ export const useCorporateData = (): UseCorporateDataReturn => {
       setLoading(true);
       setError(null);
 
+      console.log('🔄 Fetching ALL corporates from database...');
+
       // Fetch all corporate records from database
       const { data, error: fetchError } = await supabase
         .from('corporate')
         .select('id, name, description')
         .order('name', { ascending: true });
+
+      console.log('📊 Database query result:', {
+        data: data?.length,
+        error: fetchError?.message,
+        firstFew: data?.slice(0, 5)?.map(c => c.name)
+      });
 
       if (fetchError) {
         console.error('Error fetching corporate data:', fetchError);
@@ -47,32 +48,27 @@ export const useCorporateData = (): UseCorporateDataReturn => {
       }
 
       if (data && data.length > 0) {
-        // Convert database records to SearchableSelectOption format
-        const dynamicOptions: SearchableSelectOption[] = data.map((corp: CorporateRecord) => ({
-          value: corp.id, // Use ID as value for uniqueness
+        // Convert ALL database records to SearchableSelectOption format
+        const corporateOptions: SearchableSelectOption[] = data.map((corp: CorporateRecord) => ({
+          value: corp.name, // Use name as value for consistency with form handling
           label: corp.name
         }));
 
-        // Combine with default options (remove duplicates based on label)
-        const defaultLabels = ["Private", "ESIC", "CGHS", "ECHS", "Insurance"];
-        const filteredDynamicOptions = dynamicOptions.filter(
-          option => !defaultLabels.includes(option.label)
-        );
-
-        // Combine default and dynamic options
-        const allOptions = [
+        setCorporateOptions(corporateOptions);
+        console.log('✅ Loaded ALL corporate options from database:', corporateOptions.length, 'total');
+        console.log('🏢 Corporate options:', corporateOptions.map(opt => opt.label).join(', '));
+      } else {
+        console.log('⚠️ No corporate records found in database');
+        // Only use fallback if database is completely empty
+        const fallbackOptions = [
           { value: "private", label: "Private" },
           { value: "esic", label: "ESIC" },
           { value: "cghs", label: "CGHS" },
           { value: "echs", label: "ECHS" },
           { value: "insurance", label: "Insurance" },
-          ...filteredDynamicOptions
         ];
-
-        setCorporateOptions(allOptions);
-        console.log('✅ Loaded corporate options:', allOptions.length, 'total');
-      } else {
-        console.log('ℹ️ No corporate records found in database, using defaults');
+        setCorporateOptions(fallbackOptions);
+        console.log('📋 Using fallback options:', fallbackOptions.length, 'total');
       }
     } catch (err) {
       console.error('Error in fetchCorporateData:', err);
