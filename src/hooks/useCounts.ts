@@ -271,15 +271,107 @@ export const useCounts = () => {
         const { count, error } = await supabase
           .from('hope_consultants')
           .select('*', { count: 'exact', head: true });
-        
+
         if (error) {
           console.error('Error fetching Hope consultants count:', error);
           return 0;
         }
-        
+
         return count || 0;
       } catch (error) {
         console.error('Error in Hope consultants count query:', error);
+        return 0;
+      }
+    },
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: hopeAnaesthetistsCount = 0 } = useQuery({
+    queryKey: ['hope-anaesthetists-count'],
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('hope_anaesthetists')
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          console.error('Error fetching Hope anaesthetists count:', error);
+          return 0;
+        }
+
+        return count || 0;
+      } catch (error) {
+        console.error('Error in Hope anaesthetists count query:', error);
+        return 0;
+      }
+    },
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: ayushmanSurgeonsCount = 0 } = useQuery({
+    queryKey: ['ayushman-surgeons-count'],
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('ayushman_surgeons')
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          console.error('Error fetching Ayushman surgeons count:', error);
+          return 0;
+        }
+
+        return count || 0;
+      } catch (error) {
+        console.error('Error in Ayushman surgeons count query:', error);
+        return 0;
+      }
+    },
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: ayushmanConsultantsCount = 0 } = useQuery({
+    queryKey: ['ayushman-consultants-count'],
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('ayushman_consultants')
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          console.error('Error fetching Ayushman consultants count:', error);
+          return 0;
+        }
+
+        return count || 0;
+      } catch (error) {
+        console.error('Error in Ayushman consultants count query:', error);
+        return 0;
+      }
+    },
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+
+  const { data: ayushmanAnaesthetistsCount = 0 } = useQuery({
+    queryKey: ['ayushman-anaesthetists-count'],
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('ayushman_anaesthetists')
+          .select('*', { count: 'exact', head: true });
+
+        if (error) {
+          console.error('Error fetching Ayushman anaesthetists count:', error);
+          return 0;
+        }
+
+        return count || 0;
+      } catch (error) {
+        console.error('Error in Ayushman anaesthetists count query:', error);
         return 0;
       }
     },
@@ -300,5 +392,9 @@ export const useCounts = () => {
     refereesCount,
     hopeSurgeonsCount,
     hopeConsultantsCount,
+    hopeAnaesthetistsCount,
+    ayushmanSurgeonsCount,
+    ayushmanConsultantsCount,
+    ayushmanAnaesthetistsCount,
   };
 };
