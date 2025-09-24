@@ -19,8 +19,10 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
     refereesCount = 0,
     hopeSurgeonsCount = 0,
     hopeConsultantsCount = 0,
+    hopeAnaesthetistsCount = 0,
     ayushmanSurgeonsCount = 0,
-    ayushmanConsultantsCount = 0
+    ayushmanConsultantsCount = 0,
+    ayushmanAnaesthetistsCount = 0
   } = props;
 
   return useMemo(() => 
@@ -44,10 +46,14 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
             return isFeatureEnabled(hospitalType, 'hasHopeSurgeons');
           case "Hope Consultants":
             return isFeatureEnabled(hospitalType, 'hasHopeConsultants');
+          case "Hope Anaesthetists":
+            return isFeatureEnabled(hospitalType, 'hasHopeAnaesthetists');
           case "Ayushman Surgeons":
             return isFeatureEnabled(hospitalType, 'hasAyushmanSurgeons');
           case "Ayushman Consultants":
             return isFeatureEnabled(hospitalType, 'hasAyushmanConsultants');
+          case "Ayushman Anaesthetists":
+            return isFeatureEnabled(hospitalType, 'hasAyushmanAnaesthetists');
           case "CGHS Surgery":
             return isFeatureEnabled(hospitalType, 'hasCghsSurgery');
           default:
@@ -71,12 +77,15 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
                item.title === "Referees" ? refereesCount :
                item.title === "Hope Surgeons" ? hopeSurgeonsCount :
                item.title === "Hope Consultants" ? hopeConsultantsCount :
+               item.title === "Hope Anaesthetists" ? hopeAnaesthetistsCount :
                item.title === "Ayushman Surgeons" ? ayushmanSurgeonsCount :
-               item.title === "Ayushman Consultants" ? ayushmanConsultantsCount : 0
+               item.title === "Ayushman Consultants" ? ayushmanConsultantsCount :
+               item.title === "Ayushman Anaesthetists" ? ayushmanAnaesthetistsCount : 0
       })), [
         hospitalType, diagnosesCount, patientsCount, usersCount, complicationsCount,
         cghsSurgeryCount, labCount, radiologyCount, medicationCount,
-        refereesCount, hopeSurgeonsCount, hopeConsultantsCount, ayushmanSurgeonsCount, ayushmanConsultantsCount
+        refereesCount, hopeSurgeonsCount, hopeConsultantsCount, hopeAnaesthetistsCount,
+        ayushmanSurgeonsCount, ayushmanConsultantsCount, ayushmanAnaesthetistsCount
       ]
     );
 };

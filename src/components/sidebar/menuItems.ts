@@ -119,6 +119,11 @@ export const menuItems = [
     icon: UserCog,
   },
   {
+    title: "Hope Anaesthetists",
+    url: "/hope-anaesthetists",
+    icon: Syringe,
+  },
+  {
     title: "Ayushman Surgeons",
     url: "/ayushman-surgeons",
     icon: Stethoscope,
@@ -127,6 +132,11 @@ export const menuItems = [
     title: "Ayushman Consultants",
     url: "/ayushman-consultants",
     icon: UserCog,
+  },
+  {
+    title: "Ayushman Anaesthetists",
+    url: "/ayushman-anaesthetists",
+    icon: Syringe,
   },
   {
     title: "Accounting",
