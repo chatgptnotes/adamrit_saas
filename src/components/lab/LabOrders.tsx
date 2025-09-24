@@ -662,57 +662,8 @@ const LabOrders = () => {
           // Simplify: Just create a simple record to store the observed value
           console.log('4️⃣ Creating simple lab result record');
 
-          // First, check if we can find or create a basic lab entry
-          let labId = null;
-          try {
-            const { data: labData } = await supabase
-              .from('lab')
-              .select('id')
-              .eq('name', result.test_name)
-              .maybeSingle();
-
-            if (labData) {
-              labId = labData.id;
-            } else {
-              // Try to create a minimal lab entry
-              const { data: newLab } = await supabase
-                .from('lab')
-                .insert({
-                  name: result.test_name,
-                  category: result.test_category || 'GENERAL'
-                })
-                .select('id')
-                .single();
-
-              if (newLab) {
-                labId = newLab.id;
-              }
-            }
-          } catch (error) {
-            console.log('⚠️ Could not handle lab entry, proceeding without lab_id');
-          }
-
-          // Ensure we have the minimum required fields
-          if (!labId) {
-            // If we can't get lab_id, create a default lab entry
-            console.log('5️⃣ Creating default lab entry');
-            try {
-              const { data: defaultLab } = await supabase
-                .from('lab')
-                .insert({
-                  name: result.test_name || 'Lab Result',
-                  category: 'GENERAL'
-                })
-                .select('id')
-                .single();
-
-              if (defaultLab) {
-                labId = defaultLab.id;
-              }
-            } catch (error) {
-              console.error('Could not create default lab entry:', error);
-            }
-          }
+          // Skip complex lab entry lookup for now - just save the data directly
+          console.log('5️⃣ Preparing to save directly to lab_results table');
 
           // Create and save to lab_results table
           console.log('6️⃣ Preparing to save in lab_results table');
@@ -722,30 +673,34 @@ const LabOrders = () => {
 
           // Use the exact schema columns - main_test_name should be the parent test, test_name should be the sub-test
 
-          // Match the actual lab_results table schema (includes main_test_name)
+          // Match the actual lab_results table schema with all fields
           const labResultsData = {
-            // Required fields - both main_test_name and test_name are NOT NULL
-            main_test_name: originalTestRow.test_name || 'Main Test',
-            test_name: result.test_name || originalTestRow.test_name || 'Sub Test',
+            // Main test identification
+            main_test_name: originalTestRow.test_name || 'Unknown Test',
+            test_name: result.test_name || 'Unknown Sub-Test',
 
-            // Optional fields that exist in the table
+            // Test details
             test_category: result.test_category || 'GENERAL',
-            result_value: result.result_value || result.observed_value || '11.0',
-            result_unit: result.result_unit || result.unit || '',
-            reference_range: result.reference_range || result.normal_range || 'Normal',
+            result_value: result.result_value || '',
+            result_unit: result.result_unit || '',
+            reference_range: result.reference_range || '',
             comments: result.comments || '',
             is_abnormal: result.is_abnormal || false,
-            result_status: 'Preliminary',
+            result_status: authenticatedResult ? 'Final' : 'Preliminary',
+
+            // Staff information
             technician_name: result.technician_name || '',
             pathologist_name: result.pathologist_name || '',
-            authenticated_result: false,
+            authenticated_result: authenticatedResult || false,
 
-            // Add patient info fields that likely exist based on previous errors
-            patient_name: originalTestRow.patient_name || 'Patient',
-            patient_age: originalTestRow.patient_age || 30,
-            patient_gender: originalTestRow.patient_gender || 'Male'
+            // Patient information
+            patient_name: originalTestRow.patient_name || 'Unknown Patient',
+            patient_age: originalTestRow.patient_age || null,
+            patient_gender: originalTestRow.patient_gender || 'Unknown',
 
-            // NOTE: Still skipping visit_id and lab_id foreign keys for now
+            // Skip foreign keys for now to avoid schema issues
+            // visit_id: visitId || null,
+            // lab_id: labId || null
           };
 
           // Remove any undefined values to prevent schema errors
@@ -758,6 +713,8 @@ const LabOrders = () => {
           console.log('🔍 DEBUG: Original test row:', originalTestRow);
           console.log('🔍 DEBUG: Result object:', result);
           console.log('🔍 DEBUG: Data to insert into lab_results:', labResultsData);
+          console.log('🔍 DEBUG: Authentication status:', authenticatedResult);
+          console.log('🔍 DEBUG: Visit ID:', visitId);
 
           // Try saving with error handling to see what's missing
           const { data: finalResult, error: labResultsError } = await supabase
@@ -771,14 +728,24 @@ const LabOrders = () => {
             console.log('First attempt failed, trying minimal data...');
             console.error('Primary error details:', labResultsError);
             const minimalData = {
-              main_test_name: 'Main Test',
-              test_name: 'Sub Test Result',
-              test_category: 'GENERAL',
-              result_value: 'Normal',
+              main_test_name: originalTestRow.test_name || 'Test',
+              test_name: result.test_name || 'Test Result',
+              test_category: result.test_category || 'GENERAL',
+              result_value: result.result_value || 'No Value',
+              result_unit: result.result_unit || '',
+              reference_range: result.reference_range || '',
+              comments: result.comments || '',
+              is_abnormal: false,
               result_status: 'Preliminary',
-              patient_name: 'Test Patient',
-              patient_age: 30,
-              patient_gender: 'Male'
+              technician_name: '',
+              pathologist_name: '',
+              authenticated_result: false,
+              patient_name: originalTestRow.patient_name || 'Unknown Patient',
+              patient_age: originalTestRow.patient_age || null,
+              patient_gender: originalTestRow.patient_gender || 'Unknown',
+              // Skip foreign keys for now
+              // visit_id: visitId || null,
+              // lab_id: labId || null
             };
 
             const { data: minimalResult, error: minimalError } = await supabase
@@ -800,7 +767,8 @@ const LabOrders = () => {
             throw new Error(`Failed to save to lab_results table: ${labResultsError.message || labResultsError.code}`);
           }
 
-          console.log('Lab results saved successfully');
+          console.log('✅ Lab results saved successfully to lab_results table!');
+          console.log('📊 Saved data:', finalResult);
 
           // Add patient and visit info to result for print usage
           // Get complete patient data from the fetched patient info
