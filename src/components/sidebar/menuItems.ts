@@ -49,6 +49,11 @@ export const menuItems = [
     icon: ExternalLink,
   },
   {
+    title: "CGHS Surgery",
+    url: "/cghs-surgery-master",
+    icon: Syringe,
+  },
+  {
     title: "Diagnoses",
     url: "/diagnoses",
     icon: Activity,
@@ -69,14 +74,9 @@ export const menuItems = [
     icon: UserCog,
   },
   {
-    title: "Complications", 
+    title: "Complications",
     url: "/complications",
     icon: Database,
-  },
-  {
-    title: "CGHS Surgery",
-    url: "/cghs-surgery",
-    icon: FileText,
   },
   {
     title: "Lab",
