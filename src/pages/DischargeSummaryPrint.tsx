@@ -1,30 +1,43 @@
 import { useParams } from 'react-router-dom';
 import DischargeSummary from '@/components/DischargeSummary';
+import { useVisitDiagnosis } from '@/hooks/useVisitDiagnosis';
 
 export default function DischargeSummaryPrint() {
   const { visitId } = useParams<{ visitId: string }>();
 
-  // Static data based on the provided information
-  const staticPatientData = `
-Name: NIYATI BAWANKAR
-Age: 48
-Gender: Female
-Visit ID: IH24L12038
-Admission Date: 12/02/2025
-Discharge Date: 15/02/2025
-Primary Diagnosis: syncope with unstable angina
-Secondary Diagnosis: N/A
-Medications: TAB.VERTIN 16MG Pack- Route-P.O Frequency-BD Days-07, TAB. VERTIGON -25 MG Pack- Route-P.O Frequency-BD Days-07, TAB.DOLO 650 MG Pack- Route-P.O Frequency-SOS Days-07, TAB.PAN D Pack- Route-P.O Frequency-BD Days-07
-Presenting Complaints: 48 years old Female patient giddiness, vomiting headache suration in one side of head since 3 days History of Patient admitted here for further management and treatment
-Clinical Summary: The patient had no history of trauma or prior surgery. On examination, significant swelling, tenderness, and redness were observed in the right scrotal area without discharge or foul odor. Systemically stable at presentation, except for mild dehydration.
-Vital Signs: Temperature: 98.8°F, Pulse Rate: 82/min, Respiration Rate: 28/min, Blood Pressure: 100/60mmHg, SpO2: 98
-Investigations: CBC, KFT, LFT, HIV I & II, HBsAg, Coagulation Profile
-Treatment On Discharge: TAB.VERTIN 16MG Pack- Route-P.O Frequency-BD Days-07, TAB. VERTIGON -25 MG Pack- Route-P.O Frequency-BD Days-07, TAB.DOLO 650 MG Pack- Route-P.O Frequency-SOS Days-07, TAB.PAN D Pack- Route-P.O Frequency-BD Days-07
-Surgeon: Dr. Vishal Nandagawli
-Follow-up: OPD follow-up after 7 days from discharge or earlier if needed
-Emergency Contact: 7030574619 / 9373111229
-Doctor: Dr. B.K. Murali, MS (Orthopaedics), Director of Hope Group Of Hospital
-  `.trim();
+  console.log('🚀 DischargeSummaryPrint rendered with visitId:', visitId);
+
+  // Fetch real visit diagnosis data from database
+  const { data: visitDiagnosis, isLoading, error } = useVisitDiagnosis(visitId || '');
+
+  console.log('📊 useVisitDiagnosis results:', { data: visitDiagnosis, isLoading, error });
+
+  // Generate dynamic patient data string from database data only
+  const generatePatientDataString = (data: any) => {
+    if (!data) return null;
+
+    return `
+Name: ${data.patientName}
+Age: ${data.age}
+Gender: ${data.gender}
+Visit ID: ${data.visitId}
+Admission Date: ${data.admissionDate}
+Discharge Date: ${data.dischargeDate}
+Primary Diagnosis: ${data.primaryDiagnosis}
+Secondary Diagnosis: ${data.secondaryDiagnoses.length > 0 ? data.secondaryDiagnoses.join(', ') : 'N/A'}
+Medications: ${data.medications.length > 0 ? data.medications.join(', ') : 'N/A'}
+Presenting Complaints: ${data.complaints.length > 0 ? data.complaints.join(', ') : 'N/A'}
+Vital Signs: ${data.vitals.length > 0 ? data.vitals.join(', ') : 'N/A'}
+Investigations: ${data.investigations.length > 0 ? data.investigations.join(', ') : 'N/A'}
+Treatment Course: ${data.treatmentCourse.length > 0 ? data.treatmentCourse.join(', ') : 'N/A'}
+Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : 'N/A'}
+    `.trim();
+  };
+
+  // Only use real database data - no fallbacks
+  const patientDataString = visitDiagnosis ? generatePatientDataString(visitDiagnosis) : null;
+
+  console.log('📝 Generated patientDataString:', patientDataString);
 
   const handlePrint = () => {
     try {
@@ -91,6 +104,92 @@ Doctor: Dr. B.K. Murali, MS (Orthopaedics), Director of Hope Group Of Hospital
 
 
 
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading discharge summary data...</p>
+          <p className="text-sm text-gray-500">Fetching diagnosis information from database</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state when data cannot be loaded
+  if (error || (!isLoading && !visitDiagnosis)) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-8">
+          <div className="text-red-500 mb-4">
+            <svg className="h-16 w-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.728-.833-2.498 0L4.316 15.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Discharge Summary Not Available</h1>
+          <p className="text-gray-600 mb-4">
+            {error
+              ? `Error loading data: ${error.message || 'Database connection failed'}`
+              : `No discharge summary data found for Visit ID: ${visitId || 'Unknown'}`
+            }
+          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500">Possible reasons:</p>
+            <ul className="text-sm text-gray-500 list-disc list-inside space-y-1">
+              <li>Visit ID does not exist in the database</li>
+              <li>Discharge summary has not been completed yet</li>
+              <li>Database connection issue</li>
+              <li>Insufficient permissions to access patient data</li>
+            </ul>
+          </div>
+          <div className="mt-6 space-x-4">
+            <button
+              onClick={() => window.history.back()}
+              className="bg-gray-600 text-white px-6 py-3 rounded-md hover:bg-gray-700 transition-colors font-medium shadow-sm"
+            >
+              ← Go Back
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 transition-colors font-medium shadow-sm"
+            >
+              🔄 Retry
+            </button>
+          </div>
+          <div className="mt-4 text-xs text-gray-400">
+            Visit ID: {visitId || 'Not provided'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Only render if we have valid data
+  if (!patientDataString) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-yellow-500 mb-4">
+            <svg className="h-16 w-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.728-.833-2.498 0L4.316 15.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-yellow-600 mb-4">Invalid Patient Data</h1>
+          <p className="text-gray-600 mb-4">
+            The patient data retrieved from the database is incomplete or invalid.
+          </p>
+          <button
+            onClick={() => window.history.back()}
+            className="bg-gray-600 text-white px-6 py-3 rounded-md hover:bg-gray-700 transition-colors font-medium shadow-sm"
+          >
+            ← Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white">
       {/* Print Button - Hidden in print */}
@@ -131,16 +230,17 @@ Doctor: Dr. B.K. Murali, MS (Orthopaedics), Director of Hope Group Of Hospital
           If print button doesn't work, use <kbd className="bg-gray-200 px-1 rounded">Ctrl+P</kbd> (Windows) or <kbd className="bg-gray-200 px-1 rounded">Cmd+P</kbd> (Mac)
         </p>
         <div className="text-xs text-gray-500 mt-1">
+          Data Source: ✅ Database (Real Data Only) |
           Print Status: <span id="print-status">Ready</span> |
           Browser: {navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Firefox') ? 'Firefox' : navigator.userAgent.includes('Safari') ? 'Safari' : 'Other'}
         </div>
       </div>
 
-      {/* Use the existing DischargeSummary component with static data */}
+      {/* Use the existing DischargeSummary component with real database data only */}
       <DischargeSummary
         visitId={visitId}
-        allPatientData={staticPatientData}
-        patientDataSummary={undefined} // Can be passed from URL params or state if needed
+        allPatientData={patientDataString}
+        patientDataSummary={undefined}
       />
 
       {/* Print Styles */}

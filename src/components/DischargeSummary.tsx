@@ -124,6 +124,13 @@ export default function DischargeSummary({
   allPatientData?: string;
   patientDataSummary?: string;
 }) {
+  console.log('🎯 DischargeSummary rendered with:', {
+    hasData: !!data,
+    visitId,
+    hasAllPatientData: !!allPatientData,
+    allPatientDataPreview: allPatientData?.substring(0, 200),
+    hasPatientDataSummary: !!patientDataSummary
+  });
   // Function to extract data from allPatientData text
   const extractDataFromText = (text: string) => {
     const extractedData: any = {};
@@ -140,10 +147,14 @@ export default function DischargeSummary({
     const admissionMatch = text.match(/Admission:\s*([^\n\r]+)/i) || text.match(/Admission Date:\s*([^\n\r]+)/i);
     const dischargeMatch = text.match(/Discharge Date:\s*([^\n\r]*?)(?=\n|Primary|Secondary|Medications|$)/i);
     
-    // Extract diagnoses - handle multiple formats
-    const diagnosisMatch = text.match(/Diagnosis:\s*([^,]+)/i);
-    const primaryDiagnosisMatch = text.match(/Primary Diagnosis:\s*([^\n\r]+)/i);
-    const secondaryDiagnosisMatch = text.match(/Secondary Diagnosis:\s*([^\n\r]+)/i);
+    // Extract diagnoses - handle multiple formats (improved patterns)
+    const diagnosisMatch = text.match(/(?:^|\n)Diagnosis:\s*([^\n\r]+)/i);
+    const primaryDiagnosisMatch = text.match(/(?:^|\n)Primary Diagnosis:\s*([^\n\r]+)/i);
+    const secondaryDiagnosisMatch = text.match(/(?:^|\n)Secondary Diagnosis:\s*([^\n\r]+)/i);
+
+    // Additional fallback patterns for diagnosis extraction
+    const generalDiagnosisMatch = text.match(/(?:^|\n)(?:Final\s+)?Diagnosis.*?:\s*([^\n\r]+)/i);
+    const clinicalDiagnosisMatch = text.match(/(?:^|\n)Clinical Diagnosis:\s*([^\n\r]+)/i);
     
     // Extract medications - handle Treatment On Discharge format
     const medicationsMatch = text.match(/Medications:\s*([^\n\r]+)/i);
@@ -250,7 +261,10 @@ export default function DischargeSummary({
       serviceNo: serviceMatch ? serviceMatch[1].trim() : 'N/A',
       admission: admissionMatch ? admissionMatch[1].trim() : 'N/A',
       discharge: dischargeMatch ? dischargeMatch[1].trim() : 'N/A',
-      diagnosis: diagnosisMatch ? diagnosisMatch[1].trim() : primaryDiagnosisMatch ? primaryDiagnosisMatch[1].trim() : 'N/A',
+      diagnosis: diagnosisMatch ? diagnosisMatch[1].trim() :
+                 primaryDiagnosisMatch ? primaryDiagnosisMatch[1].trim() :
+                 generalDiagnosisMatch ? generalDiagnosisMatch[1].trim() :
+                 clinicalDiagnosisMatch ? clinicalDiagnosisMatch[1].trim() : 'N/A',
       secondaryDiagnosis: secondaryDiagnosisMatch ? secondaryDiagnosisMatch[1].trim() : 'N/A',
       medications: medicationsMatch ? medicationsMatch[1].trim() : treatmentOnDischargeMatch ? treatmentOnDischargeMatch[1].trim() : 'N/A',
       complaints: processedComplaints.length > 0 ? processedComplaints : (complaintsMatch ? complaintsMatch[1].trim().split('\n').filter(line => line.trim()) : []),
@@ -272,6 +286,7 @@ export default function DischargeSummary({
   // Extract additional data from patientDataSummary if available
   const summaryData = patientDataSummary ? extractDataFromText(patientDataSummary) : null;
   
+  // Only use provided data - no fallback to demo data
   const {
     header,
     patient,
@@ -291,7 +306,24 @@ export default function DischargeSummary({
     warnings,
     contacts,
     footer
-  } = data || DemoData;
+  } = data || {};
+
+  // If no data is provided and no dynamic data available, show error
+  if (!data && !allPatientData && !patientDataSummary) {
+    return (
+      <div className="w-full min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center p-8">
+          <div className="text-red-500 mb-4">
+            <svg className="h-16 w-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.728-.833-2.498 0L4.316 15.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-red-600 mb-4">No Discharge Summary Data</h2>
+          <p className="text-gray-600">No patient data available to generate discharge summary.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full min-h-screen bg-neutral-200 print:bg-white py-6 print:py-0">
@@ -302,11 +334,11 @@ export default function DischargeSummary({
       >
         {/* Top Bar */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-gray-300">
-          <div className="text-[10px] text-gray-500">{header.left}</div>
+          <div className="text-[10px] text-gray-500">{header?.left || new Date().toLocaleDateString()}</div>
           <div className="text-center">
             <h1 className="text-sm font-bold tracking-wide">**DISCHARGE SUMMARY**</h1>
           </div>
-          <div className="text-[10px] text-gray-500">{header.right}</div>
+          <div className="text-[10px] text-gray-500">{header?.right || 'Discharge Summary'}</div>
         </div>
 
         {/* Patient Card */}
@@ -314,12 +346,12 @@ export default function DischargeSummary({
           <div className="border border-gray-300 rounded p-3">
             <h2 className="text-[11px] font-semibold mb-2">PATIENT DETAILS</h2>
             <div className="space-y-1">
-              <KV label="Name" value={(dynamicData?.name && dynamicData.name !== 'N/A') ? dynamicData.name : patient.name} />
-              <KV label="Age" value={(dynamicData?.age && dynamicData.age !== 'N/A') ? dynamicData.age : patient.age} />
-              <KV label="Gender" value={(dynamicData?.gender && dynamicData.gender !== 'N/A') ? dynamicData.gender : patient.gender} />
-              <KV label="Visit ID" value={(dynamicData?.visitId && dynamicData.visitId !== 'N/A') ? dynamicData.visitId : patient.visitId} />
-              <KV label="Admission Date" value={(dynamicData?.admission && dynamicData.admission !== 'N/A') ? dynamicData.admission : patient.admission} />
-              <KV label="Discharge Date" value={(dynamicData?.discharge && dynamicData.discharge !== 'N/A') ? dynamicData.discharge : patient.discharge} />
+              <KV label="Name" value={(dynamicData?.name && dynamicData.name !== 'N/A') ? dynamicData.name : patient?.name || 'Not available'} />
+              <KV label="Age" value={(dynamicData?.age && dynamicData.age !== 'N/A') ? dynamicData.age : patient?.age || 'Not available'} />
+              <KV label="Gender" value={(dynamicData?.gender && dynamicData.gender !== 'N/A') ? dynamicData.gender : patient?.gender || 'Not available'} />
+              <KV label="Visit ID" value={(dynamicData?.visitId && dynamicData.visitId !== 'N/A') ? dynamicData.visitId : patient?.visitId || visitId || 'Not available'} />
+              <KV label="Admission Date" value={(dynamicData?.admission && dynamicData.admission !== 'N/A') ? dynamicData.admission : patient?.admission || 'Not available'} />
+              <KV label="Discharge Date" value={(dynamicData?.discharge && dynamicData.discharge !== 'N/A') ? dynamicData.discharge : patient?.discharge || 'Not available'} />
             </div>
           </div>
         </div>
@@ -329,9 +361,13 @@ export default function DischargeSummary({
           {/* Diagnosis */}
           <Section title="FINAL DIAGNOSIS">
             <ul className="list-disc pl-5 text-[10px] space-y-0.5">
-              <li>Primary Diagnosis: {dynamicData?.diagnosis || diagnoses.primary[0] || '—'}</li>
-              <li>Secondary Diagnosis: {dynamicData?.secondaryDiagnosis || diagnoses.secondary[0] || '—'}</li>
+              <li>Primary Diagnosis: {dynamicData?.diagnosis || diagnoses?.primary?.[0] || 'Not recorded'}</li>
+              <li>Secondary Diagnosis: {dynamicData?.secondaryDiagnosis || (diagnoses?.secondary && diagnoses.secondary.length > 0 ? diagnoses.secondary[0] : 'None recorded')}</li>
             </ul>
+            {/* Debug info */}
+            <div className="text-[8px] text-gray-400 mt-2 print:hidden">
+              Debug: Using {dynamicData?.diagnosis ? 'database data' : diagnoses?.primary?.[0] ? 'structured data' : 'no data'}
+            </div>
           </Section>
 
           {/* Meds */}
