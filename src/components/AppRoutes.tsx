@@ -44,8 +44,10 @@ const EsicSurgeons = lazy(() => import("../pages/EsicSurgeons"));
 const Referees = lazy(() => import("../pages/Referees"));
 const HopeSurgeons = lazy(() => import("../pages/HopeSurgeons"));
 const HopeConsultants = lazy(() => import("../pages/HopeConsultants"));
+const HopeAnaesthetists = lazy(() => import("../pages/HopeAnaesthetists"));
 const AyushmanSurgeons = lazy(() => import("../pages/AyushmanSurgeons"));
 const AyushmanConsultants = lazy(() => import("../pages/AyushmanConsultants"));
+const AyushmanAnaesthetists = lazy(() => import("../pages/AyushmanAnaesthetists"));
 const SecurityVerificationPage = lazy(() => import("../pages/SecurityVerificationPage"));
 const MandatoryService = lazy(() => import("../pages/MandatoryService"));
 const MandatoryServiceCreate = lazy(() => import("../pages/MandatoryServiceCreate"));
@@ -126,8 +128,10 @@ export const AppRoutes = () => {
         <Route path="/referees" element={<Suspense fallback={<PageLoader />}><Referees /></Suspense>} />
         <Route path="/hope-surgeons" element={<Suspense fallback={<PageLoader />}><HopeSurgeons /></Suspense>} />
         <Route path="/hope-consultants" element={<Suspense fallback={<PageLoader />}><HopeConsultants /></Suspense>} />
+        <Route path="/hope-anaesthetists" element={<Suspense fallback={<PageLoader />}><HopeAnaesthetists /></Suspense>} />
         <Route path="/ayushman-surgeons" element={<Suspense fallback={<PageLoader />}><AyushmanSurgeons /></Suspense>} />
         <Route path="/ayushman-consultants" element={<Suspense fallback={<PageLoader />}><AyushmanConsultants /></Suspense>} />
+        <Route path="/ayushman-anaesthetists" element={<Suspense fallback={<PageLoader />}><AyushmanAnaesthetists /></Suspense>} />
         <Route path="/accounting" element={<Suspense fallback={<PageLoader />}><Accounting /></Suspense>} />
         <Route path="/bill-management" element={<Suspense fallback={<PageLoader />}><BillManagement /></Suspense>} />
         <Route path="/corporate" element={<Suspense fallback={<PageLoader />}><Corporate /></Suspense>} />

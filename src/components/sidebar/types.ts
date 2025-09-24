@@ -22,6 +22,8 @@ export interface AppSidebarProps {
   refereesCount?: number;
   hopeSurgeonsCount?: number;
   hopeConsultantsCount?: number;
+  hopeAnaesthetistsCount?: number;
   ayushmanSurgeonsCount?: number;
   ayushmanConsultantsCount?: number;
+  ayushmanAnaesthetistsCount?: number;
 }
