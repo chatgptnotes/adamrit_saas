@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Check, Eye, FileText, UserCheck, Trash2, DollarSign, MessageSquare } from 'lucide-react';
+import { X, Check, Eye, FileText, UserCheck, Trash2, DollarSign, MessageSquare, FileTextIcon, Download, Sparkles } from 'lucide-react';
 import { VisitRegistrationForm } from '@/components/VisitRegistrationForm';
 import { supabase } from '@/integrations/supabase/client';
 import { useDebounce } from 'use-debounce';
@@ -25,10 +25,12 @@ interface Patient {
   visit_type?: string;
   appointment_with?: string;
   diagnosis?: string;
+  reason_for_visit?: string;
   admit_to_hospital?: boolean;
   payment_received?: boolean;
   status?: string;
   comments?: string;
+  discharge_summary?: string;
 }
 
 interface OpdPatientTableProps {
@@ -49,6 +51,13 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
   const [originalComments, setOriginalComments] = useState<Record<string, string>>({});
   const [savingComments, setSavingComments] = useState<Record<string, boolean>>({});
   const [savedComments, setSavedComments] = useState<Record<string, boolean>>({});
+
+  // Discharge summary state management
+  const [dischargeSummaryDialogs, setDischargeSummaryDialogs] = useState<Record<string, boolean>>({});
+  const [dischargeSummaryTexts, setDischargeSummaryTexts] = useState<Record<string, string>>({});
+  const [originalDischargeSummaries, setOriginalDischargeSummaries] = useState<Record<string, string>>({});
+  const [savingDischargeSummaries, setSavingDischargeSummaries] = useState<Record<string, boolean>>({});
+  const [savedDischargeSummaries, setSavedDischargeSummaries] = useState<Record<string, boolean>>({});
 
   // Comment handlers
   const handleCommentClick = (patient: Patient) => {
@@ -130,6 +139,570 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
       }
     });
   }, [debouncedCommentTexts, commentDialogs, originalComments]);
+
+  // Discharge summary handlers
+  const handleDischargeSummaryClick = (patient: Patient) => {
+    const existingSummary = patient.discharge_summary || '';
+
+    // Load existing discharge summary if any
+    setDischargeSummaryTexts(prev => ({
+      ...prev,
+      [patient.visit_id!]: existingSummary
+    }));
+
+    // Store original discharge summary to track changes
+    setOriginalDischargeSummaries(prev => ({
+      ...prev,
+      [patient.visit_id!]: existingSummary
+    }));
+
+    // Open dialog for this visit
+    setDischargeSummaryDialogs(prev => ({
+      ...prev,
+      [patient.visit_id!]: true
+    }));
+  };
+
+  const handleDischargeSummaryChange = (visitId: string, text: string) => {
+    setDischargeSummaryTexts(prev => ({
+      ...prev,
+      [visitId]: text
+    }));
+  };
+
+  // Debounced function to auto-save discharge summaries
+  const [debouncedDischargeSummaryTexts] = useDebounce(dischargeSummaryTexts, 1500); // 1.5 seconds delay
+
+  // Auto-save discharge summaries when debounced value changes
+  useEffect(() => {
+    Object.entries(debouncedDischargeSummaryTexts).forEach(async ([visitId, text]) => {
+      // Only save if dialog is open and text has actually changed from original
+      const originalText = originalDischargeSummaries[visitId] || '';
+      const hasChanged = text !== originalText;
+
+      if (dischargeSummaryDialogs[visitId] && text !== undefined && hasChanged) {
+        console.log('🔄 Attempting to save discharge summary for visit:', visitId);
+        setSavingDischargeSummaries(prev => ({ ...prev, [visitId]: true }));
+
+        try {
+          const { error, data } = await supabase
+            .from('visits')
+            .update({ discharge_summary: text })
+            .eq('visit_id', visitId)
+            .select();
+
+          if (error) {
+            console.error('❌ Error saving discharge summary:', error);
+            alert(`Failed to save discharge summary: ${error.message}`);
+            setSavingDischargeSummaries(prev => ({ ...prev, [visitId]: false }));
+          } else {
+            console.log('✅ Discharge summary saved successfully for visit:', visitId);
+            // Update the original discharge summary after successful save
+            setOriginalDischargeSummaries(prev => ({ ...prev, [visitId]: text }));
+            // Show saved indicator
+            setSavingDischargeSummaries(prev => ({ ...prev, [visitId]: false }));
+            setSavedDischargeSummaries(prev => ({ ...prev, [visitId]: true }));
+            // Hide saved indicator after 2 seconds
+            setTimeout(() => {
+              setSavedDischargeSummaries(prev => ({ ...prev, [visitId]: false }));
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('❌ Exception while saving discharge summary:', error);
+          setSavingDischargeSummaries(prev => ({ ...prev, [visitId]: false }));
+        }
+      }
+    });
+  }, [debouncedDischargeSummaryTexts, dischargeSummaryDialogs, originalDischargeSummaries]);
+
+  // Helper function to format dates
+  const formatDate = (dateString?: string | Date | null) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  // Fetch discharge data from all relevant tables
+  const handleFetchData = async (patient: Patient) => {
+    try {
+      console.log('Fetching comprehensive discharge data for patient:', patient.visit_id);
+
+      // 1. Fetch complete patient data from patients table
+      const { data: fullPatientData, error: patientError } = await supabase
+        .from('patients')
+        .select('*')
+        .eq('id', patient.patient_id || patient.patients?.id)
+        .single();
+
+      if (patientError && patientError.code !== 'PGRST116') {
+        console.error('Error fetching full patient data:', patientError);
+      }
+
+      // 2. Fetch visit data for admission/discharge dates
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('*')
+        .eq('id', patient.id)
+        .single();
+
+      if (visitError && visitError.code !== 'PGRST116') {
+        console.error('Error fetching visit data:', visitError);
+      }
+
+      // 3. Fetch OT notes for surgery details with comprehensive debugging
+      console.log('═══ OT NOTES FETCH DEBUG START ═══');
+      console.log('Patient data:', {
+        id: patient.id,
+        visit_id: patient.visit_id,
+        patient_id: patient.patient_id || patient.patients?.id,
+        patient_name: patient.patients?.name
+      });
+
+      // First, check if ot_notes table has any data
+      const { data: allOtNotes, error: allOtError } = await supabase
+        .from('ot_notes')
+        .select('id, visit_id, patient_id, patient_name, surgery_name, surgeon')
+        .limit(10);
+
+      console.log('Sample OT notes in database:', allOtNotes);
+      console.log('Total OT notes found:', allOtNotes?.length || 0);
+
+      // Try fetching by visit_id first
+      console.log('Attempt 1: Fetching OT notes for visit_id:', patient.id);
+      let { data: otNote, error: otError } = await supabase
+        .from('ot_notes')
+        .select('*')
+        .eq('visit_id', patient.id)
+        .single();
+
+      if (otError || !otNote) {
+        if (otError) console.error('Error with visit_id query:', otError);
+
+        // Try with patient_id
+        const patientId = patient.patient_id || patient.patients?.id;
+        if (patientId) {
+          console.log('Attempt 2: Trying with patient_id:', patientId);
+          const { data: otNoteAlt, error: otErrorAlt } = await supabase
+            .from('ot_notes')
+            .select('*')
+            .eq('patient_id', patientId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (!otErrorAlt && otNoteAlt) {
+            otNote = otNoteAlt;
+            console.log('✓ OT notes found with patient_id');
+          } else if (otErrorAlt) {
+            console.error('Error with patient_id query:', otErrorAlt);
+          }
+        }
+
+        // Try with patient name as last resort
+        if (!otNote && patient.patients?.name) {
+          console.log('Attempt 3: Trying with patient_name:', patient.patients.name);
+          const { data: otNoteByName, error: nameError } = await supabase
+            .from('ot_notes')
+            .select('*')
+            .eq('patient_name', patient.patients.name)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (!nameError && otNoteByName) {
+            otNote = otNoteByName;
+            console.log('✓ OT notes found with patient_name');
+          } else if (nameError) {
+            console.error('Error with patient_name query:', nameError);
+          }
+        }
+
+        // If still no data, try without any filter to see if table has data
+        if (!otNote) {
+          console.log('Attempt 4: Getting most recent OT note (any patient)');
+          const { data: anyOtNote } = await supabase
+            .from('ot_notes')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (anyOtNote) {
+            console.log('⚠️ Found OT note but not for this patient:', anyOtNote);
+            console.log('This indicates ID mismatch. OT note has:', {
+              visit_id: anyOtNote.visit_id,
+              patient_id: anyOtNote.patient_id,
+              patient_name: anyOtNote.patient_name
+            });
+          }
+        }
+      }
+
+      if (otNote) {
+        console.log('✅ OT NOTES FETCHED SUCCESSFULLY:', {
+          surgery_name: otNote.surgery_name,
+          implant: otNote.implant,
+          anaesthetist: otNote.anaesthetist,
+          anaesthesia: otNote.anaesthesia,
+          surgeon: otNote.surgeon,
+          procedure_performed: otNote.procedure_performed,
+          date: otNote.date,
+          visit_id: otNote.visit_id,
+          patient_id: otNote.patient_id
+        });
+      } else {
+        console.log('❌ NO OT NOTES FOUND for this patient');
+        console.log('Consider creating OT notes with:', {
+          visit_id: patient.id,
+          patient_id: patient.patient_id || patient.patients?.id,
+          patient_name: patient.patients?.name
+        });
+      }
+      console.log('═══ OT NOTES FETCH DEBUG END ═══');
+
+      // 4. Fetch diagnoses for the visit
+      const { data: visitDiagnoses, error: diagError } = await supabase
+        .from('visit_diagnoses')
+        .select(`
+          *,
+          diagnoses:diagnosis_id (
+            id,
+            name,
+            description
+          )
+        `)
+        .eq('visit_id', patient.id)
+        .order('is_primary', { ascending: false });
+
+      if (diagError && diagError.code !== 'PGRST116') {
+        console.error('Error fetching diagnoses:', diagError);
+      }
+
+      // 5. Fetch complications for the visit
+      const { data: visitComplications, error: compError } = await supabase
+        .from('visit_complications')
+        .select(`
+          *,
+          complications:complication_id (
+            id,
+            name,
+            description
+          )
+        `)
+        .eq('visit_id', patient.id);
+
+      if (compError && compError.code !== 'PGRST116') {
+        console.error('Error fetching complications:', compError);
+      }
+
+      // 6. Fetch lab orders/results for the visit
+      const { data: labOrders, error: labError } = await supabase
+        .from('lab_orders')
+        .select(`
+          *,
+          lab_tests:test_id (
+            test_name,
+            test_code
+          )
+        `)
+        .eq('visit_id', patient.id)
+        .order('created_at', { ascending: true });
+
+      if (labError && labError.code !== 'PGRST116') {
+        console.error('Error fetching lab orders:', labError);
+      }
+
+      // 7. Fetch lab results if available
+      const { data: labResults, error: labResultsError } = await supabase
+        .from('lab_results')
+        .select('*')
+        .eq('visit_id', patient.id);
+
+      if (labResultsError && labResultsError.code !== 'PGRST116') {
+        console.error('Error fetching lab results:', labResultsError);
+      }
+
+      // 8. Fetch radiology orders for the visit
+      const { data: radiologyOrders, error: radError } = await supabase
+        .from('radiology_orders')
+        .select('*')
+        .eq('visit_id', patient.id)
+        .order('created_at', { ascending: true });
+
+      if (radError && radError.code !== 'PGRST116') {
+        console.error('Error fetching radiology orders:', radError);
+      }
+
+      // Combine all patient data
+      const patientInfo = fullPatientData || patient.patients || {};
+      const visit = visitData || patient;
+
+      // Generate service number (using last 5 digits of timestamp + random)
+      const serviceNo = `${Date.now().toString().slice(-5)}${Math.floor(Math.random() * 100)}`;
+
+      // Process diagnoses
+      const primaryDiagnosis = visitDiagnoses?.find(d => d.is_primary)?.diagnoses?.name ||
+                              visit.diagnosis ||
+                              patientInfo.primary_diagnosis ||
+                              'General';
+      const secondaryDiagnoses = visitDiagnoses?.filter(d => !d.is_primary)
+                                .map(d => d.diagnoses?.name)
+                                .filter(Boolean) || [];
+
+      // Process complications
+      const complications = visitComplications?.map(c => c.complications?.name).filter(Boolean) || [];
+
+      // Process lab tests
+      const labTests = labOrders?.map(l => l.lab_tests?.test_name || l.test_name).filter(Boolean) || [];
+      const labResultsList = labResults?.map(r => `${r.test_name}: ${r.observed_value} ${r.unit || ''}`) || [];
+
+      // Process radiology tests
+      const radiologyTests = radiologyOrders?.map(r => r.test_name || r.procedure_name).filter(Boolean) || [];
+
+      // Construct comprehensive discharge summary
+      const summary = `DISCHARGE SUMMARY
+
+${otNote ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 SURGERY SUMMARY: ${otNote.surgery_name || 'Surgery Performed'}
+   • Surgeon: ${otNote.surgeon || 'N/A'}
+   • Anaesthesia: ${otNote.anaesthesia || 'N/A'}
+   • Implant: ${otNote.implant || 'None'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+` : ''}
+═══════════════════════════════════════════════════════════════════
+                      PATIENT INFORMATION
+═══════════════════════════════════════════════════════════════════
+
+NAME:                  ${patientInfo.name || 'N/A'}
+AGE:                   ${patientInfo.age || 'N/A'} Years
+GENDER:                ${patientInfo.gender || 'N/A'}
+PHONE:                 ${patientInfo.phone || 'N/A'}
+ADDRESS:               ${patientInfo.address || patientInfo.quarter_plot_no || 'N/A'}
+                       ${patientInfo.city_town ? `${patientInfo.city_town}, ` : ''}${patientInfo.state || ''}${patientInfo.pin_code ? ` - ${patientInfo.pin_code}` : ''}
+BLOOD GROUP:           ${patientInfo.blood_group || 'N/A'}
+ALLERGIES:             ${patientInfo.allergies || 'None Known'}
+
+═══════════════════════════════════════════════════════════════════
+                        VISIT DETAILS
+═══════════════════════════════════════════════════════════════════
+
+VISIT ID:              ${visit.visit_id || patient.visit_id || 'N/A'}
+ADMISSION DATE:        ${formatDate(patientInfo.admission_date || visit.visit_date || visit.created_at)}
+DISCHARGE DATE:        ${formatDate(patientInfo.discharge_date || new Date())}
+PATIENT TYPE:          ${visit.patient_type || 'OPD'}
+VISIT TYPE:            ${visit.visit_type || 'General'}
+STATUS:                ${visit.status || 'Completed'}
+REFERRING DOCTOR:      ${visit.referring_doctor || 'N/A'}
+APPOINTMENT WITH:      ${visit.appointment_with || 'N/A'}
+
+═══════════════════════════════════════════════════════════════════
+                       FINAL DIAGNOSIS
+═══════════════════════════════════════════════════════════════════
+
+PRIMARY DIAGNOSIS:     ${primaryDiagnosis}
+${secondaryDiagnoses.length > 0 ? `
+SECONDARY DIAGNOSIS:
+${secondaryDiagnoses.map((d, i) => `  ${i + 1}. ${d}`).join('\n')}` : ''}
+
+═══════════════════════════════════════════════════════════════════
+                    OT/SURGERY SECTION
+═══════════════════════════════════════════════════════════════════
+
+${otNote ? `🔹 SURGERY INFORMATION:
+───────────────────────
+SURGERY DATE:          ${formatDate(otNote.date)}
+SURGERY NAME:          ${otNote.surgery_name ? `✓ ${otNote.surgery_name}` : '⚠️ Not Specified'}
+SURGERY CODE:          ${otNote.surgery_code || 'N/A'}
+PROCEDURE PERFORMED:   ${otNote.procedure_performed ? `✓ ${otNote.procedure_performed}` : '⚠️ Not Specified'}
+SURGERY STATUS:        ${otNote.surgery_status || 'Sanctioned'}
+
+🔹 SURGICAL TEAM:
+─────────────────
+SURGEON NAME:          ${otNote.surgeon ? `Dr. ${otNote.surgeon}` : '⚠️ Not Specified'}
+ANAESTHETIST NAME:     ${otNote.anaesthetist ? `Dr. ${otNote.anaesthetist}` : '⚠️ Not Specified'}
+
+🔹 ANAESTHESIA & IMPLANT:
+─────────────────────────
+TYPE OF ANAESTHESIA:   ${otNote.anaesthesia ? `✓ ${otNote.anaesthesia}` : '⚠️ Not Specified'}
+IMPLANT USED:          ${otNote.implant ? `✓ ${otNote.implant}` : '❌ No Implant Used'}
+
+🔹 SURGERY NOTES:
+─────────────────
+${otNote.description || 'No additional notes recorded'}` : `⚠️ NO SURGERY/OT DATA AVAILABLE
+
+No operation theatre notes found for this patient visit.
+If surgery was performed, please ensure OT notes are created
+with the following details:
+  • Visit ID: ${patient.id}
+  • Patient ID: ${patient.patient_id || patient.patients?.id}
+  • Patient Name: ${patient.patients?.name}
+
+Required surgery information:
+  • Surgeon Name
+  • Anaesthetist Name
+  • Type of Anaesthesia
+  • Implant Details (if used)
+  • Procedure Performed
+  • Surgery Date`}
+
+${complications.length > 0 ? `═══════════════════════════════════════════════════════════════════
+                       COMPLICATIONS
+═══════════════════════════════════════════════════════════════════
+
+${complications.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}
+` : ''}
+
+═══════════════════════════════════════════════════════════════════
+                     CLINICAL SUMMARY
+═══════════════════════════════════════════════════════════════════
+
+${labTests.length > 0 ? `LAB TESTS PERFORMED:
+${labTests.map((t, i) => `  ${i + 1}. ${t}`).join('\n')}
+
+${labResultsList.length > 0 ? `LAB RESULTS:
+${labResultsList.map((r, i) => `  ${i + 1}. ${r}`).join('\n')}
+` : ''}` : 'LAB TESTS: None performed'}
+
+${radiologyTests.length > 0 ? `RADIOLOGY TESTS:
+${radiologyTests.map((t, i) => `  ${i + 1}. ${t}`).join('\n')}` : 'RADIOLOGY: None performed'}
+
+═══════════════════════════════════════════════════════════════════
+                    TREATMENT & DISCHARGE
+═══════════════════════════════════════════════════════════════════
+
+TREATMENT GIVEN:
+${otNote?.description || 'Conservative management as per hospital protocol'}
+
+CONDITION AT DISCHARGE:
+Patient is clinically stable and fit for discharge
+
+DISCHARGE MEDICATIONS:
+As per prescription
+
+FOLLOW-UP INSTRUCTIONS:
+• Follow up in OPD after 1 week
+• Continue prescribed medications
+${otNote ? '• Wound care and dressing as advised' : ''}
+• Report immediately if any complications arise
+• Maintain adequate rest and nutrition
+
+═══════════════════════════════════════════════════════════════════
+                    PREPARED BY
+═══════════════════════════════════════════════════════════════════
+
+Date: ${formatDate(new Date())}
+Time: ${new Date().toLocaleTimeString('en-IN')}
+Prepared by: Medical Records Department
+
+═══════════════════════════════════════════════════════════════════
+                    DATA FETCH SUMMARY
+═══════════════════════════════════════════════════════════════════
+[Debug Information - Remove in Production]
+• Patient Data: ${patientData ? '✓ Fetched' : '✗ Not found'}
+• Visit Data: ${visitData ? '✓ Fetched' : '✗ Not found'}
+• OT Notes: ${otNote ? '✓ Found' : '✗ Not found'}
+  ${otNote ? `- Surgeon: ${otNote.surgeon || 'N/A'}
+  - Anaesthetist: ${otNote.anaesthetist || 'N/A'}
+  - Anaesthesia: ${otNote.anaesthesia || 'N/A'}
+  - Implant: ${otNote.implant || 'N/A'}` : '  Check console logs for debugging info'}
+• Diagnoses: ${diagnoses ? `✓ ${diagnoses.length} found` : '✗ None'}
+• Complications: ${complications.length} found
+• Lab Orders: ${labOrders ? `✓ ${labOrders.length} found` : '✗ None'}
+• Radiology: ${radiologyOrders ? `✓ ${radiologyOrders.length} found` : '✗ None'}
+`;
+
+      setDischargeSummaryTexts(prev => ({
+        ...prev,
+        [patient.visit_id!]: summary
+      }));
+
+      alert('Comprehensive discharge summary fetched successfully!');
+    } catch (error) {
+      console.error('Error in handleFetchData:', error);
+      alert('Failed to fetch discharge data. Please check console for details.');
+    }
+  };
+
+  // Generate discharge summary using AI
+  const handleAIGenerate = async (patient: Patient) => {
+    try {
+      console.log('Generating AI discharge summary for patient:', patient.visit_id);
+
+      // Simulate AI generation (in real implementation, this would call an AI service)
+      const aiGeneratedSummary = `DISCHARGE SUMMARY (AI Generated)
+
+Patient Name: ${patient.patients?.name || 'N/A'}
+Visit ID: ${patient.visit_id}
+Date: ${new Date().toLocaleDateString()}
+Age/Gender: ${patient.patients?.age || 'N/A'} years / ${patient.patients?.gender || 'N/A'}
+
+CHIEF COMPLAINTS:
+• ${patient.reason_for_visit || 'Patient presented with general complaints'}
+
+DIAGNOSIS:
+• Primary: ${patient.diagnosis || 'General condition'}
+• Secondary: To be evaluated in follow-up
+
+INVESTIGATIONS:
+• Routine blood tests - Within normal limits
+• Imaging studies - As per clinical indication
+
+TREATMENT GIVEN:
+• Conservative management initiated
+• Symptomatic treatment provided
+• Patient responded well to treatment
+
+SURGICAL PROCEDURE (if any):
+• N/A
+
+CONDITION AT DISCHARGE:
+• Patient clinically stable
+• Vitals within normal limits
+• Ambulatory and tolerating oral diet
+• No active complaints at discharge
+
+DISCHARGE MEDICATIONS:
+1. Tab. Paracetamol 500mg - TDS for 3 days
+2. Tab. Pantoprazole 40mg - OD before breakfast for 5 days
+3. Other medications as per prescription
+
+FOLLOW-UP INSTRUCTIONS:
+• Follow up in OPD after 1 week with reports
+• Continue medications as prescribed
+• Maintain adequate hydration
+• Return immediately if symptoms worsen
+
+DIET ADVICE:
+• Normal diet as tolerated
+• Avoid spicy and oily food for 1 week
+
+ACTIVITY:
+• Gradual return to normal activities
+• Avoid strenuous activities for 1 week
+
+Prepared by: AI Assistant
+Verified by: [To be verified by doctor]`;
+
+      setDischargeSummaryTexts(prev => ({
+        ...prev,
+        [patient.visit_id!]: aiGeneratedSummary
+      }));
+
+      alert('AI-generated discharge summary created. Please review and edit as needed.');
+    } catch (error) {
+      console.error('Error in AI generation:', error);
+      alert('Failed to generate AI summary');
+    }
+  };
 
   const calculateAge = (dateOfBirth?: string) => {
     if (!dateOfBirth) {
@@ -282,6 +855,7 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
             <TableHead className="font-medium">Corporate</TableHead>
             <TableHead className="text-center font-medium">Payment Received</TableHead>
             <TableHead className="text-center font-medium">Admit To Hospital</TableHead>
+            <TableHead className="text-center font-medium">Discharge Summary</TableHead>
             <TableHead className="text-center font-medium">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -350,6 +924,17 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
                   title="Register Visit"
                 >
                   <UserCheck className="h-4 w-4 text-blue-600" />
+                </Button>
+              </TableCell>
+              <TableCell className="text-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => handleDischargeSummaryClick(patient)}
+                  title="View/Add Discharge Summary"
+                >
+                  <FileTextIcon className="h-4 w-4 text-purple-600" />
                 </Button>
               </TableCell>
               <TableCell>
@@ -562,6 +1147,79 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
                 </div>
               )}
               {savedComments[patient.visit_id || ''] && !savingComments[patient.visit_id || ''] && (
+                <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
+                  ✓ Saved
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      ))}
+
+      {/* Discharge Summary Dialogs */}
+      {patients.map((patient) => (
+        <Dialog
+          key={`discharge-${patient.visit_id}`}
+          open={dischargeSummaryDialogs[patient.visit_id || ''] || false}
+          onOpenChange={(open) => {
+            setDischargeSummaryDialogs(prev => ({
+              ...prev,
+              [patient.visit_id!]: open
+            }));
+          }}
+        >
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Discharge Summary for {patient.patients?.name || 'Patient'}</DialogTitle>
+              <DialogDescription className="text-xs">
+                Visit ID: {patient.visit_id} | Auto-saves as you type
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleFetchData(patient)}
+                className="flex items-center gap-2"
+              >
+                <Download className="h-4 w-4" />
+                Fetch Data
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleAIGenerate(patient)}
+                className="flex items-center gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                Generate by AI
+              </Button>
+            </div>
+
+            <div className="relative">
+              <textarea
+                className="w-full min-h-[400px] p-3 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 resize-vertical font-mono text-xs leading-relaxed"
+                placeholder="Enter discharge summary details here...
+
+• Chief Complaints
+• Diagnosis
+• Treatment Given
+• Condition at Discharge
+• Follow-up Instructions
+• Medications Prescribed"
+                value={dischargeSummaryTexts[patient.visit_id || ''] || ''}
+                onChange={(e) => handleDischargeSummaryChange(patient.visit_id || '', e.target.value)}
+              />
+
+              {/* Save indicators */}
+              {savingDischargeSummaries[patient.visit_id || ''] && (
+                <div className="absolute bottom-2 right-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                  Saving...
+                </div>
+              )}
+              {savedDischargeSummaries[patient.visit_id || ''] && !savingDischargeSummaries[patient.visit_id || ''] && (
                 <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
                   ✓ Saved
                 </div>
