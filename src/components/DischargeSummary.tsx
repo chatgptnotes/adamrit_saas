@@ -190,7 +190,7 @@ export default function DischargeSummary({
     }
     
     // Process vitals from examination
-    let processedVitals: string[] = [];
+    const processedVitals: string[] = [];
     if (examinationMatch) {
       const examText = examinationMatch[1];
       const tempMatch = examText.match(/Temperature:\s*([^\s,]+)/i);
@@ -207,7 +207,7 @@ export default function DischargeSummary({
     }
     
     // Process complaints from case summary
-    let processedComplaints: string[] = [];
+    const processedComplaints: string[] = [];
     if (caseSummaryMatch) {
       const complaintText = caseSummaryMatch[1];
       // Extract age and gender
@@ -336,7 +336,23 @@ export default function DischargeSummary({
 
           {/* Meds */}
           <Section title="DISCHARGE MEDICATIONS">
-            {dynamicData?.medications && dynamicData.medications !== 'N/A' ? (
+            {allPatientData && allPatientData.includes('MEDICATIONS:') ? (
+              <div className="text-[10px] p-3 bg-gray-50 rounded border">
+                <p><strong>Prescribed Medications:</strong></p>
+                <div className="mt-2 space-y-1">
+                  {allPatientData.split('\n')
+                    .filter(line => line.startsWith('Medication:'))
+                    .map((med, index) => (
+                      <div key={index} className="pl-2 border-l-2 border-green-200 bg-green-50 p-1 rounded">
+                        {med.replace('Medication: ', '')}
+                      </div>
+                    ))}
+                  {allPatientData.split('\n').filter(line => line.startsWith('Medication:')).length === 0 && (
+                    <div className="text-gray-500 italic">No medications found</div>
+                  )}
+                </div>
+              </div>
+            ) : dynamicData?.medications && dynamicData.medications !== 'N/A' ? (
               <div className="text-[10px] p-3 bg-gray-50 rounded border">
                 <p><strong>Treatment On Discharge:</strong></p>
                 <div className="mt-2 space-y-1">
@@ -380,20 +396,42 @@ export default function DischargeSummary({
                 </ul>
               </div>
               <div className="col-span-12 md:col-span-6">
-                <h4 className="text-[10px] font-semibold mb-1">Investigations:</h4>
-                {(dynamicData?.investigations && dynamicData.investigations.length > 0) ||
-                 (summaryData?.investigations && summaryData.investigations.length > 0) ? (
+                <h4 className="text-[10px] font-semibold mb-1">Laboratory Investigations:</h4>
+                {allPatientData && allPatientData.includes('LABORATORY INVESTIGATIONS:') ? (
                   <div className="text-[9px] space-y-1 max-h-32 overflow-y-auto">
-                    {(dynamicData?.investigations || summaryData?.investigations || []).map((inv, i) => (
-                      <div key={i} className="p-1 bg-gray-50 rounded">
-                        {inv}
-                      </div>
-                    ))}
+                    {allPatientData.split('\n')
+                      .filter(line => line.startsWith('Lab:'))
+                      .map((lab, i) => (
+                        <div key={i} className="p-1 bg-blue-50 rounded border-l-2 border-blue-200">
+                          {lab.replace('Lab: ', '')}
+                        </div>
+                      ))}
+                    {allPatientData.split('\n').filter(line => line.startsWith('Lab:')).length === 0 && (
+                      <div className="text-gray-500 italic">No lab investigations found</div>
+                    )}
                   </div>
                 ) : (
                   <ul className="list-disc pl-5 text-[10px] space-y-0.5">
                     {investigations.map((v, i) => <li key={i}>{v}</li>)}
                   </ul>
+                )}
+
+                <h4 className="text-[10px] font-semibold mb-1 mt-3">Radiology Investigations:</h4>
+                {allPatientData && allPatientData.includes('RADIOLOGY INVESTIGATIONS:') ? (
+                  <div className="text-[9px] space-y-1 max-h-32 overflow-y-auto">
+                    {allPatientData.split('\n')
+                      .filter(line => line.startsWith('Radiology:'))
+                      .map((rad, i) => (
+                        <div key={i} className="p-1 bg-purple-50 rounded border-l-2 border-purple-200">
+                          {rad.replace('Radiology: ', '')}
+                        </div>
+                      ))}
+                    {allPatientData.split('\n').filter(line => line.startsWith('Radiology:')).length === 0 && (
+                      <div className="text-gray-500 italic">No radiology investigations found</div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 italic text-[9px]">Click "Fetch Data" to load radiology data</div>
                 )}
               </div>
             </div>
