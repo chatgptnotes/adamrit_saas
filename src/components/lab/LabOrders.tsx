@@ -439,10 +439,10 @@ const LabOrders = () => {
   // NEW: State to store calculated reference ranges
   const [calculatedRanges, setCalculatedRanges] = useState<Record<string, string>>({});
 
-  // NEW: Function to fetch sub-tests for a given test
-  const fetchSubTestsForTest = useCallback(async (testName: string) => {
+  // NEW: Function to fetch sub-tests for a given test with patient-specific ranges
+  const fetchSubTestsForTest = useCallback(async (testName: string, patientAge?: number, patientGender?: string) => {
     try {
-      console.log('🔍 Fetching sub-tests for:', testName);
+      console.log('🔍 Fetching sub-tests for:', testName, 'Patient:', { age: patientAge, gender: patientGender });
 
       const { data: subTestsData, error } = await supabase
         .from('lab_test_config')
@@ -454,20 +454,77 @@ const LabOrders = () => {
         return [];
       }
 
-      console.log('📊 Raw sub-tests found:', subTestsData);
+      console.log('📊 Raw sub-tests found for', testName, ':', subTestsData);
+      console.log('👤 Patient info:', { age: patientAge, gender: patientGender });
 
-      // Remove duplicates based on sub_test_name
-      const uniqueSubTests = subTestsData?.filter((subTest, index, array) =>
-        index === array.findIndex(item => item.sub_test_name === subTest.sub_test_name)
-      ) || [];
+      // Group by sub_test_name to handle multiple ranges per sub-test
+      const groupedSubTests = subTestsData?.reduce((acc, subTest) => {
+        if (!acc[subTest.sub_test_name]) {
+          acc[subTest.sub_test_name] = [];
+        }
+        acc[subTest.sub_test_name].push(subTest);
+        return acc;
+      }, {} as Record<string, any[]>) || {};
 
-      console.log('📊 Unique sub-tests after deduplication:', uniqueSubTests);
-      return uniqueSubTests;
+      // Process each sub-test and find the best matching range
+      const processedSubTests = Object.keys(groupedSubTests).map(subTestName => {
+        const ranges = groupedSubTests[subTestName];
+
+        // Find the best matching range based on age and gender
+        const bestMatch = findBestMatchingRange(ranges, patientAge || 30, patientGender || 'Both');
+
+        return {
+          id: bestMatch.id,
+          name: subTestName,
+          unit: bestMatch.normal_unit,
+          range: `${bestMatch.min_value} - ${bestMatch.max_value} ${bestMatch.normal_unit}`,
+          minValue: bestMatch.min_value,
+          maxValue: bestMatch.max_value,
+          gender: bestMatch.gender,
+          minAge: bestMatch.min_age,
+          maxAge: bestMatch.max_age,
+          allRanges: ranges // Keep all ranges for debugging
+        };
+      });
+
+      console.log('📊 Processed sub-tests with patient-specific ranges:', processedSubTests);
+      return processedSubTests;
     } catch (error) {
       console.error('Error in fetchSubTestsForTest:', error);
       return [];
     }
   }, []);
+
+  // Helper function to find the best matching range for a patient
+  const findBestMatchingRange = (ranges: any[], patientAge: number, patientGender: string) => {
+    console.log('🎯 Finding best range for:', { age: patientAge, gender: patientGender, availableRanges: ranges });
+
+    // Normalize patient gender for comparison
+    const normalizedPatientGender = patientGender?.toLowerCase() === 'male' ? 'Male' :
+                                   patientGender?.toLowerCase() === 'female' ? 'Female' : 'Both';
+
+    // First, try to find exact age and gender match
+    let bestMatch = ranges.find(range =>
+      patientAge >= range.min_age &&
+      patientAge <= range.max_age &&
+      (range.gender === normalizedPatientGender || range.gender === 'Both')
+    );
+
+    // If no exact match, try gender-specific ranges regardless of age
+    if (!bestMatch) {
+      bestMatch = ranges.find(range =>
+        range.gender === normalizedPatientGender || range.gender === 'Both'
+      );
+    }
+
+    // If still no match, take the first available range
+    if (!bestMatch) {
+      bestMatch = ranges[0];
+    }
+
+    console.log('✅ Selected range:', bestMatch);
+    return bestMatch;
+  };
 
   // NEW: Effect to calculate reference ranges when tests are selected for entry
   useEffect(() => {
@@ -490,14 +547,18 @@ const LabOrders = () => {
           if (!processedTestNames.has(testRow.test_name)) {
             processedTestNames.add(testRow.test_name);
 
-            // Fetch sub-tests for this test
-            const subTests = await fetchSubTestsForTest(testRow.test_name);
+            // Fetch sub-tests for this test with patient-specific ranges
+            const subTests = await fetchSubTestsForTest(
+              testRow.test_name,
+              testRow.patient_age,
+              testRow.patient_gender
+            );
             if (subTests.length > 0) {
               subTestsMap[testRow.test_name] = subTests;
 
               // Calculate ranges for each sub-test
               for (const subTest of subTests) {
-                const subTestRange = `12-16 ${subTest.unit || 'g/dl'}`; // Default range or calculate from subTest data
+                const subTestRange = subTest.range || `${subTest.minValue || 'N/A'} - ${subTest.maxValue || 'N/A'} ${subTest.unit || ''}`;
                 ranges[`${testRow.id}_subtest_${subTest.id}`] = subTestRange;
               }
             }
@@ -1390,7 +1451,7 @@ const LabOrders = () => {
           resultsData.push({
             order_id: testRow.order_id,
             test_id: testRow.test_id,
-            test_name: subTest.sub_test_name, // Use sub-test name
+            test_name: subTest.name, // Use sub-test name
             test_category: testRow.test_category,
             result_value: subTestFormData.result_value || '',
             result_unit: subTestFormData.result_unit || subTest.unit || '',
@@ -1490,14 +1551,8 @@ const LabOrders = () => {
       return;
     }
 
-    if (!isFormSaved) {
-      toast({
-        title: "Please Save First",
-        description: "You must save the lab results before printing.",
-        variant: "destructive"
-      });
-      return;
-    }
+    // Allow preview with current form data even if not saved
+    console.log('🖨️ Preview & Print clicked, isFormSaved:', isFormSaved);
 
     try {
       // Get the correct patient ID - try multiple fields
@@ -1539,8 +1594,9 @@ const LabOrders = () => {
         return;
       }
 
-      // Create print content with fetched data
+      // Create print content with fetched data or current form data
       const printContent = generatePrintContent(resultsToUse);
+      console.log('📄 Generated print content length:', printContent.length);
 
       // Open print preview
       const printWindow = window.open('', '_blank');
@@ -1575,8 +1631,14 @@ const LabOrders = () => {
 
   // Generate Print Content
   const generatePrintContent = (fetchedLabResults = []) => {
+    console.log('🖨️ Generating print content...');
+    console.log('📋 Selected tests:', selectedTestsForEntry);
+    console.log('📝 Current form data:', labResultsForm);
+    console.log('🧪 Test sub-tests:', testSubTests);
+    console.log('🗂️ Saved lab results:', savedLabResults);
+
     if (selectedTestsForEntry.length === 0) return '';
-    
+
     const patientInfo = selectedTestsForEntry[0];
     const reportDate = new Date().toLocaleDateString('en-GB', {
       day: '2-digit',
@@ -1752,16 +1814,6 @@ const LabOrders = () => {
             width: 200px;
           }
           
-          .watermark {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) rotate(-45deg);
-            font-size: 72px;
-            color: rgba(0, 0, 0, 0.05);
-            z-index: -1;
-            pointer-events: none;
-          }
           
           @media print {
             body { print-color-adjust: exact; }
@@ -1770,11 +1822,13 @@ const LabOrders = () => {
         </style>
       </head>
       <body>
-        <div class="watermark">ESIC HOSPITAL</div>
-        
-        
-        
-                <div class="patient-info">
+
+        <div class="report-header">
+          <div class="hospital-name">ESIC HOSPITAL</div>
+          <div class="hospital-details">Laboratory Report</div>
+        </div>
+
+        <div class="patient-info">
           <div>
             <div><strong>Patient Name :</strong> ${patientInfo?.patient_name || 'N/A'}</div>
             <div><strong>Patient ID :</strong> ${(() => {
@@ -1829,7 +1883,7 @@ const LabOrders = () => {
             <div class="header-col-3">NORMAL RANGE</div>
           </div>
 
-          ${fetchedLabResults.length > 0 ?
+          ${false ? // Force fallback to form data for debugging
             // Parse test results from patient_name JSON field
             fetchedLabResults.map(result => {
               try {
@@ -1861,33 +1915,128 @@ const LabOrders = () => {
               return '';
             }).join('')
           :
-            // Fallback to original form data if no fetched results
+            // Fallback to form data with sub-tests
             selectedTestsForEntry.map(testRow => {
-              const formData = savedLabResults[testRow.id] || labResultsForm[testRow.id] || {
-                result_value: '',
-                result_unit: '',
-                reference_range: '',
-                comments: '',
-                is_abnormal: false,
-                result_status: 'Preliminary'
-              };
+              console.log('🔄 Processing test row for print:', testRow.test_name);
+              const subTests = testSubTests[testRow.test_name] || [];
+              console.log('📊 Sub-tests for', testRow.test_name, ':', subTests);
 
-              const displayValue = formData.result_value ?
-                `${formData.result_value} ${formData.result_unit || ''}`.trim() :
-                'Not Available';
+              // Also check for ANY form data keys that might contain data for this test
+              const allFormKeys = Object.keys(labResultsForm);
+              console.log('🔍 All available form keys:', allFormKeys);
+              const relevantKeys = allFormKeys.filter(key => key.includes(testRow.id.toString()));
+              console.log('📋 Relevant keys for test', testRow.test_name, ':', relevantKeys);
 
-              const referenceRange = calculatedRanges[testRow.id] || formData.reference_range || 'Not Specified';
+              // Try both sub-tests approach and direct key approach
+              let hasSubTestData = subTests.length > 0;
+              let hasDirectData = relevantKeys.length > 0;
 
-              return `
-                <div class="main-test-section">
-                  <div class="main-test-header">${testRow.test_name.toUpperCase()}</div>
-                  <div class="test-row">
-                    <div class="test-name">${testRow.test_name}</div>
-                    <div class="test-value ${formData.is_abnormal ? 'abnormal' : ''}">${displayValue}</div>
-                    <div class="test-range">${referenceRange}</div>
+              console.log('📊 Has sub-test data:', hasSubTestData, 'Has direct data:', hasDirectData);
+
+              if (hasSubTestData) {
+                // Display test with sub-tests
+                const subTestRows = subTests.map(subTest => {
+                  const subTestKey = `${testRow.id}_subtest_${subTest.id}`;
+                  console.log('🔑 Looking for sub-test data with key:', subTestKey);
+                  const subTestFormData = savedLabResults[subTestKey] || labResultsForm[subTestKey] || {
+                    result_value: '',
+                    result_unit: '',
+                    reference_range: '',
+                    comments: '',
+                    is_abnormal: false,
+                    result_status: 'Preliminary'
+                  };
+                  console.log('📝 Sub-test form data found:', subTestFormData);
+
+                  const displayValue = subTestFormData.result_value ?
+                    `${subTestFormData.result_value} ${subTest.unit || ''}`.trim() :
+                    'Not Available';
+
+                  const referenceRange = subTest.range || calculatedRanges[subTestKey] || 'Not Specified';
+
+                  return `
+                    <div class="test-row">
+                      <div class="test-name">${subTest.name}</div>
+                      <div class="test-value ${subTestFormData.is_abnormal ? 'abnormal' : ''}">${displayValue}</div>
+                      <div class="test-range">${referenceRange}</div>
+                    </div>
+                  `;
+                }).join('');
+
+                return `
+                  <div class="main-test-section">
+                    <div class="main-test-header">${testRow.test_name.toUpperCase()}</div>
+                    ${subTestRows}
                   </div>
-                </div>
-              `;
+                `;
+              } else if (hasDirectData) {
+                // Display data from any relevant form keys found
+                const directDataRows = relevantKeys.map(key => {
+                  const formData = labResultsForm[key] || savedLabResults[key];
+                  if (formData && formData.result_value) {
+                    console.log('📊 Found direct data in key:', key, formData);
+                    return `
+                      <div class="test-row">
+                        <div class="test-name">${testRow.test_name} (from ${key})</div>
+                        <div class="test-value">${formData.result_value} ${formData.result_unit || ''}</div>
+                        <div class="test-range">${formData.reference_range || 'Consult reference values'}</div>
+                      </div>
+                    `;
+                  }
+                  return '';
+                }).filter(row => row !== '').join('');
+
+                if (directDataRows) {
+                  return `
+                    <div class="main-test-section">
+                      <div class="main-test-header">${testRow.test_name.toUpperCase()}</div>
+                      ${directDataRows}
+                    </div>
+                  `;
+                }
+
+                // Fallback to main test data
+                const mainFormData = labResultsForm[testRow.id] || savedLabResults[testRow.id];
+                if (mainFormData && mainFormData.result_value) {
+                  return `
+                    <div class="main-test-section">
+                      <div class="main-test-header">${testRow.test_name.toUpperCase()}</div>
+                      <div class="test-row">
+                        <div class="test-name">${testRow.test_name}</div>
+                        <div class="test-value">${mainFormData.result_value} ${mainFormData.result_unit || ''}</div>
+                        <div class="test-range">${mainFormData.reference_range || 'Consult reference values'}</div>
+                      </div>
+                    </div>
+                  `;
+                }
+              } else {
+                // Display single test without sub-tests
+                const formData = savedLabResults[testRow.id] || labResultsForm[testRow.id] || {
+                  result_value: '',
+                  result_unit: '',
+                  reference_range: '',
+                  comments: '',
+                  is_abnormal: false,
+                  result_status: 'Preliminary'
+                };
+
+                const displayValue = formData.result_value ?
+                  `${formData.result_value} ${formData.result_unit || ''}`.trim() :
+                  'Not Available';
+
+                const referenceRange = calculatedRanges[testRow.id] || formData.reference_range || 'Not Specified';
+
+                return `
+                  <div class="main-test-section">
+                    <div class="main-test-header">${testRow.test_name.toUpperCase()}</div>
+                    <div class="test-row">
+                      <div class="test-name">${testRow.test_name}</div>
+                      <div class="test-value ${formData.is_abnormal ? 'abnormal' : ''}">${displayValue}</div>
+                      <div class="test-range">${referenceRange}</div>
+                    </div>
+                  </div>
+                `;
+              }
             }).join('')
           }
         </div>
@@ -1900,11 +2049,25 @@ const LabOrders = () => {
           <div class="interpretation-title">INTERPRETATION :</div>
           <div>
             ${selectedTestsForEntry.map(testRow => {
-              const formData = savedLabResults[testRow.id] || labResultsForm[testRow.id];
-              if (formData?.comments) {
-                return `<p><strong>${testRow.test_name}:</strong> ${formData.comments}</p>`;
+              let commentsHtml = '';
+
+              // Check main test comments
+              const mainFormData = savedLabResults[testRow.id] || labResultsForm[testRow.id];
+              if (mainFormData?.comments) {
+                commentsHtml += `<p><strong>${testRow.test_name}:</strong> ${mainFormData.comments}</p>`;
               }
-              return '';
+
+              // Check sub-test comments
+              const subTests = testSubTests[testRow.test_name] || [];
+              subTests.forEach(subTest => {
+                const subTestKey = `${testRow.id}_subtest_${subTest.id}`;
+                const subTestFormData = savedLabResults[subTestKey] || labResultsForm[subTestKey];
+                if (subTestFormData?.comments) {
+                  commentsHtml += `<p><strong>${subTest.name}:</strong> ${subTestFormData.comments}</p>`;
+                }
+              });
+
+              return commentsHtml;
             }).join('')}
             
             <p>
@@ -2648,174 +2811,132 @@ const LabOrders = () => {
                 </div>
               </div>
 
-                             {/* Dynamic Test Sections for Selected Tests */}
-               {selectedTestsForEntry.map((testRow) => {
-                 const formData = labResultsForm[testRow.id] || {
-                   result_value: '',
-                   result_unit: '',
-                   reference_range: '',
-                   comments: '',
-                   is_abnormal: false,
-                   result_status: 'Preliminary' as 'Preliminary' | 'Final'
-                 };
+              {/* Tabular Entry Form for Multiple Tests */}
+              <div className="border border-gray-300 rounded-lg overflow-hidden">
+                {/* Table Header */}
+                <div className="bg-gray-50 border-b border-gray-300">
+                  <div className="grid grid-cols-3 gap-0 font-semibold text-sm text-gray-800">
+                    <div className="p-3 border-r border-gray-300 text-center">INVESTIGATION</div>
+                    <div className="p-3 border-r border-gray-300 text-center">OBSERVED VALUE</div>
+                    <div className="p-3 text-center">NORMAL RANGE</div>
+                  </div>
+                </div>
 
-                 // Check if this test has sub-tests
-                 const subTests = testSubTests[testRow.test_name] || [];
-                 const hasSubTests = subTests.length > 0;
+                {/* Test Rows */}
+                {selectedTestsForEntry.map((testRow, index) => {
+                  const formData = labResultsForm[testRow.id] || {
+                    result_value: '',
+                    result_unit: '',
+                    reference_range: '',
+                    comments: '',
+                    is_abnormal: false,
+                    result_status: 'Preliminary' as 'Preliminary' | 'Final'
+                  };
 
-                 return (
-                   <div key={testRow.id} className="border rounded-lg">
+                  // Get sub-tests from the testSubTests data fetched from database
+                  const subTests = testSubTests[testRow.test_name] || [{
+                    name: testRow.test_name,
+                    unit: '',
+                    range: calculatedRanges[testRow.id] || 'Consult reference values'
+                  }];
 
-                     {/* If has sub-tests, show hierarchical structure as per documentation */}
-                     {hasSubTests ? (
-                       <div className="p-4 space-y-4">
-                         {/* Table Headers */}
-                         <div className="grid grid-cols-3 gap-4 font-medium text-sm text-gray-700 border-b pb-2">
-                           <div>INVESTIGATION</div>
-                           <div>OBSERVED VALUE</div>
-                           <div>NORMAL RANGE</div>
-                         </div>
+                  return (
+                    <div key={testRow.id} className="border-b border-gray-200 last:border-b-0">
+                      {/* Main Test Header */}
+                      <div className="bg-white">
+                        <div className="grid grid-cols-3 gap-0">
+                          <div className="p-3 border-r border-gray-300">
+                            <div className="font-bold text-sm text-blue-900">
+                              {testRow.test_name}
+                            </div>
+                          </div>
+                          <div className="p-3 border-r border-gray-300 text-center text-gray-500 text-sm font-medium">
+                            {/* Empty for main test header */}
+                          </div>
+                          <div className="p-3 text-center text-gray-500 text-sm font-medium">
+                            {/* Empty for main test header */}
+                          </div>
+                        </div>
+                      </div>
 
-                         {/* Main Test Row */}
-                         <div className="grid grid-cols-3 gap-4 items-start border-b pb-4">
-                           <div>
-                             <span className="font-semibold text-blue-600">Main Test</span>
-                             <br />
-                             <span className="font-medium">{testRow.test_name}</span>
-                           </div>
-                           <div className="text-center text-gray-500 italic">
-                             - Test Group Header -
-                           </div>
-                           <div className="text-center text-gray-500 italic">
-                             - See Sub Tests -
-                           </div>
-                         </div>
+                      {/* Sub-test Rows */}
+                      {subTests.map((subTest, subIndex) => {
+                        const subTestKey = `${testRow.id}_subtest_${subTest.id}`;
+                        const subTestFormData = labResultsForm[subTestKey] || {
+                          result_value: '',
+                          result_unit: '',
+                          reference_range: '',
+                          comments: '',
+                          is_abnormal: false,
+                          result_status: 'Preliminary' as 'Preliminary' | 'Final'
+                        };
 
-                         {/* Main Test Comments and Abnormal */}
-                         <div className="grid grid-cols-3 gap-4 mb-4">
-                           <div></div>
-                           <div className="col-span-2">
-                             <textarea
-                               className={`w-full px-3 py-2 border rounded min-h-[60px] ${isFormSaved ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                               placeholder="Comments..."
-                               value={formData.comments}
-                               onChange={(e) => handleLabResultChange(testRow.id, 'comments', e.target.value)}
-                               disabled={isFormSaved}
-                             />
-                             <div className="flex items-center space-x-2 mt-2">
-                               <input
-                                 type="checkbox"
-                                 id={`abnormal-main-${testRow.id}`}
-                                 checked={formData.is_abnormal}
-                                 onChange={(e) => handleLabResultChange(testRow.id, 'is_abnormal', e.target.checked)}
-                                 disabled={isFormSaved}
-                               />
-                               <label htmlFor={`abnormal-main-${testRow.id}`} className="text-sm">Mark as Abnormal</label>
-                             </div>
-                           </div>
-                         </div>
+                        return (
+                        <div key={subTestKey} className="bg-white border-t border-gray-100">
+                          <div className="grid grid-cols-3 gap-0 min-h-[40px]">
+                            <div className="p-2 border-r border-gray-300 flex items-center">
+                              <span className="text-sm ml-4">{subTest.name}</span>
+                            </div>
+                            <div className="p-2 border-r border-gray-300 flex items-center justify-center">
+                              <input
+                                type="text"
+                                className={`w-full max-w-[120px] px-2 py-1 border border-gray-300 rounded text-center text-sm ${isFormSaved ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+                                placeholder="Enter value"
+                                value={subTestFormData.result_value}
+                                onChange={(e) => handleLabResultChange(subTestKey, 'result_value', e.target.value)}
+                                disabled={isFormSaved}
+                              />
+                              <span className="ml-2 text-xs text-gray-600">{subTest.unit}</span>
+                              {subTestFormData.is_abnormal && (
+                                <span className="ml-2 text-red-500 text-xs">🔴</span>
+                              )}
+                            </div>
+                            <div className="p-2 flex items-center justify-center">
+                              <span className="text-sm text-gray-700">{subTest.range || 'Consult reference values'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        );
+                      })}
 
-                         {/* Sub-tests */}
-                         {subTests.map((subTest, subIndex) => (
-                           <div key={subTest.id} className="border-l-2 border-blue-300 pl-4 py-2">
-                             <div className="grid grid-cols-3 gap-4 items-start mb-3">
-                               <div>
-                                 <div className="flex items-center space-x-2">
-                                   <span className="text-blue-600">•</span>
-                                   <span className="font-medium">{subTest.sub_test_name}</span>
-                                 </div>
-                               </div>
-                               <div>
-                                 <input
-                                   type="text"
-                                   className={`w-full px-3 py-2 border rounded ${isFormSaved ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                                   placeholder="Enter value"
-                                   onChange={(e) => handleLabResultChange(`${testRow.id}_subtest_${subTest.id}`, 'result_value', e.target.value)}
-                                   disabled={isFormSaved}
-                                 />
-                               </div>
-                               <div>
-                                 <div className="text-blue-600 bg-blue-50 px-3 py-2 rounded border font-medium">
-                                   {calculatedRanges[`${testRow.id}_subtest_${subTest.id}`] || `12-16 ${subTest.unit || 'g/dl'}`}
-                                 </div>
-                               </div>
-                             </div>
-                             {/* Comments for sub-test */}
-                             <div className="grid grid-cols-3 gap-4 mb-4">
-                               <div></div>
-                               <div className="col-span-2">
-                                 <textarea
-                                   className={`w-full px-3 py-2 border rounded min-h-[60px] ${isFormSaved ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                                   placeholder="Comments..."
-                                   onChange={(e) => handleLabResultChange(`${testRow.id}_subtest_${subTest.id}`, 'comments', e.target.value)}
-                                   disabled={isFormSaved}
-                                 />
-                                 <div className="flex items-center justify-between mt-2">
-                                   <div className="flex items-center space-x-2">
-                                     <input
-                                       type="checkbox"
-                                       id={`abnormal-${testRow.id}-${subTest.id}`}
-                                       onChange={(e) => handleLabResultChange(`${testRow.id}_subtest_${subTest.id}`, 'is_abnormal', e.target.checked)}
-                                       disabled={isFormSaved}
-                                     />
-                                     <label htmlFor={`abnormal-${testRow.id}-${subTest.id}`} className="text-sm">Mark as Abnormal</label>
-                                   </div>
-                                   <div className="flex items-center space-x-2">
-                                     <input
-                                       type="file"
-                                       id={`file-${testRow.id}-${subTest.id}`}
-                                       className="hidden"
-                                       onChange={(e) => console.log('File selected:', e.target.files?.[0])}
-                                     />
-                                     <button
-                                       type="button"
-                                       onClick={() => document.getElementById(`file-${testRow.id}-${subTest.id}`)?.click()}
-                                       className="text-xs px-3 py-1 border border-gray-300 rounded hover:bg-gray-50"
-                                       disabled={isFormSaved}
-                                     >
-                                       Choose File
-                                     </button>
-                                     <span className="text-xs text-gray-500">No file chosen</span>
-                                   </div>
-                                 </div>
-                               </div>
-                             </div>
-                           </div>
-                         ))}
+                      {/* Comments Section */}
+                      <div className="bg-gray-50 border-t border-gray-200">
+                        <div className="grid grid-cols-3 gap-0">
+                          <div className="p-2 border-r border-gray-300">
+                            <span className="text-xs text-gray-600">Comments</span>
+                          </div>
+                          <div className="p-2 border-r border-gray-300">
+                            <input
+                              type="checkbox"
+                              id={`opinion-${testRow.id}`}
+                              className="w-3 h-3"
+                              disabled={isFormSaved}
+                            />
+                            <label htmlFor={`opinion-${testRow.id}`} className="text-xs text-gray-600 ml-1">P.S. for Opinion</label>
+                          </div>
+                          <div className="p-2"></div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
+              {/* Add More and File Upload Section */}
+              <div className="border-t pt-4 space-y-4">
+                {/* Add More Button */}
+                <div className="flex justify-start">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isFormSaved}
+                    className="px-4 py-2"
+                  >
+                    Add more
+                  </Button>
+                </div>
 
-                       </div>
-                     ) : (
-                       /* Original single test display if no sub-tests */
-                       <div className="p-4 space-y-3">
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div>
-                             <label className="text-sm font-medium text-gray-700">Result Value</label>
-                             <input
-                               type="text"
-                               className={`mt-1 px-3 py-2 border rounded w-full ${isFormSaved ? 'bg-gray-100 cursor-not-allowed' : ''}`}
-                               placeholder="Enter result"
-                               value={formData.result_value}
-                               onChange={(e) => handleLabResultChange(testRow.id, 'result_value', e.target.value)}
-                               disabled={isFormSaved}
-                             />
-                           </div>
-                           <div>
-                             <label className="text-sm font-medium text-gray-700">Reference Range</label>
-                             <div
-                               className={`mt-1 px-3 py-2 border rounded w-full bg-blue-50 text-blue-800 font-medium ${isFormSaved ? 'bg-gray-100' : ''}`}
-                             >
-                               {calculatedRanges[testRow.id] || 'Loading...'}
-                             </div>
-                           </div>
-                         </div>
-                       </div>
-                     )}
-                   </div>
-                 );
-               })}
-
-              {/* Main File Upload Section */}
+                {/* Main File Upload Section */}
               <div className="border-t pt-4">
                 <div className="flex items-center space-x-4">
                   <input
@@ -2837,76 +2958,51 @@ const LabOrders = () => {
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex justify-center gap-3 pt-4 border-t">
+              {/* Action Buttons - Bottom Row */}
+              <div className="flex justify-center gap-3 pt-4 border-t bg-gray-50 -mx-6 -mb-6 p-6 rounded-b-lg">
                 <Button
-                  className={`${isFormSaved ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white`}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-8"
                   onClick={handleSaveLabResults}
                   disabled={saveLabResultsMutation.isPending || isFormSaved}
                 >
-                  {saveLabResultsMutation.isPending ? '🔄 Saving...' : (isFormSaved ? '✅ Saved' : '💾 Save Results')}
+                  {saveLabResultsMutation.isPending ? 'Saving...' : (isFormSaved ? '✓ Saved' : 'Save')}
                 </Button>
 
-                
-                <Button 
-                  variant="outline" 
-                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                <Button
+                  variant="outline"
+                  className="px-8"
                   onClick={() => {
-                    const printContent = generatePrintContent([]);
-                    const printWindow = window.open('', '_blank', 'width=800,height=600');
-                    if (printWindow) {
-                      printWindow.document.write(printContent);
-                      printWindow.document.close();
-                      toast({
-                        title: "Preview Opened",
-                        description: "Report preview opened in new window.",
-                      });
-                    } else {
-                      toast({
-                        title: "Popup Blocked",
-                        description: "Please allow popups for this site to preview reports.",
-                        variant: "destructive"
-                      });
-                    }
+                    setIsEntryModeOpen(false);
+                    setIsFormSaved(false);
+                    setSavedLabResults({});
+                    setLabResultsForm({});
+                    setAuthenticatedResult(false);
+                    setUploadedFiles([]);
                   }}
-                  disabled={selectedTestsForEntry.length === 0}
-                  title="Preview how the report will look when printed"
                 >
-                  👁️ Preview Report
+                  Back
                 </Button>
-                
-                <Button variant="outline" onClick={() => {
-                  // Reset states when closing
-                  setIsEntryModeOpen(false);
-                  setIsFormSaved(false);
-                  setSavedLabResults({});
-                  setLabResultsForm({});
-                  setAuthenticatedResult(false);
-                  setUploadedFiles([]);
-                }}>
-                  ⬅️ Back
-                </Button>
-                
-                <Button 
-                  variant="outline" 
-                  className={`${isFormSaved ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+
+                <Button
+                  variant="outline"
+                  className="px-8"
                   onClick={handlePreviewAndPrint}
-                  disabled={!isFormSaved}
-                  title={!isFormSaved ? "Please save the results first" : "Print saved results"}
+                  disabled={selectedTestsForEntry.length === 0}
                 >
-                  {isFormSaved ? '🖨️ Print Report' : '🖨️ Print Report'}
+                  Preview & Print
                 </Button>
-                
-                <Button 
-                  variant="outline" 
-                  className={`${isFormSaved ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+
+                <Button
+                  variant="outline"
+                  className="px-8"
                   onClick={handleDownloadFiles}
                   disabled={!isFormSaved}
-                  title={!isFormSaved ? "Please save the results first" : "Download files"}
                 >
-                  {isFormSaved ? '📁 Download Files' : '📁 Download Files'}
+                  Download Files
                 </Button>
               </div>
+            </div>
+
             </div>
           )}
         </DialogContent>
