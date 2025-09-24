@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Printer, FileText, Bot, User } from 'lucide-react';
+import { Printer, FileText, Bot, User, Download } from 'lucide-react';
 import DischargeSummary from './DischargeSummary';
+import { useVisitMedicalData } from '@/hooks/useVisitMedicalData';
 
 interface DischargeSummaryInterfaceProps {
   visitId?: string;
@@ -21,6 +22,8 @@ export default function DischargeSummaryInterface({
   patientGender = "female",
   patientAddress = "Mamta society plot no.34/b sonegaon Nagpur"
 }: DischargeSummaryInterfaceProps) {
+  // Fetch lab and radiology data
+  const { labs, radiology, medications, isLoadingLabs, isLoadingRadiology, isLoadingMedications } = useVisitMedicalData(visitId);
   const [allPatientData, setAllPatientData] = useState(`Dr. Vishal Nandagavli, Reactive 17/03/2025:-HBSAG - Non - Reactive 17/03/2025:-HCV [ Hepatitis C Virus ] - HCV [ Hepatitis C Virus ] - Non - Reactive 17/03/2025:-PROTHROMBIN TIME (PT): Prothrombin Time:16.76 s, Prothrombin Index:76 %, Prothrombin Ratio:1.31, INR:1.31, Control:12.8 s, APTT:32.45 s, Control:30.5 s, Ratio:1.06, Eosinophils:03 %, Red Cell Count:4.52 mlt/cumm, Packed Cell Volume:42.9 %, Mean Cell Volume:94.9 fl., Mean Cell Hemoglobin:30.52 pg, Mean Cell Hemoglobin Concentration:32.1 g/dl, Platelet Count:250,000 /cumm, Serum sodium: 140 mEq/L, Serum potassium: 5.6 mEq/L, Bilirubin - Total:0.98 mg/dl, Bilirubin - Direct:0.23 mg/dl, Bilirubin - Indirect:0.75 mg/dl, SGOT / AST:38 units/L, SGPT / ALT:39.8 U/L, Alkaline Phosphatase (ALP): Protein - Total:6.75 gm/dl, Albumin:3.72 gm/dl, Globulin:3.03 gm/dl, A / G Ratio:1.23 23/03/2025:-INR QUANTITATIVE:0.93 mg/Procedure: ,Treatment On Discharge: Tan. Dolton 50MG Pack- Route:P.O Frequency-BD Days-07, TAB.FOLIC ACID Pack- Route:P.O Frequency-OD Days-07, TAB ATORVA 25 MG Pack- Route:P.O Frequency-BD Days-07, INJECTA P.O Frequency-BD Days-07,`);
   
   const [patientDataSummary, setPatientDataSummary] = useState(`**3. INVESTIGATIONS SECTION**
@@ -53,9 +56,38 @@ The patient was admitted with a history of LEFT CONGENITAL INGUINAL HERNIA. The 
     setShowPrintPreview(true);
   };
 
+  const handleFetchData = () => {
+    // Format lab data
+    const labData = labs.map(lab => `Lab: ${lab.lab_name} - Status: ${lab.status}`).join('\n');
+
+    // Format radiology data
+    const radiologyData = radiology.map(rad => `Radiology: ${rad.radiology_name} - Status: ${rad.status}`).join('\n');
+
+    // Format medications data
+    const medicationsData = medications.map(med => `Medication: ${med.medication_name} - Status: ${med.status}`).join('\n');
+
+    // Combine all data
+    const fetchedData = [
+      'LABORATORY INVESTIGATIONS:',
+      labData || 'No lab investigations found',
+      '',
+      'RADIOLOGY INVESTIGATIONS:',
+      radiologyData || 'No radiology investigations found',
+      '',
+      'MEDICATIONS:',
+      medicationsData || 'No medications found',
+      '',
+      'Visit ID: ' + visitId,
+      'Patient: ' + patientName,
+      'Generated on: ' + new Date().toLocaleString()
+    ].join('\n');
+
+    setAllPatientData(fetchedData);
+  };
+
   const handleRefreshData = () => {
     // Refresh functionality
-    console.log('Refreshing data...');
+    handleFetchData();
   };
 
   const handleCopyData = () => {
@@ -202,6 +234,16 @@ The patient was admitted with a history of LEFT CONGENITAL INGUINAL HERNIA. The 
               </div>
 
               <div className="flex gap-2 pt-2 border-t">
+                <Button
+                  onClick={handleFetchData}
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoadingLabs || isLoadingRadiology || isLoadingMedications}
+                  className="bg-green-50 hover:bg-green-100 border-green-200"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {isLoadingLabs || isLoadingRadiology || isLoadingMedications ? "Loading..." : "Fetch Data"}
+                </Button>
                 <Button onClick={handleRefreshData} variant="outline" size="sm">
                   Refresh Data
                 </Button>
@@ -211,7 +253,7 @@ The patient was admitted with a history of LEFT CONGENITAL INGUINAL HERNIA. The 
                 <Button onClick={handleClear} variant="outline" size="sm">
                   Clear
                 </Button>
-                <Button 
+                <Button
                   onClick={handleFinalDischarge}
                   className="bg-blue-600 hover:bg-blue-700 ml-auto"
                 >
@@ -220,7 +262,9 @@ The patient was admitted with a history of LEFT CONGENITAL INGUINAL HERNIA. The 
               </div>
               
               <div className="text-sm text-green-600 bg-green-50 p-2 rounded">
-                ✅ Patient data loaded successfully! (3114 characters)
+                ✅ Patient data loaded successfully! ({allPatientData.length} characters)
+                <br />
+                📊 Available data: {labs.length} lab tests, {radiology.length} radiology studies, {medications.length} medications
               </div>
             </CardContent>
           </Card>
