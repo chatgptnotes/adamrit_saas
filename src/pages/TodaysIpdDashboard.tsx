@@ -1166,6 +1166,22 @@ const TodaysIpdDashboard = () => {
 
       console.log(`✅ TodaysIpdDashboard: Found ${data?.length || 0} visits for ${hospitalConfig?.name}`);
 
+      // Debug: Check comments in fetched data
+      console.log('📊 Sample visit data (first visit):', data?.[0]);
+      console.log('💬 Comments in first visit:', data?.[0]?.comments);
+
+      // Log all visits with comments
+      const visitsWithComments = data?.filter(v => v.comments) || [];
+      console.log(`📝 Found ${visitsWithComments.length} visits with comments out of ${data?.length || 0} total visits`);
+      if (visitsWithComments.length > 0) {
+        console.log('💭 Visits with comments:', visitsWithComments.map(v => ({
+          id: v.id,
+          visit_id: v.visit_id,
+          patient_name: v.patients?.name,
+          comments: v.comments
+        })));
+      }
+
       // Sort manually to ensure patients with sr_no come first, then patients without sr_no
       const sortedData = (data || []).sort((a, b) => {
         // If both have sr_no, sort numerically
@@ -1324,23 +1340,34 @@ const TodaysIpdDashboard = () => {
   };
 
   const handleBillClick = async (visit) => {
-    // Check if referral letter is uploaded for ESIC patients
+    // Determine if this is an ESIC patient (has ESIC UHID or corporate field indicates ESIC)
+    const isESICPatient = Boolean(visit.esic_uh_id) ||
+                          visit.patients?.corporate?.toLowerCase().includes('esic') ||
+                          visit.patients?.corporate?.toLowerCase() === 'esic';
+
+    // For private patients, allow direct access to billing without referral document requirements
+    if (!isESICPatient) {
+      navigate(`/final-bill/${visit.visit_id}`);
+      return;
+    }
+
+    // For ESIC patients only - check referral letter requirements
     const isReferralLetterUploaded = await checkReferralLetterUploaded(visit.visit_id);
     const withinGracePeriod = isWithin24Hours(visit.visit_date || visit.created_at);
-    
+
     // If within 24 hours, allow access even without referral letter
     if (withinGracePeriod) {
       navigate(`/final-bill/${visit.visit_id}`);
       return;
     }
-    
-    // After 24 hours, require referral letter
+
+    // After 24 hours, require referral letter for ESIC patients only
     if (!isReferralLetterUploaded) {
       // Show popup notification
       alert(`24-hour grace period has expired. Please upload the referral letter for patient ${visit.patients?.name} before accessing billing section.`);
       return;
     }
-    
+
     // Navigate to final bill page with patient and visit data
     navigate(`/final-bill/${visit.visit_id}`);
   };
@@ -1383,24 +1410,29 @@ const TodaysIpdDashboard = () => {
 
   // Comment handlers
   const handleCommentClick = (visit: any) => {
+    console.log('🔍 Opening comment dialog for visit:', visit.id);
+    console.log('📋 Visit object:', visit);
+    console.log('💬 Existing comment from visit.comments:', visit.comments);
+
     const existingComment = visit.comments || '';
+    console.log('📝 Loading comment into dialog:', existingComment);
 
     // Load existing comment if any
     setCommentTexts(prev => ({
       ...prev,
-      [visit.visit_id]: existingComment
+      [visit.id]: existingComment
     }));
 
     // Store original comment to track changes
     setOriginalComments(prev => ({
       ...prev,
-      [visit.visit_id]: existingComment
+      [visit.id]: existingComment
     }));
 
     // Open dialog for this visit
     setCommentDialogs(prev => ({
       ...prev,
-      [visit.visit_id]: true
+      [visit.id]: true
     }));
   };
 
@@ -1429,7 +1461,7 @@ const TodaysIpdDashboard = () => {
           const { error, data } = await supabase
             .from('visits')
             .update({ comments: text })
-            .eq('visit_id', visitId)
+            .eq('id', visitId)
             .select();
 
           if (error) {
@@ -1453,6 +1485,8 @@ const TodaysIpdDashboard = () => {
             setTimeout(() => {
               setSavedComments(prev => ({ ...prev, [visitId]: false }));
             }, 2000);
+            // Refresh the data to get updated comments
+            refetch();
           }
         } catch (error) {
           console.error('❌ Exception while saving comment:', error);
@@ -1952,6 +1986,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Bill</TableHead>
                 <TableHead className="font-semibold">Billing Executive</TableHead>
                 <TableHead className="font-semibold">Billing Status</TableHead>
+                <TableHead className="font-semibold">Corporate</TableHead>
                 <TableHead className="font-semibold">File Status</TableHead>
                 <TableHead className="font-semibold">Photos</TableHead>
                 <TableHead className="font-semibold">Sign</TableHead>
@@ -1964,7 +1999,6 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Visit Type</TableHead>
                 <TableHead className="font-semibold">Doctor</TableHead>
                 <TableHead className="font-semibold">Diagnosis</TableHead>
-                <TableHead className="font-semibold">Corporate</TableHead>
                 <TableHead className="font-semibold">Admission Date</TableHead>
                 <TableHead className="font-semibold">Days Admitted</TableHead>
                 <TableHead className="font-semibold">Discharge Date</TableHead>
@@ -1980,10 +2014,10 @@ const TodaysIpdDashboard = () => {
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
+                <TableHead></TableHead>
                 <TableHead>
                   <ColumnFilter options={fileStatusOptions} selected={fileStatusFilter} onChange={setFileStatusFilter} />
                 </TableHead>
-                <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
@@ -2047,10 +2081,31 @@ const TodaysIpdDashboard = () => {
                   </TableCell>
                   <TableCell>
                     {(() => {
+                      // Check if this is an ESIC patient
+                      const isESICPatient = Boolean(visit.esic_uh_id) ||
+                                            visit.patients?.corporate?.toLowerCase().includes('esic') ||
+                                            visit.patients?.corporate?.toLowerCase() === 'esic';
+
+                      // For private patients, always show normal green bill icon (no referral document requirements)
+                      if (!isESICPatient) {
+                        return (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleBillClick(visit)}
+                            title="View Bill - Private Patient"
+                          >
+                            <DollarSign className="h-4 w-4 text-green-600" />
+                          </Button>
+                        );
+                      }
+
+                      // For ESIC patients only - apply referral document logic
                       const hasReferralLetter = referralLetterStatus[visit.visit_id];
                       const withinGracePeriod = isWithin24Hours(visit.visit_date || visit.created_at);
                       const remainingTime = getRemainingTime(visit.visit_date || visit.created_at);
-                      
+
                       // Case 1: Has referral letter - always enabled (green)
                       if (hasReferralLetter) {
                         return (
@@ -2065,7 +2120,7 @@ const TodaysIpdDashboard = () => {
                           </Button>
                         );
                       }
-                      
+
                       // Case 2: Within 24 hours without referral letter - enabled but orange (grace period)
                       if (withinGracePeriod) {
                         return (
@@ -2078,7 +2133,7 @@ const TodaysIpdDashboard = () => {
                             >
                               <DollarSign className="h-4 w-4 text-orange-500" />
                             </Button>
-                            
+
                             {/* Grace period tooltip */}
                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-orange-500 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50 whitespace-nowrap">
                               <div className="font-medium">⏰ Grace Period Active</div>
@@ -2086,14 +2141,14 @@ const TodaysIpdDashboard = () => {
                               <div className="text-xs font-semibold">Patient: {visit.patients?.name}</div>
                               <div className="text-xs">{remainingTime}</div>
                               <div className="text-xs mt-1 text-orange-100">Please upload referral letter soon</div>
-                              
+
                               {/* Arrow pointing down */}
                               <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-orange-500"></div>
                             </div>
                           </div>
                         );
                       }
-                      
+
                       // Case 3: After 24 hours without referral letter - disabled (red)
                       return (
                         <div className="relative group">
@@ -2106,7 +2161,7 @@ const TodaysIpdDashboard = () => {
                           >
                             <DollarSign className="h-4 w-4 text-red-600" />
                           </Button>
-                          
+
                           {/* 24-hour expired tooltip */}
                           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-red-600 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50 whitespace-nowrap">
                             <div className="font-medium">🚫 Grace Period Expired</div>
@@ -2127,6 +2182,9 @@ const TodaysIpdDashboard = () => {
                   </TableCell>
                   <TableCell>
                     <BillingStatusDropdown visit={visit} disabled={!isAdmin} />
+                  </TableCell>
+                  <TableCell>
+                    {visit.patients?.corporate || '—'}
                   </TableCell>
                   <TableCell>
                     {isAdmin ? <FileStatusToggle visit={visit} /> : (
@@ -2175,9 +2233,6 @@ const TodaysIpdDashboard = () => {
                   </TableCell>
                   <TableCell>
                     General
-                  </TableCell>
-                  <TableCell>
-                    {visit.patients?.corporate || '—'}
                   </TableCell>
                   <TableCell>
                     {visit.admission_date ? format(new Date(visit.admission_date), 'MMM dd, yyyy HH:mm') : '—'}
@@ -2294,12 +2349,12 @@ const TodaysIpdDashboard = () => {
         {/* Comment Dialogs */}
         {filteredVisits.map((visit) => (
           <Dialog
-            key={`comment-dialog-${visit.visit_id}`}
-            open={commentDialogs[visit.visit_id] || false}
+            key={`comment-dialog-${visit.id}`}
+            open={commentDialogs[visit.id] || false}
             onOpenChange={(open) => {
               setCommentDialogs(prev => ({
                 ...prev,
-                [visit.visit_id]: open
+                [visit.id]: open
               }));
             }}
           >
@@ -2315,17 +2370,17 @@ const TodaysIpdDashboard = () => {
                 <textarea
                   className="w-full min-h-[150px] p-3 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 resize-vertical"
                   placeholder="Add your comments here..."
-                  value={commentTexts[visit.visit_id] || ''}
-                  onChange={(e) => handleCommentChange(visit.visit_id, e.target.value)}
+                  value={commentTexts[visit.id] || ''}
+                  onChange={(e) => handleCommentChange(visit.id, e.target.value)}
                 />
 
                 {/* Save indicators */}
-                {savingComments[visit.visit_id] && (
+                {savingComments[visit.id] && (
                   <div className="absolute bottom-2 right-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
                     Saving...
                   </div>
                 )}
-                {savedComments[visit.visit_id] && !savingComments[visit.visit_id] && (
+                {savedComments[visit.id] && !savingComments[visit.id] && (
                   <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
                     ✓ Saved
                   </div>

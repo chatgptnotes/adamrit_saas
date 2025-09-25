@@ -432,7 +432,7 @@ const DetailedInvoice = () => {
             lab:lab_id (
               name,
               CGHS_code,
-              NABH_rates_in_rupee
+              private
             )
           `)
           .eq('visit_id', actualVisitId);
@@ -511,7 +511,7 @@ const DetailedInvoice = () => {
       console.log('💊 Pharmacy orders:', visitData.pharmacyOrders);
 
       // Calculate total amount from all services
-      const labTotal = visitData.labOrders.reduce((sum, order) => sum + (order.lab?.NABH_rates_in_rupee || 0), 0);
+      const labTotal = visitData.labOrders.reduce((sum, order) => sum + ((order.lab?.private && order.lab.private > 0) ? order.lab.private : 100), 0);
       const radioTotal = visitData.radiologyOrders.reduce((sum, order) => sum + (order.radiology?.cost || 0), 0);
       const pharmaTotal = visitData.pharmacyOrders.reduce((sum, order) => sum + (order.medications?.price || 0), 0);
       const totalAmount = labTotal + radioTotal + pharmaTotal + 100; // Add registration fee
@@ -566,7 +566,7 @@ const DetailedInvoice = () => {
       item: lab.lab?.name || 'Lab Test',
       dateTime: lab.ordered_date ? format(new Date(lab.ordered_date), 'dd/MM/yyyy HH:mm:ss') : '',
       qty: 1,
-      rate: lab.lab?.NABH_rates_in_rupee || 0
+      rate: (lab.lab?.private && lab.lab.private > 0) ? lab.lab.private : 100
     })) || [],
     radiology: visitData?.radiologyOrders?.map((radio, index) => ({
       item: radio.radiology?.name || 'Radiology Test',

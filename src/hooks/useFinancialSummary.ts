@@ -107,7 +107,7 @@ export interface PackageDates {
   total_admission_days: number;
 }
 
-export const useFinancialSummary = (billId?: string, visitId?: string) => {
+export const useFinancialSummary = (billId?: string, visitId?: string, savedMedicationData?: any[]) => {
   const [financialSummaryData, setFinancialSummaryData] = useState<FinancialSummaryData>({
     totalAmount: {
       advancePayment: '',
@@ -265,7 +265,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
 
       const { data: labsData, error: labsError } = await supabase
         .from('lab')
-        .select('id, name, "NABH_rates_in_rupee"')
+        .select('id, name, private')
         .in('id', labIds);
 
       console.log('📊 Labs details query result:', { 
@@ -284,18 +284,19 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
         return 0;
       }
 
-      // Calculate total using NABH rates
+      // Calculate total using private rates
       let total = 0;
       visitLabsData.forEach((visitLab: any, index) => {
         const labDetail = labsData.find((l: any) => l.id === visitLab.lab_id);
-        const cost = parseFloat(labDetail?.['NABH_rates_in_rupee']?.toString() || '0') || 0;
+        const cost = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
         total += cost;
         
         console.log(`💰 Lab ${index + 1}:`, { 
           labName: labDetail?.name || 'Unknown',
           labId: visitLab.lab_id,
           cost: cost,
-          nabhRate: labDetail?.['NABH_rates_in_rupee']
+          privateRate: labDetail?.private,
+          usingFallback: !labDetail?.private || labDetail.private === 0
         });
       });
 
@@ -423,55 +424,67 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
   };
 
   const fetchPharmacyTotal = async (): Promise<number> => {
-    if (!visitId) return 0;
+    console.log('🚀 fetchPharmacyTotal called - using existing savedMedicationData');
+    
+    // Use existing savedMedicationData instead of database query
+    if (!savedMedicationData || savedMedicationData.length === 0) {
+      console.log('📝 No savedMedicationData available');
+      return 0;
+    }
+
+    // Use same calculation logic as display
+    const total = savedMedicationData.reduce((sum, medication) => {
+      const cost = parseFloat(medication.cost || '0') || 0;
+      console.log(`💊 Medication: ${medication.medication_name}, Cost: ${cost}`);
+      return sum + cost;
+    }, 0);
+    
+    console.log('💰 Pharmacy total calculated from savedMedicationData:', total, 'from', savedMedicationData.length, 'medications');
+    return total;
+  };
+
+  const fetchAdvancePaymentTotal = async (): Promise<number> => {
+    if (!visitId) {
+      console.log('🚫 No visitId provided for advance payment total');
+      return 0;
+    }
+
+    console.log('🔍 Fetching advance payment total for visit:', visitId);
 
     try {
-      // Get visit UUID first
-      const { data: visitData, error: visitError } = await supabase
-        .from('visits')
-        .select('id')
+      // Query advance_payment table directly using visit_id (no need for UUID conversion)
+      const { data: advancePaymentData, error: advancePaymentError } = await supabase
+        .from('advance_payment')
+        .select('advance_amount, status')
         .eq('visit_id', visitId)
-        .single();
+        .eq('status', 'ACTIVE'); // Only include active payments
 
-      if (visitError || !visitData) return 0;
-
-      // Get visit_medications data using the UUID
-      const { data: visitMedicationsData, error: visitMedicationsError } = await supabase
-        .from('visit_medications')
-        .select('*')
-        .eq('visit_id', visitData.id);
-
-      if (visitMedicationsError || !visitMedicationsData || visitMedicationsData.length === 0) {
-        console.log('📝 No medications data found for visit');
-        return 0;
-      }
-
-      // Get medication details for cost information
-      const medicationIds = visitMedicationsData.map((item: any) => item.medication_id);
-      
-      const { data: medicationDetails, error: medicationDetailsError } = await supabase
-        .from('medications')
-        .select('id, name, cost')
-        .in('id', medicationIds);
-
-      if (medicationDetailsError || !medicationDetails) {
-        console.log('📝 No medication details found for cost calculation');
-        return 0;
-      }
-
-      // Calculate total using medication costs and quantities
-      let total = 0;
-      visitMedicationsData.forEach((visitMedication: any) => {
-        const medicationDetail = medicationDetails.find((m: any) => m.id === visitMedication.medication_id);
-        const cost = parseFloat(medicationDetail?.cost?.toString() || '0') || 0;
-        const quantity = parseFloat(visitMedication.quantity?.toString() || '1') || 1;
-        total += (cost * quantity);
+      console.log('📊 Advance payment query result:', { 
+        advancePaymentData, 
+        advancePaymentError, 
+        count: advancePaymentData?.length || 0 
       });
-      
-      console.log('💰 Pharmacy total calculated:', total);
+
+      if (advancePaymentError) {
+        console.error('❌ Advance payment query error:', advancePaymentError);
+        return 0;
+      }
+
+      if (!advancePaymentData || advancePaymentData.length === 0) {
+        console.log('📝 No advance payment data found for visit');
+        return 0;
+      }
+
+      // Calculate total advance payment
+      const total = advancePaymentData.reduce((sum, payment) => {
+        const amount = parseFloat(payment.advance_amount?.toString() || '0') || 0;
+        return sum + amount;
+      }, 0);
+
+      console.log('✅ Advance payment total calculated:', total, 'from', advancePaymentData.length, 'payments');
       return total;
     } catch (error) {
-      console.error('Error fetching pharmacy total:', error);
+      console.error('❌ Error fetching advance payment total:', error);
       return 0;
     }
   };
@@ -789,13 +802,15 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
         clinicalTotal,
         mandatoryTotal,
         radiologyTotal,
-        pharmacyTotal
+        pharmacyTotal,
+        advancePaymentTotal
       ] = await Promise.all([
         fetchLabTestsTotal(),
         fetchClinicalServicesTotal(), 
         fetchMandatoryServicesTotal(),
         fetchRadiologyTotal(),
-        fetchPharmacyTotal()
+        fetchPharmacyTotal(),
+        fetchAdvancePaymentTotal()
       ]);
 
       // Calculate grand total
@@ -806,6 +821,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
         ...prev,
         totalAmount: {
           ...prev.totalAmount,
+          advancePayment: advancePaymentTotal.toString(),
           clinicalServices: clinicalTotal.toString(),
           laboratoryServices: labTotal.toString(),
           radiology: radiologyTotal.toString(),
@@ -816,6 +832,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
         // Auto-calculate balance (Total - Discount - Amount Paid + Refunded)
         balance: {
           ...prev.balance,
+          advancePayment: (advancePaymentTotal - (parseFloat(prev.discount.advancePayment) || 0) - (parseFloat(prev.amountPaid.advancePayment) || 0) + (parseFloat(prev.refundedAmount.advancePayment) || 0)).toString(),
           clinicalServices: (clinicalTotal - (parseFloat(prev.discount.clinicalServices) || 0) - (parseFloat(prev.amountPaid.clinicalServices) || 0) + (parseFloat(prev.refundedAmount.clinicalServices) || 0)).toString(),
           laboratoryServices: (labTotal - (parseFloat(prev.discount.laboratoryServices) || 0) - (parseFloat(prev.amountPaid.laboratoryServices) || 0) + (parseFloat(prev.refundedAmount.laboratoryServices) || 0)).toString(),
           radiology: (radiologyTotal - (parseFloat(prev.discount.radiology) || 0) - (parseFloat(prev.amountPaid.radiology) || 0) + (parseFloat(prev.refundedAmount.radiology) || 0)).toString(),
@@ -826,6 +843,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string) => {
       }));
 
       console.log('✅ Financial data auto-populated:', {
+        advancePaymentTotal,
         labTotal,
         clinicalTotal,
         mandatoryTotal,
