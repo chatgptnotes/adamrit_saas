@@ -1324,23 +1324,34 @@ const TodaysIpdDashboard = () => {
   };
 
   const handleBillClick = async (visit) => {
-    // Check if referral letter is uploaded for ESIC patients
+    // Determine if this is an ESIC patient (has ESIC UHID or corporate field indicates ESIC)
+    const isESICPatient = Boolean(visit.esic_uh_id) ||
+                          visit.patients?.corporate?.toLowerCase().includes('esic') ||
+                          visit.patients?.corporate?.toLowerCase() === 'esic';
+
+    // For private patients, allow direct access to billing without referral document requirements
+    if (!isESICPatient) {
+      navigate(`/final-bill/${visit.visit_id}`);
+      return;
+    }
+
+    // For ESIC patients only - check referral letter requirements
     const isReferralLetterUploaded = await checkReferralLetterUploaded(visit.visit_id);
     const withinGracePeriod = isWithin24Hours(visit.visit_date || visit.created_at);
-    
+
     // If within 24 hours, allow access even without referral letter
     if (withinGracePeriod) {
       navigate(`/final-bill/${visit.visit_id}`);
       return;
     }
-    
-    // After 24 hours, require referral letter
+
+    // After 24 hours, require referral letter for ESIC patients only
     if (!isReferralLetterUploaded) {
       // Show popup notification
       alert(`24-hour grace period has expired. Please upload the referral letter for patient ${visit.patients?.name} before accessing billing section.`);
       return;
     }
-    
+
     // Navigate to final bill page with patient and visit data
     navigate(`/final-bill/${visit.visit_id}`);
   };
@@ -2047,10 +2058,31 @@ const TodaysIpdDashboard = () => {
                   </TableCell>
                   <TableCell>
                     {(() => {
+                      // Check if this is an ESIC patient
+                      const isESICPatient = Boolean(visit.esic_uh_id) ||
+                                            visit.patients?.corporate?.toLowerCase().includes('esic') ||
+                                            visit.patients?.corporate?.toLowerCase() === 'esic';
+
+                      // For private patients, always show normal green bill icon (no referral document requirements)
+                      if (!isESICPatient) {
+                        return (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleBillClick(visit)}
+                            title="View Bill - Private Patient"
+                          >
+                            <DollarSign className="h-4 w-4 text-green-600" />
+                          </Button>
+                        );
+                      }
+
+                      // For ESIC patients only - apply referral document logic
                       const hasReferralLetter = referralLetterStatus[visit.visit_id];
                       const withinGracePeriod = isWithin24Hours(visit.visit_date || visit.created_at);
                       const remainingTime = getRemainingTime(visit.visit_date || visit.created_at);
-                      
+
                       // Case 1: Has referral letter - always enabled (green)
                       if (hasReferralLetter) {
                         return (
@@ -2065,7 +2097,7 @@ const TodaysIpdDashboard = () => {
                           </Button>
                         );
                       }
-                      
+
                       // Case 2: Within 24 hours without referral letter - enabled but orange (grace period)
                       if (withinGracePeriod) {
                         return (
@@ -2078,7 +2110,7 @@ const TodaysIpdDashboard = () => {
                             >
                               <DollarSign className="h-4 w-4 text-orange-500" />
                             </Button>
-                            
+
                             {/* Grace period tooltip */}
                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-orange-500 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50 whitespace-nowrap">
                               <div className="font-medium">⏰ Grace Period Active</div>
@@ -2086,14 +2118,14 @@ const TodaysIpdDashboard = () => {
                               <div className="text-xs font-semibold">Patient: {visit.patients?.name}</div>
                               <div className="text-xs">{remainingTime}</div>
                               <div className="text-xs mt-1 text-orange-100">Please upload referral letter soon</div>
-                              
+
                               {/* Arrow pointing down */}
                               <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-orange-500"></div>
                             </div>
                           </div>
                         );
                       }
-                      
+
                       // Case 3: After 24 hours without referral letter - disabled (red)
                       return (
                         <div className="relative group">
@@ -2106,7 +2138,7 @@ const TodaysIpdDashboard = () => {
                           >
                             <DollarSign className="h-4 w-4 text-red-600" />
                           </Button>
-                          
+
                           {/* 24-hour expired tooltip */}
                           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-red-600 text-white text-xs rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50 whitespace-nowrap">
                             <div className="font-medium">🚫 Grace Period Expired</div>
