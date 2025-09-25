@@ -59,7 +59,7 @@ export const PatientDetailsModal: React.FC<PatientDetailsModalProps> = ({
           ),
           visit_labs(
             id,
-            lab(id, name, NABH_rates_in_rupee),
+            lab(id, name, private),
             status,
             ordered_date,
             result_value
@@ -306,7 +306,7 @@ export const PatientDetailsModal: React.FC<PatientDetailsModalProps> = ({
                     {patientDetails?.visits?.flatMap(visit =>
                       visit.visit_labs?.map(vl => (
                         <Badge key={vl.id} variant="outline" className="bg-purple-100 text-purple-800">
-                          {vl.lab?.name} - ₹{vl.lab?.NABH_rates_in_rupee}
+                          {vl.lab?.name} - ₹{(vl.lab?.private && vl.lab.private > 0) ? vl.lab.private : 100}
                         </Badge>
                       )) || []
                     )}

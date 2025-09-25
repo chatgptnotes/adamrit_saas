@@ -265,7 +265,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
 
       const { data: labsData, error: labsError } = await supabase
         .from('lab')
-        .select('id, name, "NABH_rates_in_rupee"')
+        .select('id, name, private')
         .in('id', labIds);
 
       console.log('📊 Labs details query result:', { 
@@ -284,18 +284,19 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         return 0;
       }
 
-      // Calculate total using NABH rates
+      // Calculate total using private rates
       let total = 0;
       visitLabsData.forEach((visitLab: any, index) => {
         const labDetail = labsData.find((l: any) => l.id === visitLab.lab_id);
-        const cost = parseFloat(labDetail?.['NABH_rates_in_rupee']?.toString() || '0') || 0;
+        const cost = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
         total += cost;
         
         console.log(`💰 Lab ${index + 1}:`, { 
           labName: labDetail?.name || 'Unknown',
           labId: visitLab.lab_id,
           cost: cost,
-          nabhRate: labDetail?.['NABH_rates_in_rupee']
+          privateRate: labDetail?.private,
+          usingFallback: !labDetail?.private || labDetail.private === 0
         });
       });
 
