@@ -1350,7 +1350,7 @@ const LabOrders = () => {
         test_code: test.interface_code || '',
         category: test.category || 'General',
         sample_type: 'Blood', // Default since this field doesn't exist in lab table
-        price: test["NABH_rates_in_rupee"] || test["Non-NABH_rates_in_rupee"] || 0,
+        price: (test.private && test.private > 0) ? test.private : 100,
         turnaround_time: 24, // Default
         preparation_instructions: test.description || ''
       })) || [];

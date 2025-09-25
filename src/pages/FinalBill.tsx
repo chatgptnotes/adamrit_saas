@@ -586,12 +586,7 @@ const FinalBill = () => {
 
   // This useEffect will be moved after visitData declaration
 
-  // Fetch saved labs when visit ID is available
-  useEffect(() => {
-    if (visitId) {
-      fetchSavedLabs(visitId);
-    }
-  }, [visitId]);
+  // Fetch saved labs when visit ID is available - MOVED AFTER STATE DECLARATIONS
 
   // Fetch saved radiology when visit ID is available
   useEffect(() => {
@@ -652,9 +647,10 @@ const FinalBill = () => {
     const fetchLabServices = async () => {
       try {
         setIsLoadingLabServices(true);
+
         const { data, error } = await supabase
           .from('lab')
-          .select(`id, name, "NABH_rates_in_rupee", "CGHS_code"`)
+          .select(`id, name, "CGHS_code", private`)
           .order('name');
 
         if (error) {
@@ -664,13 +660,24 @@ const FinalBill = () => {
           console.log('Lab services fetched successfully:', data.length, 'records');
           console.log('Sample lab services:', data.slice(0, 3));
 
-          // Map the field names to expected format
-          const mappedData = data.map(item => ({
-            id: item.id,
-            name: item.name,
-            amount: item['NABH_rates_in_rupee'] || 0,
-            code: item['CGHS_code'] || ''
-          }));
+          // Map the field names to expected format using private rates
+          const mappedData = data.map(item => {
+            // Use private rate, fallback to 100 if null/0 (temporary until DB updated)
+            const cost = (item.private && item.private > 0) ? item.private : 100;
+            console.log('🔍 fetchLabServices mapping:', {
+              service: item.name,
+              privateRate: item.private,
+              finalCost: cost,
+              usingFallback: !item.private || item.private === 0
+            });
+
+            return {
+              id: item.id,
+              name: item.name,
+              amount: cost,
+              code: item['CGHS_code'] || ''
+            };
+          });
 
           console.log('Mapped lab services sample:', mappedData.slice(0, 3));
           setAvailableLabServices(mappedData);
@@ -684,7 +691,7 @@ const FinalBill = () => {
     };
 
     fetchLabServices();
-  }, []);
+  }, [visitId]);
 
   // Fetch available radiology services from database
   useEffect(() => {
@@ -692,9 +699,42 @@ const FinalBill = () => {
       try {
         console.log('🔄 Starting to fetch radiology services...');
         setIsLoadingRadiologyServices(true);
+
+        // First get patient type from visit data if visitId is available
+        let patientCategory = 'Private'; // Default fallback
+        if (visitId) {
+          const { data: visitDataResult, error: visitError } = await supabase
+            .from('visits')
+            .select(`
+              id,
+              patient_type,
+              insurance_type
+            `)
+            .eq('visit_id', visitId)
+            .single();
+
+          if (!visitError && visitDataResult) {
+            // Get patient type from visit data instead of patient profile
+            patientCategory = visitDataResult.patient_type ||
+              visitDataResult.insurance_type ||
+              'Private';
+
+            console.log('👤 fetchRadiologyServices - Patient category determined:', {
+              category: patientCategory,
+              visitCategory: visitDataResult.category,
+              patientCategory: visitDataResult.patients?.category,
+              patientType: visitDataResult.patients?.patient_type,
+              insuranceType: visitDataResult.patients?.insurance_type
+            });
+          }
+        }
+
+        const isPrivatePatient = patientCategory?.toLowerCase() === 'private';
+        console.log('🔍 fetchRadiologyServices - Patient status:', { patientCategory, isPrivatePatient });
+
         const { data, error } = await supabase
           .from('radiology')
-          .select('id, name, cost, category, description')
+          .select('id, name, cost, category, description, private')
           .order('name');
 
         if (error) {
@@ -703,11 +743,24 @@ const FinalBill = () => {
         } else if (data) {
           console.log('✅ Radiology services fetched successfully:', data.length, 'records');
           console.log('📋 Sample radiology services:', data.slice(0, 3));
-          // Transform data to ensure cost field is available as amount for compatibility
-          const transformedData = data.map(item => ({
-            ...item,
-            amount: item.cost // Add amount field for backward compatibility
-          }));
+          
+          // Transform data with conditional pricing
+          const transformedData = data.map(item => {
+            const cost = isPrivatePatient && item.private ? item.private : (item.cost || 0);
+            console.log('🔍 fetchRadiologyServices mapping:', {
+              service: item.name,
+              isPrivatePatient,
+              privateRate: item.private,
+              standardRate: item.cost,
+              finalCost: cost
+            });
+
+            return {
+              ...item,
+              amount: cost, // Add amount field for backward compatibility
+              cost: cost    // Update cost field as well
+            };
+          });
           setAvailableRadiologyServices(transformedData);
         } else {
           console.log('⚠️ No radiology data returned from database');
@@ -722,7 +775,7 @@ const FinalBill = () => {
     };
 
     fetchRadiologyServices();
-  }, []);
+  }, [visitId]);
 
   // Fetch available pharmacy/medication services from database
   useEffect(() => {
@@ -1535,6 +1588,7 @@ const FinalBill = () => {
   // State for saved data tabs
   const [savedDataTab, setSavedDataTab] = useState('labs');
   const [savedLabData, setSavedLabData] = useState<any[]>([]);
+  const [labDataRefreshCounter, setLabDataRefreshCounter] = useState(0);
   const [savedRadiologyData, setSavedRadiologyData] = useState<any[]>([]);
   const [savedMedicationData, setSavedMedicationData] = useState<any[]>([]);
   const [savedClinicalServicesData, setSavedClinicalServicesData] = useState<any[]>([]);
@@ -1554,6 +1608,13 @@ const FinalBill = () => {
 
   // State for medication modal
   const [selectedMedication, setSelectedMedication] = useState<any>(null);
+
+  // Fetch saved labs when visit ID is available (moved here to avoid hoisting issues)
+  useEffect(() => {
+    if (visitId) {
+      fetchSavedLabs(visitId);
+    }
+  }, [visitId, labDataRefreshCounter]);
 
   // State for discharge view
   const [showDischargeView, setShowDischargeView] = useState(false);
@@ -1844,14 +1905,14 @@ const FinalBill = () => {
               if (item.lab_id) {
                 const { data: labDetails } = await supabase
                   .from('lab')
-                  .select('name, "NABH_rates_in_rupee", "CGHS_code", description')
+                  .select('name, private, "CGHS_code", description')
                   .eq('id', item.lab_id)
                   .single();
 
                 return {
                   ...item,
                   lab_name: labDetails?.name || 'Unknown Lab',
-                  cost: labDetails?.['NABH_rates_in_rupee'] || 0,
+                  cost: (labDetails?.private && labDetails.private > 0) ? labDetails.private : 100,
                   description: labDetails?.description || ''
                 };
               }
@@ -2065,14 +2126,14 @@ const FinalBill = () => {
             if (item.lab_id) {
               const { data: labDetails } = await supabase
                 .from('lab')
-                .select('name, "NABH_rates_in_rupee", description')
+                .select('name, private, description')
                 .eq('id', item.lab_id)
                 .single();
 
               return {
                 ...item,
                 lab_name: labDetails?.name || 'Unknown Lab',
-                cost: labDetails?.['NABH_rates_in_rupee'] || 0,
+                cost: (labDetails?.private && labDetails.private > 0) ? labDetails.private : 100,
                 description: labDetails?.description || ''
               };
             }
@@ -2307,7 +2368,7 @@ const FinalBill = () => {
           lab:lab_id (
             name,
             CGHS_code,
-            NABH_rates_in_rupee
+            private
           )
         `)
         .eq('visit_id', visitData.id);
@@ -2319,7 +2380,7 @@ const FinalBill = () => {
             itemCount++;
             investigationText += `${itemCount}. ${labInfo.name}\n`;
             investigationText += `   CODE: ${labInfo.CGHS_code || 'N/A'}\n`;
-            investigationText += `   APPROXIMATE COST: ₹${labInfo.NABH_rates_in_rupee || 'N/A'}\n\n`;
+            investigationText += `   APPROXIMATE COST: ₹${(labInfo.private && labInfo.private > 0) ? labInfo.private : 100}\n\n`;
           }
         });
       }
@@ -4594,7 +4655,7 @@ INSTRUCTIONS:
             if (item.lab_id) {
               const { data: labDetail } = await supabase
                 .from('lab')
-                .select('name, description, "NABH_rates_in_rupee"')
+                .select('name, description, private')
                 .eq('id', item.lab_id)
                 .single();
 
@@ -4603,7 +4664,7 @@ INSTRUCTIONS:
                 lab_name: labDetail?.name || `Lab ID: ${item.lab_id}`,
                 description: labDetail?.description || '',
                 ordered_date: item.ordered_date,
-                cost: labDetail?.['NABH_rates_in_rupee'] || 0,
+                cost: (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100,
                 created_at: item.created_at
               };
             }
@@ -6694,15 +6755,23 @@ INSTRUCTIONS:
           return;
         }
 
-        // Prepare lab data for visit_labs table (only required columns)
+        // Prepare lab data for visit_labs table (including cost)
         const labToSave = {
           visit_id: visitData.id,
           lab_id: labService.id,
           status: 'ordered',
-          ordered_date: new Date().toISOString()
+          ordered_date: new Date().toISOString(),
+          cost: labService.amount || labService.cost || 0  // Save the actual displayed rate
         };
 
         console.log('💾 Lab data to save:', labToSave);
+        console.log('💾 Service data received:', {
+          id: labService.id,
+          name: labService.name,
+          amount: labService.amount,
+          cost: labService.cost,
+          fullService: labService
+        });
 
         // Insert into visit_labs table
         const { data, error: insertError } = await supabase
@@ -6712,7 +6781,33 @@ INSTRUCTIONS:
 
         if (insertError) {
           console.error('❌ Error saving lab to visit_labs:', insertError);
-          toast.error('Failed to save lab to visit record');
+          
+          // If error is due to cost field not existing, retry without cost
+          if (insertError.message && insertError.message.includes('cost')) {
+            console.log('🔄 Retrying lab save without cost field...');
+            const labToSaveWithoutCost = {
+              visit_id: visitData.id,
+              lab_id: labService.id,
+              status: 'ordered',
+              ordered_date: new Date().toISOString()
+            };
+            
+            const { data: retryData, error: retryError } = await supabase
+              .from('visit_labs' as any)
+              .insert([labToSaveWithoutCost])
+              .select();
+              
+            if (retryError) {
+              console.error('❌ Retry also failed:', retryError);
+              toast.error('Failed to save lab to visit record');
+              return;
+            } else {
+              console.log('✅ Lab saved without cost field:', retryData);
+              toast.success(`${labService.name} saved to visit (without cost preservation)`);
+            }
+          } else {
+            toast.error('Failed to save lab to visit record');
+          }
         } else {
           console.log('✅ Lab saved to visit_labs successfully:', data);
           toast.success(`${labService.name} saved to visit`);
@@ -6948,15 +7043,15 @@ INSTRUCTIONS:
 
   // Search queries for service selection based on search term and active tab
   const { data: searchedLabServices = [], isLoading: isSearchingLabServices } = useQuery({
-    queryKey: ['lab-services-search', serviceSearchTerm],
+    queryKey: ['lab-services-search', serviceSearchTerm, visitId],
     queryFn: async () => {
-      console.log('🔍 Lab search triggered:', { serviceSearchTerm, activeServiceTab });
+      console.log('🔍 Lab search triggered:', { serviceSearchTerm, activeServiceTab, visitId });
       if (!serviceSearchTerm || serviceSearchTerm.length < 2) return [];
 
       try {
         const { data, error } = await supabase
           .from('lab')
-          .select(`id, name, "NABH_rates_in_rupee", "CGHS_code", description`)
+          .select(`id, name, "CGHS_code", description, private`)
           .or(`name.ilike.%${serviceSearchTerm}%,description.ilike.%${serviceSearchTerm}%`)
           .order('name')
           .limit(20);
@@ -6985,14 +7080,25 @@ INSTRUCTIONS:
 
         console.log('✅ Lab search results:', data?.length || 0, 'records');
 
-        // Map the field names to expected format
-        const mappedData = data?.map(item => ({
-          id: item.id,
-          name: item.name,
-          amount: item['NABH_rates_in_rupee'],
-          code: item['CGHS_code'],
-          description: item.description
-        })) || [];
+        // Map the field names to expected format using private rates
+        const mappedData = data?.map(item => {
+          // Use private rate, fallback to 100 if null/0 (temporary until DB updated)
+          const cost = (item.private && item.private > 0) ? item.private : 100;
+          console.log('🔍 Lab search mapping:', {
+            service: item.name,
+            privateRate: item.private,
+            finalCost: cost,
+            usingFallback: !item.private || item.private === 0
+          });
+          
+          return {
+            id: item.id,
+            name: item.name,
+            amount: cost,
+            code: item['CGHS_code'],
+            description: item.description
+          };
+        }) || [];
 
         return mappedData;
       } catch (error) {
@@ -7034,11 +7140,29 @@ INSTRUCTIONS:
   });
 
   // Use searched results when available, otherwise fall back to filtered pre-loaded data
-  const filteredLabServices = serviceSearchTerm.length >= 2 ? searchedLabServices :
-    availableLabServices.filter(service =>
-      service.name?.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
-      service.code?.toLowerCase().includes(serviceSearchTerm.toLowerCase())
-    );
+  const filteredLabServices = (() => {
+    const result = serviceSearchTerm.length >= 2 ? searchedLabServices :
+      availableLabServices.filter(service =>
+        service.name?.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
+        service.code?.toLowerCase().includes(serviceSearchTerm.toLowerCase())
+      );
+    
+    console.log('🔍 filteredLabServices debug:', {
+      serviceSearchTerm,
+      searchTermLength: serviceSearchTerm.length,
+      useSearchResults: serviceSearchTerm.length >= 2,
+      searchedLabServicesLength: searchedLabServices?.length || 0,
+      availableLabServicesLength: availableLabServices?.length || 0,
+      filteredResultsLength: result?.length || 0,
+      sampleService: result?.[0] ? {
+        name: result[0].name,
+        amount: result[0].amount,
+        code: result[0].code
+      } : 'No services found'
+    });
+    
+    return result;
+  })();
 
   // Debug logging
   console.log('🔍 Lab Services Debug:', {
@@ -7715,7 +7839,7 @@ INSTRUCTIONS:
 
       const { data, error } = await supabase
         .from('lab')
-        .select('id, name, description, "NABH_rates_in_rupee", "CGHS_code", category')
+        .select('id, name, description, private, "CGHS_code", category')
         .ilike('name', `%${labSearchTerm}%`)
         .limit(10);
 
@@ -8233,6 +8357,7 @@ INSTRUCTIONS:
 
   // Function to fetch saved labs from visit_labs table
   const fetchSavedLabs = async (visitId: string) => {
+    console.log('🚀🚀🚀 fetchSavedLabs FUNCTION CALLED at:', new Date().toISOString(), 'with visitId:', visitId);
     try {
       if (!visitId) {
         console.log('No visit ID provided for fetching labs');
@@ -8241,7 +8366,7 @@ INSTRUCTIONS:
 
       console.log('Fetching saved labs for visit ID:', visitId);
 
-      // First get the actual visit UUID from the visits table
+      // Get the actual visit UUID from the visits table
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
         .select('id')
@@ -8286,7 +8411,7 @@ INSTRUCTIONS:
 
       const { data: labsData, error: labsError } = await supabase
         .from('lab')
-        .select('id, name, description, category, "NABH_rates_in_rupee", "CGHS_code"')
+        .select('id, name, description, category, "CGHS_code", private')
         .in('id', labIds);
 
       if (labsError) {
@@ -8304,16 +8429,37 @@ INSTRUCTIONS:
       }
 
       console.log('Labs details data:', labsData);
+      console.log('🔍 Lab details with private rates:', labsData?.map(lab => ({
+        id: lab.id,
+        name: lab.name,
+        privateRate: lab.private
+      })));
 
-      // Combine the data
+      // Combine the data using private rates
       const formattedLabs = visitLabsData.map((visitLab: any) => {
         const labDetail = labsData?.find((l: any) => l.id === visitLab.lab_id);
+        
+        // Use private rate, fallback to 100 if null/0 (temporary until DB updated)
+        const cost = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
+        console.log('🎯 Using private rate from lab table:', {
+          privateRate: labDetail?.private,
+          finalCost: cost,
+          usingFallback: !labDetail?.private || labDetail.private === 0
+        });
+        
+        console.log('🔍 fetchSavedLabs mapping:', {
+          labId: labDetail?.id,
+          labName: labDetail?.name,
+          privateRate: labDetail?.private,
+          finalCost: cost
+        });
+
         return {
           ...visitLab,
           lab_name: labDetail?.name || `Unknown Lab (${visitLab.lab_id})`,
           description: labDetail?.description || 'No description available',
           category: labDetail?.category || '',
-          cost: labDetail?.['NABH_rates_in_rupee'] || 0,
+          cost: cost,
           cghs_code: labDetail?.['CGHS_code'] || '',
           status: visitLab.status || 'ordered',
           ordered_date: visitLab.ordered_date
@@ -8321,8 +8467,10 @@ INSTRUCTIONS:
       });
 
       console.log('Final formatted labs:', formattedLabs);
+      console.log('🔥 ABOUT TO UPDATE STATE with:', formattedLabs);
       setSavedLabData(formattedLabs);
-      console.log('State updated - savedLabData should now contain:', formattedLabs.length, 'items');
+      console.log('✅ STATE UPDATED - savedLabData should now contain:', formattedLabs.length, 'items');
+      console.log('🔍 Sample formatted lab:', formattedLabs?.[0]);
     } catch (error) {
       console.error('Error in fetchSavedLabs:', error);
     }
@@ -11052,7 +11200,7 @@ Dr. Murali B K
             // Fetch visit_labs for lab investigations
             const { data: visitLabs } = await supabase
               .from('visit_labs')
-              .select(`*, lab:lab_id (name, CGHS_code, NABH_rates_in_rupee)`)
+              .select(`*, lab:lab_id (name, CGHS_code, private)`)
               .eq('visit_id', visitData.id);
 
             // Fetch visit_radiology for radiology investigations  
@@ -11070,7 +11218,7 @@ Dr. Murali B K
                   srNo: srNo++,
                   code: labItem.lab?.CGHS_code || '-',
                   particular: labItem.lab?.name || 'Lab Investigation',
-                  cost: labItem.lab?.NABH_rates_in_rupee || '0'
+                  cost: (labItem.lab?.private && labItem.lab.private > 0) ? labItem.lab.private : 100
                 });
               });
             }
@@ -13121,6 +13269,394 @@ Dr. Murali B K
                 )}
               </div>
 
+              {/* Modern Separator */}
+              <div className="relative py-6 mx-4">
+                <div className="flex items-center">
+                  <div className="flex-grow border-t-2 border-blue-300"></div>
+                  <div className="mx-4 flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                  </div>
+                  <div className="flex-grow border-t-2 border-blue-300"></div>
+                </div>
+              </div>
+
+              {/* Labs Section */}
+              <div className="p-4 border-b border-gray-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 bg-blue-100 rounded flex items-center justify-center">
+                    <span className="text-blue-600 text-xs font-bold">🧪</span>
+                  </div>
+                  <h4 className="font-semibold text-blue-600">Labs</h4>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">Laboratory services and tests</p>
+
+                {/* Labs Search */}
+                <div className="relative mb-3">
+                  <Input
+                    placeholder="Search lab services..."
+                    className="pl-10 text-sm"
+                    value={labSearchTerm}
+                    onChange={(e) => setLabSearchTerm(e.target.value)}
+                  />
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+                    <span className="text-gray-400 text-sm">🔍</span>
+                  </div>
+                </div>
+
+                {/* Labs Dropdown */}
+                {labSearchTerm.length >= 2 && (
+                  <div className="mb-3 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-sm">
+                    {filteredLabs.map((lab) => (
+                      <div
+                        key={lab.id}
+                        className="p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        onClick={() => {
+                          if (!selectedLabs.find(s => s.id === lab.id)) {
+                            setSelectedLabs([...selectedLabs, lab]);
+                            setLabSearchTerm("");
+                            console.log('🧪 Lab selected:', lab);
+                          } else {
+                            console.log('⚠️ Lab already selected:', lab.name);
+                          }
+                        }}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="font-medium text-sm">{lab.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {lab.description || 'No description available'}
+                            </div>
+                            {lab.category && (
+                              <div className="text-xs text-blue-600 mt-1">
+                                📋 {lab.category}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            {((lab.private && lab.private > 0) || true) && (
+                              <div className="text-sm font-medium text-green-600">
+                                ₹{(lab.private && lab.private > 0) ? lab.private : 100}
+                              </div>
+                            )}
+                            {lab['CGHS_code'] && (
+                              <div className="text-xs text-gray-400">
+                                {lab['CGHS_code']}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {filteredLabs.length === 0 && (
+                      <div className="p-2 text-sm text-gray-500">
+                        No lab services found for "{labSearchTerm}". Try: CBC, LFT, Blood Sugar, Thyroid
+                      </div>
+                    )}
+                  </div>
+                )}
+
+
+                {/* Selected Labs */}
+                {selectedLabs.length > 0 && (
+                  <div className="mb-3">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">
+                      Selected Lab Services ({selectedLabs.length}):
+                    </h5>
+                    <div className="space-y-2">
+                      {selectedLabs.map((lab) => (
+                        <div key={lab.id} className="flex items-center justify-between p-3 bg-blue-50 rounded border border-blue-200">
+                          <div className="flex-1">
+                            <div className="font-medium text-sm">{lab.name}</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {lab.description || 'No description available'}
+                            </div>
+                            <div className="flex items-center gap-3 mt-2">
+                              {lab.category && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                                  {lab.category}
+                                </span>
+                              )}
+                              {lab['CGHS_code'] && (
+                                <span className="text-xs text-gray-500">
+                                  Code: {lab['CGHS_code']}
+                                </span>
+                              )}
+                              {((lab.private && lab.private > 0) || true) && (
+                                <span className="text-xs font-medium text-green-600">
+                                  ₹{(lab.private && lab.private > 0) ? lab.private : 100}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedLabs(selectedLabs.filter(s => s.id !== lab.id));
+                              console.log('🗑️ Lab removed:', lab.name);
+                            }}
+                            className="text-red-500 hover:text-red-700 text-lg font-bold ml-3"
+                            title="Remove lab test"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Save Labs Button */}
+                {selectedLabs.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <Button
+                      size="sm"
+                      className="w-full bg-blue-600 text-white"
+                      onClick={() => {
+                        console.log('Labs save button clicked - selectedLabs:', selectedLabs);
+                        console.log('Labs save button clicked - visitId:', visitId);
+                        if (visitId) {
+                          saveLabsToVisit(visitId);
+                        } else {
+                          toast.error('No visit ID available to save labs');
+                        }
+                      }}
+                    >
+                      Save Labs to Visit
+                    </Button>
+
+
+                  </div>
+                )}
+              </div>
+
+              {/* Modern Separator */}
+              <div className="relative py-6 mx-4">
+                <div className="flex items-center">
+                  <div className="flex-grow border-t-2 border-purple-300"></div>
+                  <div className="mx-4 flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
+                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse"></div>
+                  </div>
+                  <div className="flex-grow border-t-2 border-purple-300"></div>
+                </div>
+              </div>
+
+              {/* Radiology Section */}
+              <div className="p-4 border-b border-gray-200">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 bg-purple-100 rounded flex items-center justify-center">
+                    <span className="text-purple-600 text-xs font-bold">📷</span>
+                  </div>
+                  <h4 className="font-semibold text-purple-600">Radiology</h4>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">Imaging and radiology services</p>
+
+                {/* Radiology Search */}
+                <div className="relative mb-3">
+                  <Input
+                    placeholder="Search radiology services..."
+                    className="pl-10 text-sm"
+                    value={radiologySearchTerm}
+                    onChange={(e) => setRadiologySearchTerm(e.target.value)}
+                  />
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+                    <span className="text-gray-400 text-sm">🔍</span>
+                  </div>
+                </div>
+
+                {/* Radiology Dropdown */}
+                {radiologySearchTerm.length >= 2 && (
+                  <div className="mb-3 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-sm">
+                    {filteredRadiology.map((radiology) => (
+                      <div
+                        key={radiology.id}
+                        className="p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        onClick={() => {
+                          if (!selectedRadiology.find(s => s.id === radiology.id)) {
+                            setSelectedRadiology([...selectedRadiology, radiology]);
+                            setRadiologySearchTerm("");
+                          }
+                        }}
+                      >
+                        <div className="font-medium text-sm">{radiology.name}</div>
+                        <div className="text-xs text-gray-500">
+                          {radiology.description || 'No description available'}
+                        </div>
+                      </div>
+                    ))}
+                    {filteredRadiology.length === 0 && (
+                      <div className="p-2 text-sm text-gray-500">No radiology services found</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Selected Radiology */}
+                {selectedRadiology.length > 0 && (
+                  <div className="mb-3">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">Selected Radiology Services:</h5>
+                    <div className="space-y-2">
+                      {selectedRadiology.map((radiology) => (
+                        <div key={radiology.id} className="flex items-center justify-between p-2 bg-purple-50 rounded border border-purple-200">
+                          <div>
+                            <div className="font-medium text-sm">{radiology.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {radiology.description || 'No description available'}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedRadiology(selectedRadiology.filter(s => s.id !== radiology.id));
+                            }}
+                            className="text-red-500 hover:text-red-700 text-sm font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Save Radiology Button */}
+                {selectedRadiology.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <Button
+                      size="sm"
+                      className="w-full bg-purple-600 text-white"
+                      onClick={() => {
+                        console.log('Radiology save button clicked - selectedRadiology:', selectedRadiology);
+                        console.log('Radiology save button clicked - visitId:', visitId);
+                        if (visitId) {
+                          saveRadiologyToVisit(visitId);
+                        } else {
+                          toast.error('No visit ID available to save radiology');
+                        }
+                      }}
+                    >
+                      Save Radiology to Visit
+                    </Button>
+
+
+                  </div>
+                )}
+              </div>
+
+              {/* Modern Separator */}
+              <div className="relative py-6 mx-4">
+                <div className="flex items-center">
+                  <div className="flex-grow border-t-2 border-green-300"></div>
+                  <div className="mx-4 flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                  </div>
+                  <div className="flex-grow border-t-2 border-green-300"></div>
+                </div>
+              </div>
+
+              {/* Medications Section */}
+              <div className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-6 h-6 bg-green-100 rounded flex items-center justify-center">
+                    <span className="text-green-600 text-xs font-bold">💊</span>
+                  </div>
+                  <h4 className="font-semibold text-green-600">Medications</h4>
+                </div>
+                <p className="text-sm text-gray-600 mb-3">All medications for patient</p>
+
+
+
+                {/* Medications Search */}
+                <div className="relative mb-3">
+                  <Input
+                    placeholder="Search medications..."
+                    className="pl-10 text-sm"
+                    value={medicationSearchTerm}
+                    onChange={(e) => setMedicationSearchTerm(e.target.value)}
+                  />
+                  <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
+                    <span className="text-gray-400 text-sm">🔍</span>
+                  </div>
+                </div>
+
+                {/* Medications Dropdown */}
+                {medicationSearchTerm.length >= 2 && (
+                  <div className="mb-3 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-sm">
+                    {filteredMedications.map((medication) => (
+                      <div
+                        key={medication.id}
+                        className="p-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        onClick={() => {
+                          if (!selectedMedications.find(s => s.id === medication.id)) {
+                            setSelectedMedications([...selectedMedications, medication]);
+                            setMedicationSearchTerm("");
+                          }
+                        }}
+                      >
+                        <div className="font-medium text-sm">{medication.name}</div>
+                        <div className="text-xs text-gray-500">
+                          {medication.description || 'No description available'}
+                        </div>
+                      </div>
+                    ))}
+                    {filteredMedications.length === 0 && (
+                      <div className="p-2 text-sm text-gray-500">No medications found</div>
+                    )}
+                  </div>
+                )}
+
+                {/* Selected Medications */}
+                {selectedMedications.length > 0 && (
+                  <div className="mb-3">
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">Selected Medications:</h5>
+                    <div className="space-y-2">
+                      {selectedMedications.map((medication) => (
+                        <div key={medication.id} className="flex items-center justify-between p-2 bg-green-50 rounded border border-green-200">
+                          <div>
+                            <div className="font-medium text-sm">{medication.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {medication.description || 'No description available'}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedMedications(selectedMedications.filter(s => s.id !== medication.id));
+                            }}
+                            className="text-red-500 hover:text-red-700 text-sm font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Save Medications Button */}
+                {selectedMedications.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <Button
+                      size="sm"
+                      className="w-full bg-green-600 text-white"
+                      onClick={() => {
+                        console.log('Medications save button clicked - selectedMedications:', selectedMedications);
+                        console.log('Medications save button clicked - visitId:', visitId);
+                        if (visitId) {
+                          saveMedicationsToVisit(visitId);
+                        } else {
+                          toast.error('No visit ID available to save medications');
+                        }
+                      }}
+                    >
+                      Save Medications to Visit
+                    </Button>
+
+
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -13131,7 +13667,7 @@ Dr. Murali B K
           <div className="p-4 border-b border-gray-200">
             <div className="flex items-center justify-between">
               {!isMiddleSectionCollapsed && (
-                <div>
+                <div> 
                   <h3 className="font-semibold text-lg text-blue-600 mb-2">Service Selection</h3>
                   <p className="text-sm text-gray-600">Search and select services for billing</p>
                 </div>
@@ -13325,9 +13861,15 @@ Dr. Murali B K
                                       e.preventDefault();
                                       e.stopPropagation();
                                       console.log('🖱️ Lab service clicked:', service);
-                                      console.log('🖱️ Click event:', e);
+                                      console.log('🖱️ Service details:', {
+                                        id: service.id,
+                                        name: service.name,
+                                        amount: service.amount,
+                                        cost: service.cost,
+                                        fullServiceObject: service
+                                      });
                                       console.log('🔍 Current visitId:', visitId);
-                                      alert(`Lab clicked: ${service.name} - Check console for details`);
+                                      alert(`Lab clicked: ${service.name} (₹${service.amount}) - Check console for details`);
                                       await addLabServiceToInvoice(service);
                                       setServiceSearchTerm("");
                                       console.log('🔄 Search term cleared');
@@ -13338,7 +13880,14 @@ Dr. Murali B K
                                         <div className="font-medium text-sm">{service.name}</div>
                                         <div className="text-xs text-gray-500">Code: {service.code || 'N/A'}</div>
                                       </div>
-                                      <div className="text-sm font-medium">₹{service.amount || 'N/A'}</div>
+                                      <div className="text-sm font-medium">₹{(() => {
+                                        console.log('🔍 Lab service display:', {
+                                          name: service.name,
+                                          amount: service.amount,
+                                          serviceObject: service
+                                        });
+                                        return service.amount || 'N/A';
+                                      })()}</div>
                                     </div>
                                   </div>
                                 ))
@@ -14196,6 +14745,49 @@ Dr. Murali B K
                             >
                               Check Schema
                             </button>
+                            <button
+                              onClick={async () => {
+                                alert('🔄 REFRESH LABS BUTTON CLICKED! Check console for logs...');
+                                console.log('🔄 DIRECT fetchSavedLabs call starting...');
+                                console.log('🔍 Current visitId:', visitId);
+                                console.log('🔍 Current savedLabData BEFORE:', savedLabData);
+                                
+                                if (visitId) {
+                                  try {
+                                    console.log('🔥 Calling fetchSavedLabs directly...');
+                                    
+                                    // Force clear the state first
+                                    console.log('🔥 Clearing savedLabData state first...');
+                                    setSavedLabData([]);
+                                    
+                                    // Wait a moment for state to clear
+                                    await new Promise(resolve => setTimeout(resolve, 100));
+                                    
+                                    // Now fetch new data
+                                    await fetchSavedLabs(visitId);
+                                    console.log('✅ DIRECT fetchSavedLabs completed');
+                                    
+                                    // Wait for state to update
+                                    setTimeout(() => {
+                                      console.log('🔍 savedLabData AFTER fetchSavedLabs (delayed check):', savedLabData);
+                                    }, 500);
+                                    
+                                    alert('✅ fetchSavedLabs function completed - check saved lab data now!');
+                                  } catch (error) {
+                                    console.error('❌ Error in direct fetchSavedLabs call:', error);
+                                    alert('❌ Error: ' + error.message);
+                                  }
+                                } else {
+                                  console.warn('❌ No visitId available');
+                                  alert('❌ No visitId available');
+                                }
+                                console.log('🔄 Also triggering counter refresh...');
+                                setLabDataRefreshCounter(prev => prev + 1);
+                              }}
+                              className="px-3 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700"
+                            >
+                              Refresh Labs
+                            </button>
                           </div>
                         </div>
                         <div className="text-xs text-yellow-700 mt-1">
@@ -14342,7 +14934,16 @@ Dr. Murali B K
                                         <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
                                           <input
                                             type="number"
-                                            value={lab.cost ? String(lab.cost).replace('₹', '') : ''}
+                                            value={(() => {
+                                              console.log('🔍 Rendering saved lab cost:', {
+                                                labId: lab.id,
+                                                labName: lab.lab_name,
+                                                rawCost: lab.cost,
+                                                displayValue: lab.cost ? String(lab.cost).replace('₹', '') : '',
+                                                fullLabObject: lab
+                                              });
+                                              return lab.cost ? String(lab.cost).replace('₹', '') : '';
+                                            })()}
                                             onChange={(e) => updateLabField(lab.id, 'cost', e.target.value)}
                                             className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
                                             placeholder="Cost"
