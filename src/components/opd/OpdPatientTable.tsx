@@ -61,19 +61,19 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
     // Load existing comment if any
     setCommentTexts(prev => ({
       ...prev,
-      [patient.visit_id!]: existingComment
+      [patient.id]: existingComment
     }));
 
     // Store original comment to track changes
     setOriginalComments(prev => ({
       ...prev,
-      [patient.visit_id!]: existingComment
+      [patient.id]: existingComment
     }));
 
     // Open dialog for this visit
     setCommentDialogs(prev => ({
       ...prev,
-      [patient.visit_id!]: true
+      [patient.id]: true
     }));
   };
 
@@ -102,7 +102,7 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
           const { error, data } = await supabase
             .from('visits')
             .update({ comments: text })
-            .eq('visit_id', visitId)
+            .eq('id', visitId)
             .select();
 
           if (error) {
@@ -1120,12 +1120,12 @@ Verified by: [To be verified by doctor]`;
       {/* Comment Dialogs */}
       {patients.map((patient) => (
         <Dialog
-          key={patient.visit_id}
-          open={commentDialogs[patient.visit_id || ''] || false}
+          key={patient.id}
+          open={commentDialogs[patient.id] || false}
           onOpenChange={(open) => {
             setCommentDialogs(prev => ({
               ...prev,
-              [patient.visit_id!]: open
+              [patient.id]: open
             }));
           }}
         >
@@ -1141,17 +1141,17 @@ Verified by: [To be verified by doctor]`;
               <textarea
                 className="w-full min-h-[150px] p-3 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 resize-vertical"
                 placeholder="Add your comments here..."
-                value={commentTexts[patient.visit_id || ''] || ''}
-                onChange={(e) => handleCommentChange(patient.visit_id || '', e.target.value)}
+                value={commentTexts[patient.id] || ''}
+                onChange={(e) => handleCommentChange(patient.id, e.target.value)}
               />
 
               {/* Save indicators */}
-              {savingComments[patient.visit_id || ''] && (
+              {savingComments[patient.id] && (
                 <div className="absolute bottom-2 right-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
                   Saving...
                 </div>
               )}
-              {savedComments[patient.visit_id || ''] && !savingComments[patient.visit_id || ''] && (
+              {savedComments[patient.id] && !savingComments[patient.id] && (
                 <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
                   ✓ Saved
                 </div>
