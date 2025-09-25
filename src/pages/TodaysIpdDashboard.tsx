@@ -1166,6 +1166,22 @@ const TodaysIpdDashboard = () => {
 
       console.log(`✅ TodaysIpdDashboard: Found ${data?.length || 0} visits for ${hospitalConfig?.name}`);
 
+      // Debug: Check comments in fetched data
+      console.log('📊 Sample visit data (first visit):', data?.[0]);
+      console.log('💬 Comments in first visit:', data?.[0]?.comments);
+
+      // Log all visits with comments
+      const visitsWithComments = data?.filter(v => v.comments) || [];
+      console.log(`📝 Found ${visitsWithComments.length} visits with comments out of ${data?.length || 0} total visits`);
+      if (visitsWithComments.length > 0) {
+        console.log('💭 Visits with comments:', visitsWithComments.map(v => ({
+          id: v.id,
+          visit_id: v.visit_id,
+          patient_name: v.patients?.name,
+          comments: v.comments
+        })));
+      }
+
       // Sort manually to ensure patients with sr_no come first, then patients without sr_no
       const sortedData = (data || []).sort((a, b) => {
         // If both have sr_no, sort numerically
@@ -1383,24 +1399,29 @@ const TodaysIpdDashboard = () => {
 
   // Comment handlers
   const handleCommentClick = (visit: any) => {
+    console.log('🔍 Opening comment dialog for visit:', visit.id);
+    console.log('📋 Visit object:', visit);
+    console.log('💬 Existing comment from visit.comments:', visit.comments);
+
     const existingComment = visit.comments || '';
+    console.log('📝 Loading comment into dialog:', existingComment);
 
     // Load existing comment if any
     setCommentTexts(prev => ({
       ...prev,
-      [visit.visit_id]: existingComment
+      [visit.id]: existingComment
     }));
 
     // Store original comment to track changes
     setOriginalComments(prev => ({
       ...prev,
-      [visit.visit_id]: existingComment
+      [visit.id]: existingComment
     }));
 
     // Open dialog for this visit
     setCommentDialogs(prev => ({
       ...prev,
-      [visit.visit_id]: true
+      [visit.id]: true
     }));
   };
 
@@ -1429,7 +1450,7 @@ const TodaysIpdDashboard = () => {
           const { error, data } = await supabase
             .from('visits')
             .update({ comments: text })
-            .eq('visit_id', visitId)
+            .eq('id', visitId)
             .select();
 
           if (error) {
@@ -1453,6 +1474,8 @@ const TodaysIpdDashboard = () => {
             setTimeout(() => {
               setSavedComments(prev => ({ ...prev, [visitId]: false }));
             }, 2000);
+            // Refresh the data to get updated comments
+            refetch();
           }
         } catch (error) {
           console.error('❌ Exception while saving comment:', error);
@@ -1952,6 +1975,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Bill</TableHead>
                 <TableHead className="font-semibold">Billing Executive</TableHead>
                 <TableHead className="font-semibold">Billing Status</TableHead>
+                <TableHead className="font-semibold">Corporate</TableHead>
                 <TableHead className="font-semibold">File Status</TableHead>
                 <TableHead className="font-semibold">Photos</TableHead>
                 <TableHead className="font-semibold">Sign</TableHead>
@@ -1964,7 +1988,6 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Visit Type</TableHead>
                 <TableHead className="font-semibold">Doctor</TableHead>
                 <TableHead className="font-semibold">Diagnosis</TableHead>
-                <TableHead className="font-semibold">Corporate</TableHead>
                 <TableHead className="font-semibold">Admission Date</TableHead>
                 <TableHead className="font-semibold">Days Admitted</TableHead>
                 <TableHead className="font-semibold">Discharge Date</TableHead>
@@ -1980,10 +2003,10 @@ const TodaysIpdDashboard = () => {
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
+                <TableHead></TableHead>
                 <TableHead>
                   <ColumnFilter options={fileStatusOptions} selected={fileStatusFilter} onChange={setFileStatusFilter} />
                 </TableHead>
-                <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
@@ -2129,6 +2152,9 @@ const TodaysIpdDashboard = () => {
                     <BillingStatusDropdown visit={visit} disabled={!isAdmin} />
                   </TableCell>
                   <TableCell>
+                    {visit.patients?.corporate || '—'}
+                  </TableCell>
+                  <TableCell>
                     {isAdmin ? <FileStatusToggle visit={visit} /> : (
                       <Badge variant="outline" className="capitalize">{visit.file_status || '—'}</Badge>
                     )}
@@ -2175,9 +2201,6 @@ const TodaysIpdDashboard = () => {
                   </TableCell>
                   <TableCell>
                     General
-                  </TableCell>
-                  <TableCell>
-                    {visit.patients?.corporate || '—'}
                   </TableCell>
                   <TableCell>
                     {visit.admission_date ? format(new Date(visit.admission_date), 'MMM dd, yyyy HH:mm') : '—'}
@@ -2294,12 +2317,12 @@ const TodaysIpdDashboard = () => {
         {/* Comment Dialogs */}
         {filteredVisits.map((visit) => (
           <Dialog
-            key={`comment-dialog-${visit.visit_id}`}
-            open={commentDialogs[visit.visit_id] || false}
+            key={`comment-dialog-${visit.id}`}
+            open={commentDialogs[visit.id] || false}
             onOpenChange={(open) => {
               setCommentDialogs(prev => ({
                 ...prev,
-                [visit.visit_id]: open
+                [visit.id]: open
               }));
             }}
           >
@@ -2315,17 +2338,17 @@ const TodaysIpdDashboard = () => {
                 <textarea
                   className="w-full min-h-[150px] p-3 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 resize-vertical"
                   placeholder="Add your comments here..."
-                  value={commentTexts[visit.visit_id] || ''}
-                  onChange={(e) => handleCommentChange(visit.visit_id, e.target.value)}
+                  value={commentTexts[visit.id] || ''}
+                  onChange={(e) => handleCommentChange(visit.id, e.target.value)}
                 />
 
                 {/* Save indicators */}
-                {savingComments[visit.visit_id] && (
+                {savingComments[visit.id] && (
                   <div className="absolute bottom-2 right-2 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
                     Saving...
                   </div>
                 )}
-                {savedComments[visit.visit_id] && !savingComments[visit.visit_id] && (
+                {savedComments[visit.id] && !savingComments[visit.id] && (
                   <div className="absolute bottom-2 right-2 text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
                     ✓ Saved
                   </div>
