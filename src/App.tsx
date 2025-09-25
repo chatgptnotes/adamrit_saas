@@ -162,7 +162,12 @@ const AppContent = () => {
   if (!isAuthenticated && isAuthRoute) {
     return (
       <ThemeProvider>
-        <BrowserRouter>
+        <BrowserRouter 
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true
+          }}
+        >
           <QueryClientProvider client={queryClient}>
             <TooltipProvider>
               <div className="min-h-screen">
@@ -210,7 +215,12 @@ const AppContent = () => {
 
   return (
     <ThemeProvider>
-      <BrowserRouter>
+      <BrowserRouter 
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true
+        }}
+      >
         <SidebarProvider>
           <div className="min-h-screen flex w-full">
             <AppSidebar {...counts} />
