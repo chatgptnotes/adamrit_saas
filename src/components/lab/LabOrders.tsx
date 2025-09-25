@@ -573,6 +573,108 @@ const LabOrders = () => {
     }
   }, [selectedTestsForEntry, calculateReferenceRange, fetchSubTestsForTest]);
 
+  // NEW: Effect to load existing lab results when tests are selected for entry
+  useEffect(() => {
+    if (selectedTestsForEntry.length > 0) {
+      const loadExistingLabResults = async () => {
+        console.log('🔍 Loading existing lab results for selected tests...');
+        const firstTest = selectedTestsForEntry[0];
+        const visitId = firstTest.visit_id || firstTest.id;
+
+        try {
+          // Load existing lab results for this visit
+          const { data: existingResults, error } = await supabase
+            .from('lab_results')
+            .select('*')
+            .eq('visit_id', visitId);
+
+          if (error) {
+            console.error('Error loading existing lab results:', error);
+            return;
+          }
+
+          console.log('📊 Found existing lab results:', existingResults);
+
+          if (existingResults && existingResults.length > 0) {
+            const loadedFormData: Record<string, any> = {};
+            const loadedSavedResults: Record<string, any> = {};
+
+            existingResults.forEach(result => {
+              // Find matching test row by test category
+              const matchingTest = selectedTestsForEntry.find(test =>
+                test.test_category === result.test_category ||
+                test.test_name === result.test_name ||
+                test.id === result.lab_id ||
+                test.order_number === result.visit_id
+              );
+
+              if (matchingTest) {
+                const formData = {
+                  result_value: result.result_value || '',
+                  result_unit: result.result_unit || '',
+                  comments: result.comments || '',
+                  is_abnormal: result.is_abnormal || false,
+                  technician_name: result.technician_name || '',
+                  pathologist_name: result.pathologist_name || ''
+                };
+
+                // Check if this is a sub-test result by comparing with available sub-tests
+                const subTests = testSubTests[matchingTest.test_name] || [];
+                const matchingSubTest = subTests.find(subTest =>
+                  subTest.name === result.test_name ||
+                  subTest.name.toLowerCase() === result.test_name.toLowerCase()
+                );
+
+                if (matchingSubTest) {
+                  // Handle sub-test results
+                  const subTestKey = `${matchingTest.id}_subtest_${matchingSubTest.id}`;
+                  loadedFormData[subTestKey] = formData;
+                  loadedSavedResults[subTestKey] = formData;
+                  console.log(`📝 Loaded sub-test data for ${result.test_name} with key: ${subTestKey}`);
+                } else if (result.test_name === matchingTest.test_name) {
+                  // Handle main test results
+                  loadedFormData[matchingTest.id] = formData;
+                  loadedSavedResults[matchingTest.id] = formData;
+                  console.log(`📝 Loaded main test data for ${result.test_name} with key: ${matchingTest.id}`);
+                }
+              } else {
+                console.log(`⚠️ No matching test found for result: ${result.test_name}`);
+              }
+            });
+
+            // Update form data and saved results
+            setLabResultsForm(prev => ({ ...prev, ...loadedFormData }));
+            setSavedLabResults(prev => ({ ...prev, ...loadedSavedResults }));
+
+            // Check if any result was authenticated
+            const hasAuthenticatedResults = existingResults.some(result =>
+              result.authenticated_result === true || result.result_status === 'Final'
+            );
+
+            if (hasAuthenticatedResults) {
+              setAuthenticatedResult(true);
+              console.log('🔐 Found authenticated results - setting authentication to true');
+            }
+
+            if (Object.keys(loadedFormData).length > 0) {
+              setIsFormSaved(true);
+              console.log('✅ Successfully loaded existing lab results into form');
+              toast({
+                title: "Loaded Existing Results",
+                description: `Found and loaded ${Object.keys(loadedFormData).length} existing test results.`,
+                variant: "default"
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error in loadExistingLabResults:', error);
+        }
+      };
+
+      loadExistingLabResults();
+    }
+  }, [selectedTestsForEntry]);
+
   // Sample save mutation
   const saveSamplesMutation = useMutation({
     mutationFn: async (testIds: string[]) => {
@@ -581,9 +683,9 @@ const LabOrders = () => {
       testIds.forEach(testId => {
         updatedStatus[testId] = 'saved';
       });
-      
+
       setTestSampleStatus(prev => ({ ...prev, ...updatedStatus }));
-      
+
       return testIds;
     },
     onSuccess: (testIds) => {
@@ -1020,6 +1122,7 @@ const LabOrders = () => {
       return testRows;
     }
   });
+
 
   // Group tests by patient for hierarchical display
   const groupedTests = labTestRows.reduce((groups, test) => {
@@ -1640,7 +1743,7 @@ const LabOrders = () => {
       <html>
       <head>
         <meta charset="UTF-8">
-        <title>Laboratory Report</title>
+        <title>Lab Report</title>
         <style>
           @page {
             margin: 20mm;
@@ -1807,10 +1910,6 @@ const LabOrders = () => {
       </head>
       <body>
 
-        <div class="report-header">
-          <div class="hospital-name">ESIC HOSPITAL</div>
-          <div class="hospital-details">Laboratory Report</div>
-        </div>
 
         <div class="patient-info">
           <div>
@@ -1858,7 +1957,7 @@ const LabOrders = () => {
           </div>
         </div>
         
-        <div class="report-title">Report on ${selectedTestsForEntry.map(test => test.test_name).join(', ').toUpperCase()}</div>
+        <div class="report-title">Report on ${selectedTestsForEntry.map(test => test.test_category).join(', ').toUpperCase()}</div>
         
         <div class="results-content">
           <div class="header-row">
