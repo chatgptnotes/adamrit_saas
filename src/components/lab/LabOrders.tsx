@@ -1640,7 +1640,7 @@ const LabOrders = () => {
       <html>
       <head>
         <meta charset="UTF-8">
-        <title>Laboratory Report</title>
+        <title>Lab Report</title>
         <style>
           @page {
             margin: 20mm;
@@ -1807,10 +1807,6 @@ const LabOrders = () => {
       </head>
       <body>
 
-        <div class="report-header">
-          <div class="hospital-name">ESIC HOSPITAL</div>
-          <div class="hospital-details">Laboratory Report</div>
-        </div>
 
         <div class="patient-info">
           <div>
@@ -1858,7 +1854,7 @@ const LabOrders = () => {
           </div>
         </div>
         
-        <div class="report-title">Report on ${selectedTestsForEntry.map(test => test.test_name).join(', ').toUpperCase()}</div>
+        <div class="report-title">Report on ${selectedTestsForEntry.map(test => test.test_category).join(', ').toUpperCase()}</div>
         
         <div class="results-content">
           <div class="header-row">
