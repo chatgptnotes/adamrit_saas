@@ -36,6 +36,7 @@ interface PaymentTransaction {
   status: string;
   is_refund: boolean;
   refund_reason: string;
+  billing_executive?: string;
 }
 
 interface PatientInfo {
@@ -54,6 +55,40 @@ const paymentModes = [
   { value: 'RTGS', label: 'RTGS' },
   { value: 'DD', label: 'Demand Draft' },
   { value: 'ONLINE', label: 'Online Transfer' },
+];
+
+const billingExecutives = [
+  'Dr.B.K.Murali',
+  'Ruby',
+  'Shrikant',
+  'Gaurav',
+  'Dr. Swapnil',
+  'Dr.Sachin',
+  'Dr.Shiraj',
+  'Dr. Sharad',
+  'Shashank',
+  'Shweta',
+  'Suraj',
+  'Nitin',
+  'Sonali',
+  'Ruchika',
+  'Pragati',
+  'Rachana',
+  'Kashish',
+  'Aman',
+  'Dolly',
+  'Ruchi',
+  'Gayatri',
+  'Noor',
+  'Neesha',
+  'Diksha',
+  'Ayush',
+  'Kiran',
+  'Pratik',
+  'Azhar',
+  'Tejas',
+  'Abhishek',
+  'Chandrprakash'
 ];
 
 // UUID validation helper function
@@ -98,6 +133,7 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
     refundReason: '',
     paymentDate: new Date(),
     paymentMode: 'CASH',
+    billingExecutive: '',
     remarks: '',
     referenceNumber: ''
   });
@@ -413,6 +449,7 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
         refund_reason: formData.isRefund && formData.refundReason ? formData.refundReason.trim() : null,
         payment_date: format(formData.paymentDate, 'yyyy-MM-dd'),
         payment_mode: formData.paymentMode,
+        billing_executive: formData.billingExecutive && formData.billingExecutive.trim() ? formData.billingExecutive.trim() : null,
         reference_number: formData.referenceNumber && formData.referenceNumber.trim() ? formData.referenceNumber.trim() : null,
         remarks: formData.remarks && formData.remarks.trim() ? formData.remarks.trim() : null,
         created_by: 'current_user' // You can replace this with actual user info
@@ -450,6 +487,7 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
         refundReason: '',
         paymentDate: new Date(),
         paymentMode: 'CASH',
+        billingExecutive: '',
         remarks: '',
         referenceNumber: ''
       });
@@ -469,42 +507,189 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
   };
 
   const handlePrintReceipt = (payment: PaymentTransaction) => {
-    // Create a simple receipt print
+    // Generate receipt number (you can customize this logic)
+    const receiptNumber = payment.id ? payment.id.slice(-6).toUpperCase() : Math.random().toString().slice(-6);
+    
+    // Convert amount to words
+    const amountInWords = (amount: number): string => {
+      const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+      const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+      const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+      
+      const convertToWords = (num: number): string => {
+        if (num === 0) return '';
+        if (num < 10) return ones[num];
+        if (num < 20) return teens[num - 10];
+        if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 !== 0 ? ' ' + ones[num % 10] : '');
+        if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 !== 0 ? ' ' + convertToWords(num % 100) : '');
+        if (num < 100000) return convertToWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 !== 0 ? ' ' + convertToWords(num % 1000) : '');
+        if (num < 10000000) return convertToWords(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 !== 0 ? ' ' + convertToWords(num % 100000) : '');
+        return convertToWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 !== 0 ? ' ' + convertToWords(num % 10000000) : '');
+      };
+      
+      if (amount === 0) return 'Zero Rupees Only';
+      return 'Rupee ' + convertToWords(amount) + ' Only';
+    };
+
     const printContent = `
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 400px;">
-        <h2 style="text-align: center; margin-bottom: 20px;">${payment.is_refund ? 'Refund' : 'Advance Payment'} Receipt</h2>
-        
-        <!-- Patient Information -->
-        <div style="margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #333;">Patient Details</h3>
-          <div style="margin-bottom: 5px;"><strong>Name:</strong> ${patientInfo.name || 'N/A'}</div>
-          <div style="margin-bottom: 5px;"><strong>Bill No.:</strong> ${patientInfo.billNo || 'N/A'}</div>
-          <div style="margin-bottom: 5px;"><strong>Registration No.:</strong> ${patientInfo.registrationNo || 'N/A'}</div>
-          <div style="margin-bottom: 5px;"><strong>Date of Admission:</strong> ${patientInfo.dateOfAdmission || 'N/A'}</div>
-        </div>
-        
-        <!-- Payment Information -->
-        <div style="margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
-          <h3 style="margin: 0 0 10px 0; font-size: 14px; color: #333;">Payment Details</h3>
-          <div style="margin-bottom: 10px;"><strong>Date:</strong> ${format(new Date(payment.payment_date), 'dd/MM/yyyy')}</div>
-          <div style="margin-bottom: 10px;"><strong>Amount:</strong> ₹${payment.advance_amount}</div>
-          <div style="margin-bottom: 10px;"><strong>Mode:</strong> ${payment.payment_mode}</div>
-          ${payment.reference_number ? `<div style="margin-bottom: 10px;"><strong>Ref No:</strong> ${payment.reference_number}</div>` : ''}
-          ${payment.is_refund && payment.refund_reason ? `<div style="margin-bottom: 10px;"><strong>Refund Reason:</strong> ${payment.refund_reason}</div>` : ''}
-          ${payment.remarks ? `<div style="margin-bottom: 10px;"><strong>Remarks:</strong> ${payment.remarks}</div>` : ''}
-        </div>
-        
-        <div style="margin-top: 30px; text-align: center; font-size: 12px;">
-          Receipt ID: c${payment.id?.slice(-15) || 'N/A'}
-        </div>
-      </div>
+      <html>
+        <head>
+          <title>Advance Payment Receipt</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              margin: 0;
+              padding: 20px;
+              font-size: 12px;
+              line-height: 1.4;
+            }
+            .receipt-container {
+              max-width: 700px;
+              margin: 0 auto;
+              border: 1px solid #000;
+              padding: 0;
+            }
+            .header {
+              text-align: right;
+              padding: 10px 20px;
+              border-bottom: 1px solid #000;
+            }
+            .print-btn {
+              background: #007bff;
+              color: white;
+              border: none;
+              padding: 5px 15px;
+              cursor: pointer;
+              font-size: 12px;
+            }
+            .receipt-content {
+              padding: 20px;
+            }
+            .receipt-title {
+              font-size: 16px;
+              font-weight: bold;
+              margin-bottom: 20px;
+            }
+            .receipt-info {
+              margin-bottom: 30px;
+            }
+            .info-row {
+              display: flex;
+              margin-bottom: 8px;
+            }
+            .info-label {
+              width: 150px;
+              font-weight: normal;
+            }
+            .info-colon {
+              width: 20px;
+            }
+            .info-value {
+              flex: 1;
+              font-weight: bold;
+            }
+            .amount-section {
+              margin: 40px 0;
+              border-top: 1px solid #000;
+              border-bottom: 1px solid #000;
+              padding: 15px 0;
+            }
+            .username-section {
+              margin: 30px 0;
+            }
+            .signature-section {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 80px;
+              padding-top: 20px;
+              border-top: 1px solid #000;
+            }
+            .signature-box {
+              text-align: center;
+              width: 200px;
+            }
+            @media print {
+              .print-btn { display: none; }
+              body { margin: 0; padding: 10px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <div class="header">
+              <button class="print-btn" onclick="window.print()">Print</button>
+            </div>
+            
+            <div class="receipt-content">
+              <div class="receipt-info">
+                <div class="info-row">
+                  <span class="info-label">Receipt No</span>
+                  <span class="info-colon">:</span>
+                  <span class="info-value">${receiptNumber}</span>
+                </div>
+              </div>
+
+              <div class="receipt-info">
+                <div class="info-row">
+                  <span class="info-label">Received with thanks from</span>
+                  <span class="info-colon">:</span>
+                  <span class="info-value">${patientInfo.name || 'N/A'}(${patientInfo.registrationNo || 'N/A'})</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">The sum of</span>
+                  <span class="info-colon">:</span>
+                  <span class="info-value">${amountInWords(parseFloat(payment.advance_amount))}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">By</span>
+                  <span class="info-colon">:</span>
+                  <span class="info-value">${payment.payment_mode === 'CASH' ? 'Cash' : payment.payment_mode}${payment.reference_number ? ' - ' + payment.reference_number : ''}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Remarks</span>
+                  <span class="info-colon">:</span>
+                  <span class="info-value">${payment.remarks || `Being ${payment.is_refund ? 'refund' : 'advance payment'} received towards ${payment.is_refund ? 'refund' : 'medical treatment'} from ${patientInfo.name || 'patient'} against R. No.: ${receiptNumber}`}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Date</span>
+                  <span class="info-colon">:</span>
+                  <span class="info-value">${format(new Date(payment.payment_date), 'dd/MM/yyyy HH:mm:ss')}</span>
+                </div>
+              </div>
+
+              <div class="amount-section">
+                <div class="info-row">
+                  <span class="info-label">₹${payment.advance_amount}/-</span>
+                </div>
+                <div class="username-section">
+                  <div class="info-row">
+                    <span class="info-label">Username</span>
+                    <span class="info-colon">:</span>
+                    <span class="info-value">${payment.billing_executive || formData.billingExecutive || 'System User'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="signature-section">
+                <div class="signature-box">
+                  <div style="border-bottom: 1px solid #000; margin-bottom: 5px; height: 40px;"></div>
+                  <div>Name & Sign of Patient</div>
+                </div>
+                <div class="signature-box">
+                  <div style="border-bottom: 1px solid #000; margin-bottom: 5px; height: 40px;"></div>
+                  <div>Authorised Signatory</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
     `;
 
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(printContent);
       printWindow.document.close();
-      printWindow.print();
     }
   };
 
@@ -622,6 +807,28 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
                   {paymentModes.map((mode) => (
                     <SelectItem key={mode.value} value={mode.value}>
                       {mode.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Billing Executive */}
+            <div className="grid grid-cols-2 items-center gap-4">
+              <Label htmlFor="billingExecutive" className="text-sm font-medium">
+                Billing Executive
+              </Label>
+              <Select 
+                value={formData.billingExecutive} 
+                onValueChange={(value) => setFormData({ ...formData, billingExecutive: value })}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select Executive" />
+                </SelectTrigger>
+                <SelectContent>
+                  {billingExecutives.map((executive) => (
+                    <SelectItem key={executive} value={executive}>
+                      {executive}
                     </SelectItem>
                   ))}
                 </SelectContent>

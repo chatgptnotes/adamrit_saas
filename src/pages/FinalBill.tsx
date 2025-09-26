@@ -563,13 +563,19 @@ const FinalBill = () => {
     const fetchAnaesthetists = async () => {
       const { data, error } = await supabase
         .from('ayushman_anaesthetists')
-        .select('id, name');
+        .select('name, specialty');
 
       if (error) {
         console.error("Error fetching anaesthetists:", error);
         toast.error("Failed to fetch anaesthetists.");
       } else if (data) {
-        setAnaesthetists(data);
+        // Transform data to match expected format (using name as both id and name)
+        const transformedData = data.map(item => ({
+          id: item.name, // Use name as id since there's no id column
+          name: item.name,
+          specialty: item.specialty
+        }));
+        setAnaesthetists(transformedData);
       }
     };
 
@@ -1430,7 +1436,7 @@ const FinalBill = () => {
 
   // OT Notes state
   const [otNotesData, setOtNotesData] = useState({
-    date: '',
+    date: new Date().toISOString().slice(0, 16), // Default to current date/time in datetime-local format
     procedure: '',
     surgeon: '',
     anaesthetist: '',
@@ -1443,10 +1449,13 @@ const FinalBill = () => {
 
   // Function to fetch saved OT Notes from database
   const fetchSavedOtNotes = async () => {
-    if (!visitId) return;
+    if (!visitId) {
+      console.log('❌ No visitId provided for fetchSavedOtNotes');
+      return;
+    }
 
     try {
-      console.log('Fetching saved OT Notes for visit:', visitId);
+      console.log('🔍 Fetching saved OT Notes for visit:', visitId);
 
       // First get the visit UUID
       const { data: visitData, error: visitError } = await supabase
@@ -1491,16 +1500,16 @@ const FinalBill = () => {
           console.log('Formatted date for input:', formattedDate);
         }
 
-        // Update the form with saved data, but don't override procedure - let auto-populate handle it
-        setOtNotesData(prev => ({
+        // Update the form with saved data
+        setOtNotesData({
           date: formattedDate,
-          procedure: prev.procedure || otNotesRecord.procedure_performed || '', // Keep current procedure if exists
+          procedure: otNotesRecord.procedure_performed || '', // Use saved procedure data
           surgeon: otNotesRecord.surgeon || '',
           anaesthetist: otNotesRecord.anaesthetist || '',
           anaesthesia: otNotesRecord.anaesthesia || '',
           implant: otNotesRecord.implant || '',
           description: otNotesRecord.description || ''
-        }));
+        });
 
         console.log('OT Notes form populated with saved data');
       }
@@ -1550,10 +1559,10 @@ const FinalBill = () => {
     if (allSurgeries.length > 0) {
       const combinedProcedures = allSurgeries.join(', ');
       console.log('Setting combined procedures:', combinedProcedures);
-      // Always update procedure field with current surgery data, even if there's saved data
+      // Only update procedure field if it's currently empty (no saved data)
       setOtNotesData(prev => ({
         ...prev,
-        procedure: combinedProcedures
+        procedure: prev.procedure || combinedProcedures // Keep saved procedure if it exists
       }));
     } else {
       console.log('No surgeries found to populate');
@@ -3758,9 +3767,9 @@ INSTRUCTIONS:
 
   // Function to save OT Notes to new simplified ot_notes table
   const handleSaveOtNotes = async () => {
-    console.log("Starting OT Notes save...");
-    console.log("Current visitId:", visitId);
-    console.log("OT Notes Data:", otNotesData);
+    console.log("🚀 Starting OT Notes save...");
+    console.log("📋 Current visitId:", visitId);
+    console.log("📝 OT Notes Data:", otNotesData);
 
     if (!visitId) {
       toast.error("Visit ID not available. Please ensure you're on a valid visit page.");
@@ -6222,11 +6231,11 @@ INSTRUCTIONS:
     console.log('🔍 [MANDATORY SERVICES FETCH] Current savedMandatoryServicesData state:', savedMandatoryServicesData.length);
 
     try {
-      // Step 1: Get visit UUID first
-      console.log('🔍 [MANDATORY SERVICES FETCH] Step 1: Getting visit UUID...');
+      // Step 1: Get visit UUID and patient data first
+      console.log('🔍 [MANDATORY SERVICES FETCH] Step 1: Getting visit UUID and patient data...');
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id, visit_id')
+        .select('id, visit_id, patient_type, patients(category)')
         .eq('visit_id', visitId)
         .single();
 
@@ -6236,6 +6245,39 @@ INSTRUCTIONS:
       }
 
       console.log('🔍 [MANDATORY SERVICES FETCH] Visit found:', visitData);
+
+      // Determine patient category
+      let patientCategory = 'Private'; // Default
+      if (visitData) {
+        patientCategory = visitData.patient_type || 
+                         visitData.patients?.category || 
+                         'Private';
+      }
+      console.log('🔍 [MANDATORY SERVICES FETCH] Patient category determined:', patientCategory);
+      console.log('🔍 [MANDATORY SERVICES FETCH] Visit data details:', {
+        patient_type: visitData.patient_type,
+        patients_category: visitData.patients?.category,
+        full_visit_data: visitData
+      });
+
+      // Step 1.5: Quick test - get Registration Charges service rates for debugging
+      console.log('🔍 [MANDATORY SERVICES FETCH] Step 1.5: Testing Registration Charges rates...');
+      const { data: testService, error: testError } = await supabase
+        .from('mandatory_services')
+        .select('service_name, private_rate, tpa_rate, nabh_rate, non_nabh_rate')
+        .eq('service_name', 'Registration Charges')
+        .single();
+      
+      console.log('🔍 [MANDATORY SERVICES FETCH] Registration Charges test:', {
+        testService,
+        testError,
+        rates: testService ? {
+          private: testService.private_rate,
+          tpa: testService.tpa_rate,
+          nabh: testService.nabh_rate,
+          non_nabh: testService.non_nabh_rate
+        } : 'No service found'
+      });
 
       // Step 2: Get mandatory services from junction table (hybrid approach)
       console.log('🔍 [MANDATORY SERVICES FETCH] Step 2: Fetching from junction table...');
@@ -6279,6 +6321,72 @@ INSTRUCTIONS:
 
       if (mandatoryServicesData && mandatoryServicesData.length > 0) {
         processedMandatoryServicesData = mandatoryServicesData.map(item => {
+          console.log('🔍 [MANDATORY SERVICES FETCH] Processing item:', {
+            junction_data: {
+              rate_used: item.rate_used,
+              amount: item.amount,
+              rate_type: item.rate_type
+            },
+            service_rates: {
+              private_rate: item.mandatory_services?.private_rate,
+              tpa_rate: item.mandatory_services?.tpa_rate,
+              nabh_rate: item.mandatory_services?.nabh_rate,
+              non_nabh_rate: item.mandatory_services?.non_nabh_rate
+            },
+            patientCategory
+          });
+
+          // Enhanced amount calculation with service rate fallbacks
+          let calculatedAmount = 0;
+          let rateType = item.rate_type || 'standard';
+
+          // First, try to use junction table data
+          if (item.rate_used && item.rate_used > 0) {
+            calculatedAmount = item.rate_used;
+            console.log('💰 [AMOUNT CALC] Using rate_used from junction table:', calculatedAmount);
+          } else if (item.amount && item.amount > 0) {
+            calculatedAmount = item.amount;
+            console.log('💰 [AMOUNT CALC] Using amount from junction table:', calculatedAmount);
+          } else {
+            // Fallback: Calculate from service rates based on patient category
+            console.log('💰 [AMOUNT CALC] Junction table data empty, calculating from service rates...');
+            
+            const serviceRates = item.mandatory_services;
+            if (serviceRates) {
+              // Match patient category to appropriate rate
+              switch (patientCategory?.toLowerCase()) {
+                case 'private':
+                  calculatedAmount = serviceRates.private_rate || 0;
+                  rateType = 'private';
+                  break;
+                case 'tpa':
+                case 'insurance':
+                  calculatedAmount = serviceRates.tpa_rate || 0;
+                  rateType = 'tpa';
+                  break;
+                case 'nabh':
+                  calculatedAmount = serviceRates.nabh_rate || 0;
+                  rateType = 'nabh';
+                  break;
+                case 'non_nabh':
+                case 'non-nabh':
+                  calculatedAmount = serviceRates.non_nabh_rate || 0;
+                  rateType = 'non_nabh';
+                  break;
+                default:
+                  // Default to private rate for unknown patient categories
+                  calculatedAmount = serviceRates.private_rate || serviceRates.tpa_rate || 0;
+                  rateType = 'private';
+                  break;
+              }
+              console.log('💰 [AMOUNT CALC] Calculated from service rates:', {
+                patientCategory,
+                selectedRate: calculatedAmount,
+                rateType
+              });
+            }
+          }
+
           const serviceData = {
             id: item.mandatory_services?.id,
             service_name: item.mandatory_services?.service_name,
@@ -6294,11 +6402,18 @@ INSTRUCTIONS:
             external_requisition: item.external_requisition,
             selected_at: item.selected_at,
             junction_id: item.id,
-            // For compatibility with existing UI
-            selectedRate: item.rate_used,
-            rateType: item.rate_type
+            // For compatibility with existing UI - FIXED CALCULATION
+            selectedRate: calculatedAmount,
+            rateType: rateType,
+            patientCategory: patientCategory // Properly set patient category
           };
-          console.log('📋 [MANDATORY SERVICES FETCH] Processed service:', serviceData);
+          console.log('📋 [MANDATORY SERVICES FETCH] Final processed service:', serviceData);
+          console.log('📋 [MANDATORY SERVICES FETCH] Service for UI display:', {
+            service_name: serviceData.service_name,
+            selectedRate: serviceData.selectedRate,
+            patientCategory: serviceData.patientCategory,
+            rateType: serviceData.rateType
+          });
           return serviceData;
         });
         console.log('✅ [MANDATORY SERVICES FETCH] Mandatory services found via junction table:', processedMandatoryServicesData.length);
@@ -6317,6 +6432,9 @@ INSTRUCTIONS:
       setMandatoryServicesInitialized(true);
 
       console.log('✅ [MANDATORY SERVICES FETCH] State updated successfully');
+      
+      // Force trigger manual debugging
+      console.log('🚨 [DEBUG TRIGGER] Manual debug refresh completed. Check console above for data flow.');
 
       // Verify state will be updated in next render
       setTimeout(() => {
@@ -14788,6 +14906,15 @@ Dr. Murali B K
                             >
                               Refresh Labs
                             </button>
+                            <button
+                              onClick={() => {
+                                console.log('🐛 [DEBUG MANUAL] Manual mandatory services debug triggered');
+                                fetchSavedMandatoryServicesData().catch(console.error);
+                              }}
+                              className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                            >
+                              Debug Mandatory
+                            </button>
                           </div>
                         </div>
                         <div className="text-xs text-yellow-700 mt-1">
@@ -15260,34 +15387,46 @@ Dr. Murali B K
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {savedMandatoryServicesData.map((service, index) => (
-                                      <tr key={index} className="hover:bg-gray-50">
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
-                                          {service.service_name}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                          {service.patientCategory}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
-                                          {service.rateType?.toUpperCase()}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
-                                          ₹{service.selectedRate || service.amount}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                          {service.selected_at ? new Date(service.selected_at).toLocaleDateString() : 'N/A'}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-center">
-                                          <button
-                                            onClick={() => handleDeleteMandatoryService(service.id)}
-                                            className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
-                                            title="Delete mandatory service"
-                                          >
-                                            🗑️
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))}
+                                    {savedMandatoryServicesData.map((service, index) => {
+                                      // Debug logging for each service
+                                      console.log(`🔍 [SERVICE DISPLAY] Row ${index}:`, {
+                                        service_name: service.service_name,
+                                        patientCategory: service.patientCategory,
+                                        rateType: service.rateType,
+                                        selectedRate: service.selectedRate,
+                                        amount: service.amount,
+                                        selected_at: service.selected_at
+                                      });
+                                      
+                                      return (
+                                        <tr key={index} className="hover:bg-gray-50">
+                                          <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
+                                            {service.service_name || 'Unknown Service'}
+                                          </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                            {service.patientCategory || 'Unknown'}
+                                          </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
+                                            {service.rateType?.toUpperCase() || 'STANDARD'}
+                                          </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
+                                            ₹{service.selectedRate || service.amount || 0}
+                                          </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                            {service.selected_at ? new Date(service.selected_at).toLocaleDateString() : 'N/A'}
+                                          </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-sm text-center">
+                                            <button
+                                              onClick={() => handleDeleteMandatoryService(service.id)}
+                                              className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
+                                              title="Delete mandatory service"
+                                            >
+                                              🗑️
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
