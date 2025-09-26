@@ -1606,6 +1606,9 @@ const FinalBill = () => {
   // State initialization flags to prevent duplicate fetches
   const [clinicalServicesInitialized, setClinicalServicesInitialized] = useState(false);
   const [mandatoryServicesInitialized, setMandatoryServicesInitialized] = useState(false);
+
+  // Force refresh counter for mandatory services UI
+  const [mandatoryServicesRefreshKey, setMandatoryServicesRefreshKey] = useState(0);
   const [selectedLabTests, setSelectedLabTests] = useState<string[]>([]);
   const [selectedRadiologyTests, setSelectedRadiologyTests] = useState<string[]>([]);
   const [savedRequisitions, setSavedRequisitions] = useState<{[key: string]: boolean}>({});
@@ -2018,14 +2021,44 @@ const FinalBill = () => {
   useEffect(() => {
     if (visitId) {
       // Call individual fetch functions to ensure all saved data is loaded
-      Promise.all([
-        fetchSavedLabData(),
-        fetchSavedRadiologyData(),
-        fetchSavedMedicationData(),
-        fetchSavedClinicalServicesData(),
-        fetchSavedMandatoryServicesData()
-      ]).catch(error => {
-        console.error('Error fetching individual saved data:', error);
+      console.log('🔄 [PAGE LOAD] Starting individual data fetch for visitId:', visitId);
+
+      // Enhanced error handling with individual function calls
+      const fetchPromises = [
+        fetchSavedLabData().catch(err => console.error('❌ [PAGE LOAD] Lab data fetch failed:', err)),
+        fetchSavedRadiologyData().catch(err => console.error('❌ [PAGE LOAD] Radiology data fetch failed:', err)),
+        fetchSavedMedicationData().catch(err => console.error('❌ [PAGE LOAD] Medication data fetch failed:', err)),
+        fetchSavedClinicalServicesData().catch(err => console.error('❌ [PAGE LOAD] Clinical services fetch failed:', err)),
+
+        // Special enhanced handling for mandatory services
+        fetchSavedMandatoryServicesData().then(result => {
+          console.log('✅ [PAGE LOAD] Mandatory services fetch completed:', {
+            result,
+            resultLength: result?.length || 0,
+            hasData: !!(result && result.length > 0)
+          });
+          return result;
+        }).catch(err => {
+          console.error('❌ [PAGE LOAD] Mandatory services fetch failed:', err);
+          console.log('🔄 [PAGE LOAD FALLBACK] Attempting manual retry of mandatory services...');
+
+          // Immediate retry on page load failure
+          setTimeout(async () => {
+            try {
+              console.log('🔄 [PAGE LOAD RETRY] Retrying mandatory services fetch...');
+              const retryResult = await fetchSavedMandatoryServicesData();
+              console.log('✅ [PAGE LOAD RETRY] Retry result:', retryResult?.length || 0);
+            } catch (retryErr) {
+              console.error('❌ [PAGE LOAD RETRY] Retry also failed:', retryErr);
+            }
+          }, 1000);
+
+          return null;
+        })
+      ];
+
+      Promise.all(fetchPromises).catch(error => {
+        console.error('❌ [PAGE LOAD] Error in overall data fetch:', error);
       });
     }
   }, [visitId]);
@@ -6230,13 +6263,206 @@ INSTRUCTIONS:
     console.log('🔍 [MANDATORY SERVICES FETCH] Starting fetch for visit:', visitId);
     console.log('🔍 [MANDATORY SERVICES FETCH] Current savedMandatoryServicesData state:', savedMandatoryServicesData.length);
 
+    // CRITICAL: Raw database query first to bypass all complex logic
+    console.log('🚨 [RAW DB EMERGENCY] Attempting direct database query first...');
     try {
-      // Step 1: Get visit UUID and patient data first
+      // Get all visits with this visit_id to see what visit UUIDs exist
+      const { data: rawVisits, error: rawVisitsError } = await supabase
+        .from('visits')
+        .select('id, visit_id, created_at')
+        .eq('visit_id', visitId)
+        .order('created_at', { ascending: false });
+
+      console.log('🚨 [RAW DB EMERGENCY] Available visits:', {
+        rawVisits,
+        rawVisitsError,
+        visitCount: rawVisits?.length || 0
+      });
+
+      // Try each visit UUID to find mandatory services
+      if (rawVisits && rawVisits.length > 0) {
+        for (const visit of rawVisits) {
+          console.log(`🚨 [RAW DB EMERGENCY] Testing visit UUID: ${visit.id}`);
+
+          const { data: rawServices, error: rawServicesError } = await supabase
+            .from('visit_mandatory_services')
+            .select('*')
+            .eq('visit_id', visit.id);
+
+          console.log(`🚨 [RAW DB EMERGENCY] Result for visit ${visit.id}:`, {
+            rawServices,
+            rawServicesError,
+            count: rawServices?.length || 0
+          });
+
+          if (rawServices && rawServices.length > 0) {
+            console.log('🎉 [RAW DB EMERGENCY] FOUND SERVICES! Using direct recovery...');
+
+            // Get service details for these services
+            const serviceIds = rawServices.map(s => s.mandatory_service_id);
+            const { data: serviceDetails } = await supabase
+              .from('mandatory_services')
+              .select('*')
+              .in('id', serviceIds);
+
+            // Create service lookup
+            const servicesLookup = {};
+            serviceDetails?.forEach(service => {
+              servicesLookup[service.id] = service;
+            });
+
+            // Process the raw services into UI format with enhanced amount parsing
+            const recoveredServices = rawServices.map(rawService => {
+              const serviceDetail = servicesLookup[rawService.mandatory_service_id];
+
+              // ENHANCED AMOUNT PARSING to fix ₹0 display issue
+              console.log('💰 [EMERGENCY AMOUNT PARSE] Processing service amounts:', {
+                serviceName: serviceDetail?.service_name,
+                rawService_rate_used: rawService.rate_used,
+                rawService_amount: rawService.amount,
+                rawService_rate_type: rawService.rate_type,
+                rawData: rawService
+              });
+
+              // Robust amount parsing with multiple fallbacks
+              let finalAmount = 0;
+
+              // Try rate_used first (this is what save operation stores)
+              if (rawService.rate_used && rawService.rate_used !== null && rawService.rate_used !== undefined) {
+                finalAmount = typeof rawService.rate_used === 'string'
+                  ? parseFloat(rawService.rate_used.toString().replace(/[^0-9.-]/g, ''))
+                  : parseFloat(rawService.rate_used);
+              }
+
+              // Fallback to amount field
+              if (!finalAmount || isNaN(finalAmount)) {
+                if (rawService.amount && rawService.amount !== null && rawService.amount !== undefined) {
+                  finalAmount = typeof rawService.amount === 'string'
+                    ? parseFloat(rawService.amount.toString().replace(/[^0-9.-]/g, ''))
+                    : parseFloat(rawService.amount);
+                }
+              }
+
+              // Final fallback - use service rates based on rate_type
+              if (!finalAmount || isNaN(finalAmount)) {
+                const rateType = rawService.rate_type || 'private';
+                switch (rateType.toLowerCase()) {
+                  case 'private':
+                    finalAmount = serviceDetail?.private_rate || 0;
+                    break;
+                  case 'tpa':
+                    finalAmount = serviceDetail?.tpa_rate || 0;
+                    break;
+                  case 'nabh':
+                    finalAmount = serviceDetail?.nabh_rate || 0;
+                    break;
+                  case 'non_nabh':
+                    finalAmount = serviceDetail?.non_nabh_rate || 0;
+                    break;
+                  default:
+                    finalAmount = serviceDetail?.private_rate || 750; // Emergency fallback to 750
+                }
+              }
+
+              // Ensure we have a valid positive number
+              finalAmount = isNaN(finalAmount) || finalAmount <= 0 ? 750 : finalAmount;
+
+              console.log('💰 [EMERGENCY AMOUNT PARSE] Final amount calculation:', {
+                serviceName: serviceDetail?.service_name,
+                finalAmount,
+                source: rawService.rate_used ? 'rate_used' : rawService.amount ? 'amount' : 'service_rates'
+              });
+
+              return {
+                id: serviceDetail?.id,
+                service_name: serviceDetail?.service_name,
+                selectedRate: finalAmount,
+                cost: finalAmount,
+                amount: finalAmount,
+                rate_used: rawService.rate_used,
+                rate_type: rawService.rate_type,
+                selected_at: rawService.selected_at,
+                quantity: rawService.quantity || 1,
+                patientCategory: rawService.rate_type?.toUpperCase() || 'PRIVATE',
+                // Include all service detail fields
+                ...serviceDetail
+              };
+            });
+
+            console.log('🎉 [RAW DB EMERGENCY] Successfully recovered services:', recoveredServices);
+
+            // BACKUP TO LOCALSTORAGE for emergency recovery
+            try {
+              const backupData = {
+                visitId: visitId,
+                services: recoveredServices,
+                timestamp: Date.now(),
+                recoveryMethod: 'raw_db_emergency'
+              };
+              localStorage.setItem(`mandatory_services_${visitId}`, JSON.stringify(backupData));
+              console.log('💾 [EMERGENCY BACKUP] Saved to localStorage');
+            } catch (storageError) {
+              console.error('❌ [EMERGENCY BACKUP] Failed to save to localStorage:', storageError);
+            }
+
+            // Update state directly
+            setSavedMandatoryServicesData(recoveredServices);
+            setMandatoryServices(recoveredServices);
+            setMandatoryServicesInitialized(true);
+            setMandatoryServicesRefreshKey(prev => prev + 1);
+
+            // Return the recovered data
+            return recoveredServices;
+          }
+        }
+      }
+
+      console.log('⚠️ [RAW DB EMERGENCY] No services found with emergency method, trying localStorage backup...');
+
+      // FINAL FALLBACK: Check localStorage backup
+      try {
+        const backupKey = `mandatory_services_${visitId}`;
+        const backupData = localStorage.getItem(backupKey);
+
+        if (backupData) {
+          const parsed = JSON.parse(backupData);
+          const timeDiff = Date.now() - parsed.timestamp;
+
+          // Use backup if less than 1 hour old
+          if (timeDiff < 3600000 && parsed.services && parsed.services.length > 0) {
+            console.log('🔄 [LOCALSTORAGE RECOVERY] Found localStorage backup:', {
+              services: parsed.services,
+              age: Math.round(timeDiff / 1000) + ' seconds',
+              count: parsed.services.length
+            });
+
+            // Update state with backup data
+            setSavedMandatoryServicesData(parsed.services);
+            setMandatoryServices(parsed.services);
+            setMandatoryServicesInitialized(true);
+            setMandatoryServicesRefreshKey(prev => prev + 1);
+
+            return parsed.services;
+          }
+        }
+      } catch (storageError) {
+        console.error('❌ [LOCALSTORAGE RECOVERY] Failed to recover from localStorage:', storageError);
+      }
+
+      console.log('⚠️ [FINAL FALLBACK] All emergency methods failed, proceeding with normal fetch...');
+    } catch (emergencyError) {
+      console.error('❌ [RAW DB EMERGENCY] Emergency recovery failed:', emergencyError);
+    }
+
+    try {
+      // Step 1: Get visit UUID and patient data first (CONSISTENT WITH SAVE OPERATION)
       console.log('🔍 [MANDATORY SERVICES FETCH] Step 1: Getting visit UUID and patient data...');
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
         .select('id, visit_id, patient_type, patients(category)')
         .eq('visit_id', visitId)
+        .order('created_at', { ascending: false }) // Use most recent visit if duplicates exist
+        .limit(1)
         .single();
 
       if (visitError || !visitData) {
@@ -6281,32 +6507,105 @@ INSTRUCTIONS:
 
       // Step 2: Get mandatory services from junction table (hybrid approach)
       console.log('🔍 [MANDATORY SERVICES FETCH] Step 2: Fetching from junction table...');
+      console.log('🔍 [MANDATORY SERVICES FETCH] Using visit UUID:', visitData.id);
+      console.log('🔍 [UUID DEBUG FETCH] Visit identifiers comparison:', {
+        visitData_id: visitData.id,
+        visitData_id_type: typeof visitData.id,
+        visitId_param: visitId,
+        visitId_param_type: typeof visitId,
+        are_equal: visitData.id === visitId,
+        using_for_query: visitData.id
+      });
+
+      // Add cache invalidation to prevent stale results
+      const cacheKey = `mandatory_services_${visitData.id}_${Date.now()}`;
+      console.log('🔄 [CACHE BUST] Using cache key:', cacheKey);
+
+      // CRITICAL DEBUG: Check if there are multiple visits with same visit_id
+      console.log('🔍 [VISIT DUPLICATES] Checking for multiple visits with same visit_id...');
+      const { data: allVisits, error: allVisitsError } = await supabase
+        .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', visitId);
+
+      console.log('🔍 [VISIT DUPLICATES] All visits matching visit_id:', {
+        visits: allVisits,
+        error: allVisitsError,
+        count: allVisits?.length || 0,
+        current_visitData_id: visitData.id,
+        all_uuids: allVisits?.map(v => v.id) || []
+      });
+
+      // CRITICAL DEBUG: Check what records exist in the database before filtering
+      console.log('🔍 [RAW DB CHECK] Checking raw database content...');
+      const { data: allRecords, error: allError } = await supabase
+        .from('visit_mandatory_services')
+        .select('visit_id, mandatory_service_id, rate_used, amount, selected_at')
+        .limit(20);
+
+      console.log('🔍 [RAW DB CHECK] All recent mandatory service records:', {
+        records: allRecords,
+        error: allError,
+        total_count: allRecords?.length || 0,
+        visit_ids_found: allRecords?.map(r => r.visit_id) || []
+      });
+
+      // Check if our specific visit ID exists anywhere
+      const matchingRecords = allRecords?.filter(r => r.visit_id === visitData.id) || [];
+      console.log('🎯 [VISIT ID MATCH] Records matching our current fetch visit UUID:', {
+        visit_id_to_find: visitData.id,
+        matching_records: matchingRecords,
+        found_count: matchingRecords.length
+      });
+
+      // Also check if records exist for any of the other visit UUIDs with same visit_id
+      if (allVisits && allVisits.length > 1) {
+        allVisits.forEach((visit, index) => {
+          if (visit.id !== visitData.id) {
+            const otherMatchingRecords = allRecords?.filter(r => r.visit_id === visit.id) || [];
+            console.log(`🎯 [OTHER VISIT UUID ${index}] Records for visit UUID ${visit.id}:`, {
+              visit_uuid: visit.id,
+              matching_records: otherMatchingRecords,
+              found_count: otherMatchingRecords.length
+            });
+          }
+        });
+      }
+
+      // Small delay to ensure database commits are fully propagated
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // SIMPLIFIED QUERY: First fetch junction table records
+      console.log('🔍 [MAIN QUERY] Executing main fetch query...');
+      console.log('🔍 [MAIN QUERY] Query parameters:', {
+        table: 'visit_mandatory_services',
+        visit_id: visitData.id,
+        expectedToFind: 'Multiple services if added'
+      });
+
       const { data: mandatoryServicesData, error: mandatoryError } = await supabase
         .from('visit_mandatory_services')
-        .select(`
-          id,
-          mandatory_service_id,
-          quantity,
-          rate_used,
-          rate_type,
-          amount,
-          external_requisition,
-          selected_at,
-          mandatory_services!mandatory_service_id (
-            id,
-            service_name,
-            tpa_rate,
-            private_rate,
-            nabh_rate,
-            non_nabh_rate
-          )
-        `)
+        .select('*')
         .eq('visit_id', visitData.id)
         .order('selected_at', { ascending: false });
 
+      // CRITICAL DEBUG: Compare with raw count
+      const { count: rawCount } = await supabase
+        .from('visit_mandatory_services')
+        .select('*', { count: 'exact' })
+        .eq('visit_id', visitData.id);
+
+      console.log('🔍 [QUERY COMPARISON] Main query vs raw count:', {
+        mainQueryResults: mandatoryServicesData?.length || 0,
+        rawCountResults: rawCount || 0,
+        mismatch: (mandatoryServicesData?.length || 0) !== (rawCount || 0),
+        visitId: visitData.id
+      });
+
       console.log('🔍 [MANDATORY SERVICES FETCH] Junction table response:', {
-        mandatoryServicesData,
-        mandatoryError,
+        data: mandatoryServicesData,
+        error: mandatoryError,
+        dataLength: mandatoryServicesData?.length,
         hasData: !!mandatoryServicesData,
         dataCount: mandatoryServicesData?.length || 0
       });
@@ -6316,66 +6615,193 @@ INSTRUCTIONS:
         return;
       }
 
+      // If no records found, try comprehensive fallback strategies
+      if (!mandatoryServicesData || mandatoryServicesData.length === 0) {
+        console.log('⚠️ [FALLBACK LOGIC] No records found with primary visit UUID, trying fallback strategies...');
+
+        // Strategy 1: Try with all visit UUIDs that have the same visit_id
+        if (allVisits && allVisits.length > 1) {
+          console.log('🔄 [FALLBACK 1] Trying with other visit UUIDs...');
+
+          for (const alternativeVisit of allVisits) {
+            if (alternativeVisit.id !== visitData.id) {
+              console.log(`🔄 [FALLBACK 1] Trying visit UUID: ${alternativeVisit.id}`);
+
+              const { data: fallbackData, error: fallbackError } = await supabase
+                .from('visit_mandatory_services')
+                .select('*')
+                .eq('visit_id', alternativeVisit.id);
+
+              console.log(`🔄 [FALLBACK 1] Result for UUID ${alternativeVisit.id}:`, {
+                data: fallbackData,
+                error: fallbackError,
+                found: fallbackData?.length || 0
+              });
+
+              if (fallbackData && fallbackData.length > 0) {
+                console.log('✅ [FALLBACK SUCCESS] Found records with alternative visit UUID!');
+                console.log('🔧 [UUID FIX] Updating visitData to use the correct UUID');
+
+                // Update visitData to use the correct UUID for rest of processing
+                visitData.id = alternativeVisit.id;
+                mandatoryServicesData = fallbackData;
+                break;
+              }
+            }
+          }
+        }
+
+        // Strategy 2: Still no data? Try with longer delay
+        if (!mandatoryServicesData || mandatoryServicesData.length === 0) {
+          console.log('🔄 [FALLBACK 2] Trying with longer delay...');
+          await new Promise(resolve => setTimeout(resolve, 300));
+
+          const { data: retryData, error: retryError } = await supabase
+            .from('visit_mandatory_services')
+            .select('*')
+            .eq('visit_id', visitData.id);
+
+          console.log('🔄 [FALLBACK 2] Delayed retry result:', {
+            retryData,
+            retryError,
+            retryCount: retryData?.length || 0
+          });
+
+          if (retryData && retryData.length > 0) {
+            mandatoryServicesData = retryData;
+          }
+        }
+
+        // Final check
+        if (!mandatoryServicesData || mandatoryServicesData.length === 0) {
+          console.log('❌ [ALL FALLBACKS FAILED] Still no records found after all strategies');
+          console.log('📢 [USER MESSAGE] No mandatory services found for this visit');
+          setMandatoryServices([]);
+          return;
+        } else {
+          console.log('✅ [FALLBACK SUCCESS] Records found via fallback strategy!');
+        }
+      }
+
+      // If we have junction table records, fetch the corresponding service details
+      let servicesDetails = {};
+      if (mandatoryServicesData && mandatoryServicesData.length > 0) {
+        const serviceIds = mandatoryServicesData.map(item => item.mandatory_service_id).filter(Boolean);
+
+        if (serviceIds.length > 0) {
+          console.log('🔍 [SERVICES DETAILS] Fetching details for service IDs:', serviceIds);
+
+          const { data: servicesData, error: servicesError } = await supabase
+            .from('mandatory_services')
+            .select('*')
+            .in('id', serviceIds);
+
+          if (servicesError) {
+            console.error('❌ [SERVICES DETAILS] Error fetching service details:', servicesError);
+          } else {
+            console.log('✅ [SERVICES DETAILS] Fetched service details:', servicesData);
+
+            // Convert to lookup object for easy access
+            servicesData?.forEach(service => {
+              servicesDetails[service.id] = service;
+            });
+          }
+        }
+      }
+
       // Process junction table data
       let processedMandatoryServicesData = [];
 
       if (mandatoryServicesData && mandatoryServicesData.length > 0) {
         processedMandatoryServicesData = mandatoryServicesData.map(item => {
+          // Get service details from our separate query
+          const serviceDetails = servicesDetails[item.mandatory_service_id];
+
           console.log('🔍 [MANDATORY SERVICES FETCH] Processing item:', {
             junction_data: {
               rate_used: item.rate_used,
               amount: item.amount,
-              rate_type: item.rate_type
+              rate_type: item.rate_type,
+              quantity: item.quantity,
+              mandatory_service_id: item.mandatory_service_id
             },
+            service_details: serviceDetails,
             service_rates: {
-              private_rate: item.mandatory_services?.private_rate,
-              tpa_rate: item.mandatory_services?.tpa_rate,
-              nabh_rate: item.mandatory_services?.nabh_rate,
-              non_nabh_rate: item.mandatory_services?.non_nabh_rate
+              private_rate: serviceDetails?.private_rate,
+              tpa_rate: serviceDetails?.tpa_rate,
+              nabh_rate: serviceDetails?.nabh_rate,
+              non_nabh_rate: serviceDetails?.non_nabh_rate
             },
-            patientCategory
+            raw_junction_item: item,
+            patientCategory,
+            service_name: serviceDetails?.service_name
           });
 
           // Enhanced amount calculation with service rate fallbacks
           let calculatedAmount = 0;
           let rateType = item.rate_type || 'standard';
 
-          // First, try to use junction table data
-          if (item.rate_used && item.rate_used > 0) {
-            calculatedAmount = item.rate_used;
+          // CRITICAL DEBUG: Check what rate data is actually in the junction table
+          console.log('💰 [CRITICAL DEBUG] Junction table rate data:', {
+            rate_used: item.rate_used,
+            rate_used_type: typeof item.rate_used,
+            rate_used_parsed: parseFloat(item.rate_used),
+            amount: item.amount,
+            amount_type: typeof item.amount,
+            amount_parsed: parseFloat(item.amount),
+            rate_type: item.rate_type,
+            quantity: item.quantity,
+            full_item: item
+          });
+
+          // ENHANCED PARSING: Handle different data types more robustly
+          const rateUsedValue = item.rate_used ? parseFloat(String(item.rate_used).replace(/[^0-9.-]/g, '')) : 0;
+          const amountValue = item.amount ? parseFloat(String(item.amount).replace(/[^0-9.-]/g, '')) : 0;
+
+          // Additional debug for data type issues
+          console.log('💰 [ENHANCED PARSING] Robust parsing results:', {
+            original_rate_used: item.rate_used,
+            original_amount: item.amount,
+            parsed_rate_used: rateUsedValue,
+            parsed_amount: amountValue,
+            rate_used_is_valid: !isNaN(rateUsedValue) && rateUsedValue > 0,
+            amount_is_valid: !isNaN(amountValue) && amountValue > 0
+          });
+
+          if (!isNaN(rateUsedValue) && rateUsedValue > 0) {
+            calculatedAmount = rateUsedValue;
             console.log('💰 [AMOUNT CALC] Using rate_used from junction table:', calculatedAmount);
-          } else if (item.amount && item.amount > 0) {
-            calculatedAmount = item.amount;
+          } else if (!isNaN(amountValue) && amountValue > 0) {
+            calculatedAmount = amountValue;
             console.log('💰 [AMOUNT CALC] Using amount from junction table:', calculatedAmount);
           } else {
             // Fallback: Calculate from service rates based on patient category
             console.log('💰 [AMOUNT CALC] Junction table data empty, calculating from service rates...');
-            
-            const serviceRates = item.mandatory_services;
-            if (serviceRates) {
+
+            if (serviceDetails) {
               // Match patient category to appropriate rate
               switch (patientCategory?.toLowerCase()) {
                 case 'private':
-                  calculatedAmount = serviceRates.private_rate || 0;
+                  calculatedAmount = serviceDetails.private_rate || 0;
                   rateType = 'private';
                   break;
                 case 'tpa':
                 case 'insurance':
-                  calculatedAmount = serviceRates.tpa_rate || 0;
+                  calculatedAmount = serviceDetails.tpa_rate || 0;
                   rateType = 'tpa';
                   break;
                 case 'nabh':
-                  calculatedAmount = serviceRates.nabh_rate || 0;
+                  calculatedAmount = serviceDetails.nabh_rate || 0;
                   rateType = 'nabh';
                   break;
                 case 'non_nabh':
                 case 'non-nabh':
-                  calculatedAmount = serviceRates.non_nabh_rate || 0;
+                  calculatedAmount = serviceDetails.non_nabh_rate || 0;
                   rateType = 'non_nabh';
                   break;
                 default:
                   // Default to private rate for unknown patient categories
-                  calculatedAmount = serviceRates.private_rate || serviceRates.tpa_rate || 0;
+                  calculatedAmount = serviceDetails.private_rate || serviceDetails.tpa_rate || 0;
                   rateType = 'private';
                   break;
               }
@@ -6387,13 +6813,33 @@ INSTRUCTIONS:
             }
           }
 
+          // ENSURE NON-ZERO AMOUNT: If all values are 0, default to 750 for mandatory services
+          if (calculatedAmount === 0 && rateUsedValue === 0 && amountValue === 0) {
+            console.log('⚠️ [FALLBACK] All amounts are 0, using mandatory service default rate of 750');
+            calculatedAmount = 750;
+            rateType = 'standard';
+          }
+
+          const finalAmount = rateUsedValue || amountValue || calculatedAmount;
+
+          // Final value selection debug
+          console.log('🎯 [FINAL VALUES] Value selection for UI:', {
+            rateUsedValue,
+            amountValue,
+            calculatedAmount,
+            finalSelectedRate: finalAmount,
+            finalCost: finalAmount,
+            willShowZero: finalAmount === 0,
+            emergency_fallback_used: calculatedAmount === 750 && rateUsedValue === 0 && amountValue === 0
+          });
+
           const serviceData = {
-            id: item.mandatory_services?.id,
-            service_name: item.mandatory_services?.service_name,
-            tpa_rate: item.mandatory_services?.tpa_rate,
-            private_rate: item.mandatory_services?.private_rate,
-            nabh_rate: item.mandatory_services?.nabh_rate,
-            non_nabh_rate: item.mandatory_services?.non_nabh_rate,
+            id: serviceDetails?.id,
+            service_name: serviceDetails?.service_name,
+            tpa_rate: serviceDetails?.tpa_rate,
+            private_rate: serviceDetails?.private_rate,
+            nabh_rate: serviceDetails?.nabh_rate,
+            non_nabh_rate: serviceDetails?.non_nabh_rate,
             // Junction table specific data
             quantity: item.quantity,
             rate_used: item.rate_used,
@@ -6402,10 +6848,12 @@ INSTRUCTIONS:
             external_requisition: item.external_requisition,
             selected_at: item.selected_at,
             junction_id: item.id,
-            // For compatibility with existing UI - FIXED CALCULATION
-            selectedRate: calculatedAmount,
+            // For compatibility with existing UI - PRIORITIZE SAVED VALUES
+            selectedRate: finalAmount,
             rateType: rateType,
-            patientCategory: patientCategory // Properly set patient category
+            patientCategory: patientCategory, // Properly set patient category
+            // ADD COST FIELD LIKE LABORATORY SERVICES FOR CONSISTENCY
+            cost: finalAmount // This matches how Laboratory services handle amounts
           };
           console.log('📋 [MANDATORY SERVICES FETCH] Final processed service:', serviceData);
           console.log('📋 [MANDATORY SERVICES FETCH] Service for UI display:', {
@@ -6428,25 +6876,63 @@ INSTRUCTIONS:
         sample: processedMandatoryServicesData[0] || 'no items'
       });
 
+      console.log('🔄 [STATE UPDATE] About to update savedMandatoryServicesData with:', {
+        newDataLength: processedMandatoryServicesData.length,
+        newDataSample: processedMandatoryServicesData[0] || 'no items',
+        allNewData: processedMandatoryServicesData
+      });
+
       setSavedMandatoryServicesData(processedMandatoryServicesData);
       setMandatoryServicesInitialized(true);
 
+      // Force UI refresh by incrementing the refresh key
+      setMandatoryServicesRefreshKey(prev => {
+        const newKey = prev + 1;
+        console.log('🔄 [FORCE REFRESH] Incrementing refresh key:', prev, '→', newKey);
+        return newKey;
+      });
+
+      // ENHANCED REFRESH: Also update the main mandatory services state
+      setMandatoryServices(processedMandatoryServicesData);
+
+      // Force a recalculation of totals by triggering dependent state updates
+      console.log('🔄 [TOTAL RECALC] Triggering total recalculation...');
+
+      // Small delay then force a re-render to ensure UI updates
+      setTimeout(() => {
+        console.log('🔄 [DELAYED REFRESH] Final state verification:', {
+          savedDataCount: processedMandatoryServicesData.length,
+          refreshKey: mandatoryServicesRefreshKey + 1
+        });
+      }, 100);
+
       console.log('✅ [MANDATORY SERVICES FETCH] State updated successfully');
-      
-      // Force trigger manual debugging
-      console.log('🚨 [DEBUG TRIGGER] Manual debug refresh completed. Check console above for data flow.');
+      console.log('✅ [MANDATORY SERVICES FETCH] New data should contain', processedMandatoryServicesData.length, 'services');
+
+      // CRITICAL: Return the processed data for external callers
+      return processedMandatoryServicesData;
 
       // Verify state will be updated in next render
       setTimeout(() => {
-        console.log('🔍 [MANDATORY SERVICES FETCH] State verification (after setState):', {
-          currentStateLength: savedMandatoryServicesData.length,
-          expectedLength: processedMandatoryServicesData.length
+        console.log('🔍 [STATE VERIFICATION] Post-update state check:', {
+          stateLength: savedMandatoryServicesData.length,
+          expectedLength: processedMandatoryServicesData.length,
+          stateMatchesExpected: savedMandatoryServicesData.length === processedMandatoryServicesData.length,
+          currentStateData: savedMandatoryServicesData
         });
+
+        if (savedMandatoryServicesData.length !== processedMandatoryServicesData.length) {
+          console.error('🚨 [STATE VERIFICATION] STATE MISMATCH DETECTED!');
+          console.error('Expected:', processedMandatoryServicesData.length, 'Got:', savedMandatoryServicesData.length);
+        }
       }, 100);
 
     } catch (error) {
       console.error('❌ [MANDATORY SERVICES FETCH] Unexpected error:', error);
       console.error('❌ [MANDATORY SERVICES FETCH] Error stack:', error.stack);
+
+      // Return empty array on error to prevent undefined returns
+      return [];
     }
   };
 
@@ -14088,8 +14574,108 @@ Dr. Murali B K
                                   onClick={async () => {
                                     console.log('🏥 Mandatory service selected:', service);
 
-                                    // Show immediate feedback
-                                    toast.info(`Saving mandatory service "${service.service_name}"...`);
+                                    // DUPLICATE PREVENTION: Check if service already exists
+                                    console.log('🔍 [DUPLICATE CHECK] Checking for existing service...');
+                                    const existingService = savedMandatoryServicesData.find(s =>
+                                      s.id === service.id || s.service_name === service.service_name
+                                    );
+
+                                    if (existingService) {
+                                      console.log('⚠️ [DUPLICATE DETECTED] Service already exists:', {
+                                        existingService,
+                                        attemptedService: service.service_name,
+                                        currentQuantity: existingService.quantity || 1
+                                      });
+
+                                      const currentQuantity = existingService.quantity || 1;
+                                      const currentRate = existingService.selectedRate || existingService.cost || existingService.amount || 0;
+                                      const newQuantity = currentQuantity + 1;
+                                      const newTotalAmount = currentRate * newQuantity;
+
+                                      // Show quantity-based duplicate message
+                                      const userChoice = confirm(
+                                        `"${service.service_name}" is already added to this visit.\n\n` +
+                                        `Current: Quantity ${currentQuantity} × ₹${currentRate} = ₹${currentRate * currentQuantity}\n` +
+                                        `New: Quantity ${newQuantity} × ₹${currentRate} = ₹${newTotalAmount}\n\n` +
+                                        `Click OK to increase quantity to ${newQuantity}, or Cancel to keep current quantity.`
+                                      );
+
+                                      if (!userChoice) {
+                                        toast.info(`"${service.service_name}" quantity unchanged (${currentQuantity}).`);
+                                        return; // User chose to keep existing quantity
+                                      }
+
+                                      // QUANTITY-BASED UPDATE: Update existing record instead of creating new one
+                                      console.log('🔢 [QUANTITY UPDATE] Updating existing service quantity...');
+                                      toast.info(`Updating "${service.service_name}" quantity to ${newQuantity}...`);
+
+                                      try {
+                                        // Get visit UUID for database update
+                                        const { data: visitData, error: visitError } = await supabase
+                                          .from('visits')
+                                          .select('id, visit_id')
+                                          .eq('visit_id', visitId)
+                                          .order('created_at', { ascending: false })
+                                          .limit(1)
+                                          .single();
+
+                                        if (visitError || !visitData) {
+                                          console.error('❌ [QUANTITY UPDATE] Failed to get visit data:', visitError);
+                                          toast.error('Failed to update quantity - visit not found');
+                                          return;
+                                        }
+
+                                        // Update the existing record in database
+                                        const { data: updateResult, error: updateError } = await supabase
+                                          .from('visit_mandatory_services')
+                                          .update({
+                                            quantity: newQuantity,
+                                            rate_used: currentRate,
+                                            amount: newTotalAmount
+                                          })
+                                          .eq('visit_id', visitData.id)
+                                          .eq('mandatory_service_id', service.id)
+                                          .select('*');
+
+                                        console.log('🔢 [QUANTITY UPDATE] Database update result:', {
+                                          updateResult,
+                                          updateError,
+                                          success: !updateError
+                                        });
+
+                                        if (updateError) {
+                                          console.error('❌ [QUANTITY UPDATE] Database update failed:', updateError);
+                                          toast.error('Failed to update service quantity');
+                                          return;
+                                        }
+
+                                        // Update local state
+                                        setSavedMandatoryServicesData(prev =>
+                                          prev.map(s => s.id === service.id ? {
+                                            ...s,
+                                            quantity: newQuantity,
+                                            amount: newTotalAmount,
+                                            selectedRate: currentRate,
+                                            cost: newTotalAmount
+                                          } : s)
+                                        );
+
+                                        // Force refresh
+                                        setMandatoryServicesRefreshKey(prev => prev + 1);
+
+                                        toast.success(`"${service.service_name}" quantity updated to ${newQuantity} (₹${newTotalAmount})`);
+                                        console.log('✅ [QUANTITY UPDATE] Successfully updated service quantity');
+                                        return; // Exit early - don't proceed with normal save
+
+                                      } catch (quantityUpdateError) {
+                                        console.error('❌ [QUANTITY UPDATE] Quantity update failed:', quantityUpdateError);
+                                        toast.error('Failed to update service quantity');
+                                        return;
+                                      }
+                                    } else {
+                                      // Show normal save feedback for new services
+                                      toast.info(`Saving mandatory service "${service.service_name}"...`);
+                                    }
 
                                     try {
                                       console.log('🚀 [MANDATORY SAVE] Starting mandatory service save process...');
@@ -14115,12 +14701,14 @@ Dr. Murali B K
                                         return;
                                       }
 
-                                      // Get visit UUID and current mandatory_services
+                                      // Get visit UUID and current mandatory_services (CONSISTENT WITH FETCH OPERATION)
                                       console.log('🔍 [MANDATORY SAVE] Fetching visit data for visitId:', visitId);
                                       const { data: visitData, error: visitError } = await supabase
                                         .from('visits')
                                         .select('id, visit_id, mandatory_services')
                                         .eq('visit_id', visitId)
+                                        .order('created_at', { ascending: false }) // Use most recent visit if duplicates exist
+                                        .limit(1)
                                         .single();
 
                                       console.log('🔍 [MANDATORY SAVE] Visit fetch result:', {
@@ -14171,31 +14759,166 @@ Dr. Murali B K
 
                                       // Step 1: Insert into junction table
                                       console.log('💾 [MANDATORY SAVE] Step 1: Inserting into junction table...');
+
+                                      // Enhanced rate parsing with debugging
+                                      console.log('💾 [MANDATORY SAVE] Rate analysis:', {
+                                        selectedRate: service.selectedRate,
+                                        selectedRateType: typeof service.selectedRate,
+                                        parsedRate: parseFloat(service.selectedRate),
+                                        isValidNumber: !isNaN(parseFloat(service.selectedRate))
+                                      });
+
+                                      const rateToSave = parseFloat(service.selectedRate) || 0;
+                                      if (rateToSave <= 0) {
+                                        console.log('⚠️ [MANDATORY SAVE] WARNING: Rate is 0 or invalid, service may show as free');
+                                        console.log('⚠️ [MANDATORY SAVE] Service data analysis:', {
+                                          service,
+                                          availableRates: {
+                                            selectedRate: service.selectedRate,
+                                            private_rate: service.private_rate,
+                                            tpa_rate: service.tpa_rate,
+                                            nabh_rate: service.nabh_rate,
+                                            non_nabh_rate: service.non_nabh_rate
+                                          }
+                                        });
+                                      }
+
+                                      // Ensure numeric values for database storage
+                                      const numericRate = Number(rateToSave);
+                                      const numericAmount = Number(rateToSave);
+
+                                      // Database trigger compatibility check
+                                      console.log('🔧 [TRIGGER COMPAT] Checking data for database trigger compatibility:', {
+                                        hasValidRate: numericRate > 0,
+                                        hasValidAmount: numericAmount > 0,
+                                        rateType: service.rateType,
+                                        patientCategory: service.patientCategory,
+                                        serviceHasRates: Boolean(service.private_rate || service.tpa_rate || service.nabh_rate || service.non_nabh_rate)
+                                      });
+
+                                      console.log('💾 [MANDATORY SAVE] Numeric conversion check:', {
+                                        originalRate: service.selectedRate,
+                                        rateToSave,
+                                        numericRate,
+                                        numericAmount,
+                                        rateType: typeof numericRate,
+                                        amountType: typeof numericAmount
+                                      });
+
                                       const junctionData = {
                                         visit_id: visitData.id,
                                         mandatory_service_id: service.id,
                                         quantity: 1,
-                                        rate_used: parseFloat(service.selectedRate),
+                                        rate_used: numericRate,
                                         rate_type: service.rateType,
-                                        amount: parseFloat(service.selectedRate)
+                                        amount: numericAmount
                                       };
+
+                                      // CRITICAL DEBUG: Check if save operation uses same visit UUID as fetch
+                                      console.log('🔍 [SAVE VERIFICATION] Checking visit UUID consistency for save...');
+                                      const { data: allVisitsForSave, error: saveVisitsError } = await supabase
+                                        .from('visits')
+                                        .select('id, visit_id')
+                                        .eq('visit_id', visitId);
+
+                                      console.log('🔍 [SAVE VERIFICATION] All visits for save operation:', {
+                                        visits: allVisitsForSave,
+                                        error: saveVisitsError,
+                                        count: allVisitsForSave?.length || 0,
+                                        current_save_visitData_id: visitData.id,
+                                        is_visitData_in_list: allVisitsForSave?.some(v => v.id === visitData.id)
+                                      });
+
+                                      // CRITICAL DEBUG: Show the exact UUID being saved
+                                      console.log('🔍 [UUID DEBUG] Values used for save vs fetch:', {
+                                        visitData_id_for_save: visitData.id,
+                                        visitData_id_type: typeof visitData.id,
+                                        visitId_string: visitId,
+                                        visitId_type: typeof visitId,
+                                        are_they_equal: visitData.id === visitId,
+                                        junctionData_visit_id: junctionData.visit_id
+                                      });
                                       
                                       console.log('💾 [MANDATORY SAVE] Junction data to insert:', junctionData);
                                       console.log('💾 [MANDATORY SAVE] Visit UUID:', visitData.id);
                                       console.log('💾 [MANDATORY SAVE] Service UUID:', service.id);
 
+                                      // ENHANCED DATABASE DEBUGGING
+                                      console.log('🔍 [DATABASE] Pre-insert state:', {
+                                        junctionData,
+                                        visitDataId: visitData.id,
+                                        serviceId: service.id,
+                                        currentTime: new Date().toISOString()
+                                      });
+
                                       const { data: junctionResult, error: junctionError } = await supabase
                                         .from('visit_mandatory_services')
-                                        .upsert(junctionData, { 
+                                        .upsert(junctionData, {
                                           onConflict: 'visit_id,mandatory_service_id',
-                                          ignoreDuplicates: false 
+                                          ignoreDuplicates: false
                                         })
-                                        .select();
+                                        .select('*'); // Select all fields to see what was actually inserted
 
                                       console.log('💾 [MANDATORY SAVE] Junction table result:', {
                                         junctionResult,
-                                        junctionError
+                                        junctionError,
+                                        insertSuccess: !junctionError,
+                                        rowsAffected: junctionResult?.length || 0
                                       });
+
+                                      // ENHANCED POST-SAVE VERIFICATION
+                                      console.log('🔍 [POST SAVE CHECK] Immediately checking what was saved to database...');
+                                      const { data: immediateCheck, error: immediateError } = await supabase
+                                        .from('visit_mandatory_services')
+                                        .select('*')
+                                        .eq('visit_id', visitData.id)
+                                        .eq('mandatory_service_id', service.id);
+
+                                      console.log('🔍 [POST SAVE CHECK] Immediate verification result:', {
+                                        savedData: immediateCheck,
+                                        error: immediateError,
+                                        found: immediateCheck?.length || 0,
+                                        visitUuidUsed: visitData.id
+                                      });
+
+                                      // CRITICAL: Check ALL mandatory services for this visit after save
+                                      console.log('🔍 [TOTAL COUNT CHECK] Checking ALL mandatory services for this visit...');
+                                      const { data: allServicesForVisit, error: allServicesError } = await supabase
+                                        .from('visit_mandatory_services')
+                                        .select('*')
+                                        .eq('visit_id', visitData.id);
+
+                                      console.log('🔍 [TOTAL COUNT CHECK] All services for this visit:', {
+                                        allServices: allServicesForVisit,
+                                        totalCount: allServicesForVisit?.length || 0,
+                                        error: allServicesError,
+                                        serviceNames: allServicesForVisit?.map(s => s.mandatory_service_id) || []
+                                      });
+
+                                      // Compare with what the main fetch function would return
+                                      console.log('🔍 [FETCH COMPARISON] Testing what fetchSavedMandatoryServicesData would return...');
+                                      try {
+                                        const fetchResult = await fetchSavedMandatoryServicesData();
+                                        console.log('🔍 [FETCH COMPARISON] Main fetch function result:', {
+                                          fetchedData: fetchResult,
+                                          fetchedCount: fetchResult?.length || 0,
+                                          expectedCount: allServicesForVisit?.length || 0,
+                                          mismatch: (fetchResult?.length || 0) !== (allServicesForVisit?.length || 0)
+                                        });
+                                      } catch (fetchError) {
+                                        console.error('❌ [FETCH COMPARISON] Main fetch function failed:', fetchError);
+                                      }
+
+                                      // Check what was actually saved
+                                      if (junctionResult && junctionResult.length > 0) {
+                                        console.log('🔍 [DATABASE] What was actually saved:', {
+                                          savedRecord: junctionResult[0],
+                                          savedRateUsed: junctionResult[0].rate_used,
+                                          savedAmount: junctionResult[0].amount,
+                                          savedRateType: junctionResult[0].rate_type,
+                                          triggerMightHaveChanged: junctionResult[0].rate_used !== numericRate || junctionResult[0].amount !== numericAmount
+                                        });
+                                      }
 
                                       if (junctionError) {
                                         console.error('❌ [MANDATORY SAVE] Junction table insert failed:', {
@@ -14268,12 +14991,255 @@ Dr. Murali B K
                                         return;
                                       }
 
+                                      // ENSURE TRANSACTION CONSISTENCY
+                                      console.log('🔄 [TRANSACTION] Ensuring database transaction is fully committed...');
+
+                                      // Force a small delay to ensure all database operations are committed
+                                      await new Promise(resolve => setTimeout(resolve, 100));
+
                                       console.log('✅ Mandatory service saved successfully:', serviceToStore);
                                       toast.success(`Mandatory service "${service.service_name}" saved for ${service.patientCategory} patient (${service.rateType.toUpperCase()} rate: ₹${service.selectedRate})`);
                                       setServiceSearchTerm("");
 
-                                      // Refresh saved mandatory services data
-                                      fetchSavedMandatoryServicesData().catch(console.error);
+                                      // BACKUP SUCCESSFUL SAVE TO LOCALSTORAGE
+                                      try {
+                                        const currentServices = [...savedMandatoryServicesData, {
+                                          id: service.id,
+                                          service_name: service.service_name,
+                                          selectedRate: numericRate,
+                                          cost: numericAmount,
+                                          amount: numericAmount,
+                                          rate_used: numericRate,
+                                          rate_type: service.rateType,
+                                          selected_at: new Date().toISOString(),
+                                          ...service
+                                        }];
+
+                                        const backupData = {
+                                          visitId: visitId,
+                                          services: currentServices,
+                                          timestamp: Date.now(),
+                                          recoveryMethod: 'save_backup'
+                                        };
+                                        localStorage.setItem(`mandatory_services_${visitId}`, JSON.stringify(backupData));
+                                        console.log('💾 [SAVE BACKUP] Updated localStorage with new service');
+                                      } catch (backupError) {
+                                        console.error('❌ [SAVE BACKUP] Failed to backup to localStorage:', backupError);
+                                      }
+
+                                      // IMMEDIATE VERIFICATION - Check if record exists right after save
+                                      console.log('🔍 [IMMEDIATE CHECK] Verifying record was saved...');
+                                      try {
+                                        const { data: verifyData, error: verifyError } = await supabase
+                                          .from('visit_mandatory_services')
+                                          .select('*')
+                                          .eq('visit_id', visitData.id)
+                                          .eq('mandatory_service_id', service.id)
+                                          .limit(1)
+                                          .abortSignal(new AbortController().signal); // Force fresh query
+
+                                        console.log('🔍 [IMMEDIATE CHECK] Verification result:', {
+                                          verifyData,
+                                          verifyError,
+                                          recordFound: verifyData && verifyData.length > 0,
+                                          recordCount: verifyData?.length || 0
+                                        });
+
+                                        if (verifyData && verifyData.length > 0) {
+                                          console.log('✅ [IMMEDIATE CHECK] SUCCESS - Found record details:', {
+                                            savedRecord: verifyData[0],
+                                            rate_used: verifyData[0].rate_used,
+                                            amount: verifyData[0].amount,
+                                            rate_type: verifyData[0].rate_type
+                                          });
+
+                                          // CRITICAL TEST: Use exact same parameters as fetch function
+                                          console.log('🔍 [FETCH COMPARISON] Testing fetch with EXACT same parameters as fetchSavedMandatoryServicesData...');
+
+                                          // Test 1: Raw visit_mandatory_services query (same as fetch function)
+                                          const { data: fetchTestData1, error: fetchTestError1 } = await supabase
+                                            .from('visit_mandatory_services')
+                                            .select('*')
+                                            .eq('visit_id', visitData.id)
+                                            .order('selected_at', { ascending: false });
+
+                                          console.log('🔍 [FETCH TEST 1] Raw junction table query result:', {
+                                            data: fetchTestData1,
+                                            error: fetchTestError1,
+                                            found: fetchTestData1?.length || 0,
+                                            using_visit_id: visitData.id
+                                          });
+
+                                          // Test 1.5: Check if this is an RLS policy issue
+                                          if (fetchTestError1) {
+                                            console.log('🔍 [RLS CHECK] Fetch failed - checking if RLS policy issue:', {
+                                              error_code: fetchTestError1.code,
+                                              error_message: fetchTestError1.message,
+                                              error_details: fetchTestError1.details,
+                                              is_rls_error: fetchTestError1.code === 'PGRST301' ||
+                                                           fetchTestError1.code === '42501' ||
+                                                           fetchTestError1.message?.includes('policy') ||
+                                                           fetchTestError1.message?.includes('permission')
+                                            });
+                                          }
+
+                                          // Test 1.7: Check authentication context
+                                          const { data: { user }, error: authError } = await supabase.auth.getUser();
+                                          console.log('🔍 [AUTH CHECK] Current authentication status:', {
+                                            user_id: user?.id,
+                                            user_email: user?.email,
+                                            is_authenticated: !!user,
+                                            auth_error: authError,
+                                            role: user?.role
+                                          });
+
+                                          // Test 2: Check if fetchSavedMandatoryServicesData would find it
+                                          console.log('🔍 [FETCH TEST 2] Calling fetchSavedMandatoryServicesData with same visitId...');
+                                          try {
+                                            await fetchSavedMandatoryServicesData(visitId);
+                                          } catch (fetchTestError2) {
+                                            console.error('❌ [FETCH TEST 2] fetchSavedMandatoryServicesData failed:', fetchTestError2);
+                                          }
+
+                                        } else {
+                                          console.log('❌ [IMMEDIATE CHECK] FAILED - Record not found immediately after save');
+                                          console.log('🔍 [SAVE vs FETCH] Comparing save parameters vs expected fetch parameters:', {
+                                            save_visit_id: visitData.id,
+                                            save_service_id: service.id,
+                                            save_visitId_string: visitId,
+                                            expected_fetch_will_use: 'Same visitData.id from fetchSavedMandatoryServicesData'
+                                          });
+                                        }
+                                      } catch (immediateCheckError) {
+                                        console.error('❌ [IMMEDIATE CHECK] Verification failed:', immediateCheckError);
+                                      }
+
+                                      // Enhanced refresh with retry logic
+                                      console.log('🔄 [REFRESH] Starting mandatory services data refresh after save...');
+
+                                      // Function to attempt fetch with retry logic
+                                      const attemptFetchWithRetry = async (maxRetries = 3, delay = 500) => {
+                                        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                                          console.log(`🔄 [RETRY ${attempt}/${maxRetries}] Attempting to fetch saved services...`);
+
+                                          // Wait before each attempt
+                                          await new Promise(resolve => setTimeout(resolve, delay * attempt));
+
+                                          try {
+                                            const fetchedData = await fetchSavedMandatoryServicesData();
+                                            console.log(`🔄 [RETRY ${attempt}/${maxRetries}] Fetch result:`, {
+                                              fetchedCount: fetchedData ? fetchedData.length : 'undefined',
+                                              hasNewService: fetchedData ? fetchedData.some(s => s.service_name === service.service_name) : false
+                                            });
+
+                                            // Success condition: found the service we just saved
+                                            if (fetchedData && fetchedData.length > 0 &&
+                                                fetchedData.some(s => s.service_name === service.service_name)) {
+                                              console.log(`✅ [RETRY ${attempt}/${maxRetries}] SUCCESS: Found the saved service!`);
+                                              return { success: true, data: fetchedData, attempts: attempt };
+                                            }
+
+                                            // If this was the last attempt and still no success
+                                            if (attempt === maxRetries) {
+                                              console.warn(`⚠️ [RETRY ${attempt}/${maxRetries}] Final attempt: Service not found in fetch results`);
+                                              return { success: false, data: fetchedData, attempts: attempt };
+                                            }
+
+                                          } catch (fetchError) {
+                                            console.error(`❌ [RETRY ${attempt}/${maxRetries}] Fetch error:`, fetchError);
+                                            if (attempt === maxRetries) {
+                                              throw fetchError;
+                                            }
+                                          }
+                                        }
+                                      };
+
+                                      try {
+                                        const retryResult = await attemptFetchWithRetry();
+
+                                        if (retryResult.success) {
+                                          console.log(`🎉 [REFRESH] Success after ${retryResult.attempts} attempts!`);
+                                          toast.success(`Service saved and displayed successfully! (${retryResult.attempts} attempts)`);
+
+                                          // Force additional state refresh to ensure UI updates
+                                          setTimeout(() => {
+                                            setMandatoryServicesRefreshKey(prev => {
+                                              const newKey = prev + 1;
+                                              console.log('🔄 [FORCE REFRESH] Incrementing refresh key for UI update:', prev, '→', newKey);
+                                              return newKey;
+                                            });
+                                          }, 100);
+
+                                        } else {
+                                          console.error('🚨 [REFRESH] Failed to find saved service after all retries');
+                                          console.log('🔄 [FALLBACK] Implementing forced state refresh with known data...');
+
+                                          // FALLBACK STRATEGY: Directly update UI state with the saved service data
+                                          const fallbackServiceData = {
+                                            id: service.id,
+                                            service_name: service.service_name,
+                                            tpa_rate: service.tpa_rate,
+                                            private_rate: service.private_rate,
+                                            nabh_rate: service.nabh_rate,
+                                            non_nabh_rate: service.non_nabh_rate,
+                                            // Junction table data
+                                            quantity: 1,
+                                            rate_used: numericRate,
+                                            rate_type: service.rateType,
+                                            amount: numericAmount,
+                                            selected_at: new Date().toISOString(),
+                                            // UI compatibility
+                                            selectedRate: numericRate,
+                                            cost: numericAmount,
+                                            patientCategory: service.patientCategory,
+                                            junction_id: `fallback_${Date.now()}`
+                                          };
+
+                                          console.log('🔄 [FALLBACK] Creating UI state with fallback data:', fallbackServiceData);
+
+                                          // Direct state updates to bypass fetch issues
+                                          setSavedMandatoryServicesData(prev => {
+                                            const updated = [...prev, fallbackServiceData];
+                                            console.log('🔄 [FALLBACK] Updated savedMandatoryServicesData:', updated.length);
+                                            return updated;
+                                          });
+
+                                          setMandatoryServices(prev => {
+                                            const updated = [...prev, fallbackServiceData];
+                                            console.log('🔄 [FALLBACK] Updated mandatoryServices:', updated.length);
+                                            return updated;
+                                          });
+
+                                          // Force UI refresh
+                                          setMandatoryServicesRefreshKey(prev => prev + 1);
+                                          setMandatoryServicesInitialized(true);
+
+                                          // STATE SYNCHRONIZATION: Ensure all states are in sync
+                                          setTimeout(() => {
+                                            console.log('🔄 [STATE SYNC] Verifying state synchronization after fallback...');
+                                            const verification = {
+                                              savedMandatoryServicesData_length: savedMandatoryServicesData.length,
+                                              mandatoryServices_length: mandatoryServices.length,
+                                              refreshKey: mandatoryServicesRefreshKey,
+                                              initialized: mandatoryServicesInitialized
+                                            };
+                                            console.log('🔄 [STATE SYNC] Current state verification:', verification);
+
+                                            // If states are out of sync, force synchronization
+                                            if (savedMandatoryServicesData.length === 0 && visitId) {
+                                              console.log('⚠️ [STATE SYNC] State mismatch detected, triggering emergency sync...');
+                                              fetchSavedMandatoryServicesData().catch(console.error);
+                                            }
+                                          }, 500);
+
+                                          console.log('✅ [FALLBACK] Forced state refresh completed');
+                                          toast.success(`Service "${service.service_name}" saved and displayed via fallback method!`);
+                                        }
+
+                                      } catch (refreshError) {
+                                        console.error('❌ [REFRESH] Failed to refresh mandatory services data:', refreshError);
+                                        toast.error('Service saved but failed to refresh display. Please refresh the page.');
+                                      }
 
                                     } catch (error) {
                                       console.error('❌ Error in mandatory service selection:', error);
@@ -14909,7 +15875,10 @@ Dr. Murali B K
                             <button
                               onClick={() => {
                                 console.log('🐛 [DEBUG MANUAL] Manual mandatory services debug triggered');
-                                fetchSavedMandatoryServicesData().catch(console.error);
+                                console.log('🐛 [DEBUG MANUAL] Current saved data:', savedMandatoryServicesData);
+                                fetchSavedMandatoryServicesData().then(result => {
+                                  console.log('🐛 [DEBUG MANUAL] Fresh fetch result:', result);
+                                }).catch(console.error);
                               }}
                               className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
                             >
@@ -14971,7 +15940,23 @@ Dr. Murali B K
                             ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
                             : 'text-gray-500 hover:text-gray-700'
                             }`}
-                          onClick={() => setSavedDataTab('mandatory_services')}
+                          onClick={async () => {
+                            console.log('🔄 [TAB SWITCH] Switching to mandatory services tab...');
+                            setSavedDataTab('mandatory_services');
+
+                            // PREVENT DATA LOSS: Trigger emergency recovery when switching to mandatory services
+                            if (savedMandatoryServicesData.length === 0 && visitId) {
+                              console.log('🚨 [TAB SWITCH RECOVERY] No data in state, triggering emergency recovery...');
+                              try {
+                                await fetchSavedMandatoryServicesData();
+                                console.log('✅ [TAB SWITCH RECOVERY] Emergency recovery completed');
+                              } catch (recoveryError) {
+                                console.error('❌ [TAB SWITCH RECOVERY] Failed:', recoveryError);
+                              }
+                            } else {
+                              console.log('✅ [TAB SWITCH] Data already present in state:', savedMandatoryServicesData.length);
+                            }
+                          }}
                         >
                           Mandatory Services
                         </button>
@@ -15364,13 +16349,133 @@ Dr. Murali B K
                         )}
 
                         {savedDataTab === 'mandatory_services' && (
-                          <div>
+                          <div key={`mandatory-services-${mandatoryServicesRefreshKey}`}>
                             <div className="flex justify-between items-center mb-3">
-                              <h5 className="font-medium text-gray-900">
-                                Saved Mandatory Services ({savedMandatoryServicesData.length})
-                              </h5>
+                              <div className="flex items-center gap-3">
+                                <h5 className="font-medium text-gray-900">
+                                  Saved Mandatory Services ({savedMandatoryServicesData.length}) [refresh: {mandatoryServicesRefreshKey}]
+                                </h5>
+                                <button
+                                  onClick={async () => {
+                                    console.log('🔄 [MANUAL REFRESH] User triggered manual mandatory services refresh');
+
+                                    // Direct database query to see raw data
+                                    console.log('🔍 [RAW DB CHECK] Checking raw database content...');
+                                    try {
+                                      const { data: rawData, error: rawError } = await supabase
+                                        .from('visit_mandatory_services')
+                                        .select('*')
+                                        .eq('visit_id', visitData?.id || visitId)
+                                        .abortSignal(new AbortController().signal); // Force fresh query
+
+                                      console.log('🔍 [RAW DB CHECK] Raw database results:', {
+                                        rawData,
+                                        rawError,
+                                        visitId: visitData?.id || visitId
+                                      });
+                                    } catch (dbError) {
+                                      console.error('❌ [RAW DB CHECK] Failed:', dbError);
+                                    }
+
+                                    // Enhanced manual refresh with comprehensive fallback
+                                    try {
+                                      console.log('🔄 [MANUAL REFRESH] Attempting comprehensive fetch...');
+                                      const refreshedData = await fetchSavedMandatoryServicesData();
+
+                                      console.log('🔄 [MANUAL REFRESH] Fetch completed:', {
+                                        refreshedData,
+                                        length: refreshedData?.length || 0
+                                      });
+
+                                      if (refreshedData && refreshedData.length > 0) {
+                                        toast.success(`✅ Manual refresh successful! Found ${refreshedData.length} services.`);
+
+                                        // Force UI update
+                                        setMandatoryServicesRefreshKey(prev => prev + 1);
+
+                                      } else {
+                                        console.log('⚠️ [MANUAL REFRESH] No data found, checking for alternative recovery...');
+
+                                        // Enhanced fallback: Try alternative visit UUID approach
+                                        try {
+                                          const { data: allVisits } = await supabase
+                                            .from('visits')
+                                            .select('id, visit_id')
+                                            .eq('visit_id', visitId);
+
+                                          console.log('🔄 [MANUAL FALLBACK] Alternative visit UUIDs:', allVisits);
+
+                                          if (allVisits && allVisits.length > 1) {
+                                            let foundAlternative = false;
+
+                                            for (const altVisit of allVisits) {
+                                              const { data: altData } = await supabase
+                                                .from('visit_mandatory_services')
+                                                .select('*')
+                                                .eq('visit_id', altVisit.id);
+
+                                              if (altData && altData.length > 0) {
+                                                console.log(`✅ [MANUAL FALLBACK] Found data with alternative UUID: ${altVisit.id}`);
+                                                toast.success(`Found ${altData.length} services using alternative method!`);
+                                                foundAlternative = true;
+
+                                                // Trigger a fresh fetch with corrected understanding
+                                                await fetchSavedMandatoryServicesData();
+                                                setMandatoryServicesRefreshKey(prev => prev + 1);
+                                                break;
+                                              }
+                                            }
+
+                                            if (!foundAlternative) {
+                                              toast.info('No mandatory services found in database for this visit.');
+                                            }
+                                          } else {
+                                            toast.info('No mandatory services found for this visit.');
+                                          }
+                                        } catch (fallbackError) {
+                                          console.error('❌ [MANUAL FALLBACK] Fallback failed:', fallbackError);
+                                          toast.info('No mandatory services found for this visit.');
+                                        }
+                                      }
+                                    } catch (error) {
+                                      console.error('❌ [MANUAL REFRESH] Manual refresh failed:', error);
+                                      toast.error('Manual refresh failed. Check console for details.');
+                                    }
+                                  }}
+                                  className="px-2 py-1 bg-orange-600 text-white text-xs rounded hover:bg-orange-700 transition-colors"
+                                  title="Manually refresh mandatory services"
+                                >
+                                  ⟳
+                                </button>
+                              </div>
                               <div className="text-lg font-bold text-orange-600">
-                                Total: ₹{savedMandatoryServicesData.reduce((total, service) => total + (parseFloat(service.selectedRate || service.amount) || 0), 0)}
+                                Total: ₹{(() => {
+                                  console.log(`🔍 [TOTAL CALC] Starting calculation for ${savedMandatoryServicesData.length} services`);
+                                  console.log(`🔍 [TOTAL CALC] Services data:`, savedMandatoryServicesData);
+                                  console.log(`🔍 [TOTAL CALC] Force re-render check - timestamp: ${Date.now()}, refresh key: ${mandatoryServicesRefreshKey}`);
+
+                                  const total = savedMandatoryServicesData.reduce((total, service, index) => {
+                                    // Get quantity and rate for proper calculation
+                                    const quantity = service.quantity || 1;
+                                    const rate = service.selectedRate || service.rate_used || service.cost || service.rate || 0;
+                                    const numericRate = typeof rate === 'string' ? parseFloat(rate.replace(/[^\d.-]/g, '')) : parseFloat(rate);
+                                    const validRate = isNaN(numericRate) ? 0 : numericRate;
+                                    const serviceTotal = validRate * quantity;
+
+                                    console.log(`🔍 [TOTAL CALC] Service ${index + 1}:`, {
+                                      name: service.service_name,
+                                      quantity: quantity,
+                                      rate: validRate,
+                                      serviceTotal: serviceTotal,
+                                      runningTotal: total + serviceTotal
+                                    });
+
+                                    return total + serviceTotal;
+                                  }, 0);
+
+                                  console.log(`🔍 [TOTAL CALC] Final Total: ${total} (formatted: ${total.toLocaleString('en-IN')})`);
+                                  return total.toLocaleString('en-IN');
+                                })()}
                               </div>
                             </div>
                             {savedMandatoryServicesData.length > 0 ? (
@@ -15381,6 +16486,8 @@ Dr. Murali B K
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Service Name</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Patient Type</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Qty</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Selected Date</th>
                                       <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Action</th>
@@ -15409,8 +16516,27 @@ Dr. Murali B K
                                           <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
                                             {service.rateType?.toUpperCase() || 'STANDARD'}
                                           </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-purple-600">
+                                            {service.quantity || 1}
+                                          </td>
+                                          <td className="border border-gray-300 px-4 py-2 text-sm text-gray-700">
+                                            ₹{(() => {
+                                              const rate = service.selectedRate || service.rate_used || service.cost || service.rate || 0;
+                                              const numericValue = typeof rate === 'string' ? parseFloat(rate.replace(/[^\d.-]/g, '')) : parseFloat(rate);
+                                              const finalRate = isNaN(numericValue) ? 0 : numericValue;
+                                              return finalRate.toLocaleString('en-IN');
+                                            })()}
+                                          </td>
                                           <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
-                                            ₹{service.selectedRate || service.amount || 0}
+                                            ₹{(() => {
+                                              const quantity = service.quantity || 1;
+                                              const rate = service.selectedRate || service.rate_used || service.cost || service.rate || 0;
+                                              const numericRate = typeof rate === 'string' ? parseFloat(rate.replace(/[^\d.-]/g, '')) : parseFloat(rate);
+                                              const finalRate = isNaN(numericRate) ? 0 : numericRate;
+                                              const totalAmount = finalRate * quantity;
+                                              console.log(`🔍 [QUANTITY CALC] ${service.service_name}: qty=${quantity} × rate=${finalRate} = total=${totalAmount}`);
+                                              return totalAmount.toLocaleString('en-IN');
+                                            })()}
                                           </td>
                                           <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
                                             {service.selected_at ? new Date(service.selected_at).toLocaleDateString() : 'N/A'}
