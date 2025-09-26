@@ -150,7 +150,7 @@ const Invoice = () => {
           lab:lab_id (
             id,
             name,
-            NABH_rates_in_rupee,
+            private,
             category,
             description
           )
@@ -504,7 +504,7 @@ const Invoice = () => {
         labOrdersData.forEach((visitLab) => {
           console.log('Processing visit lab:', visitLab);
           // Ensure amounts are numbers, not strings
-          const rate = parseFloat(visitLab.lab?.NABH_rates_in_rupee) || 0;
+          const rate = (visitLab.lab?.private && visitLab.lab.private > 0) ? visitLab.lab.private : 100;
           services.push({
             srNo: srNo++,
             item: visitLab.lab?.name || 'Lab Test',
