@@ -101,6 +101,7 @@ const LabOrders = () => {
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [patientStatusFilter, setPatientStatusFilter] = useState('Currently Admitted'); // New filter for patient admission status
 
   // 🏥 EXPLICIT HOSPITAL FILTERING - If-Else Condition
   const getHospitalFilter = useCallback(() => {
@@ -122,9 +123,27 @@ const LabOrders = () => {
   // Sample taken and included states (now for individual tests)
   const [sampleTakenTests, setSampleTakenTests] = useState<string[]>([]);
   const [includedTests, setIncludedTests] = useState<string[]>([]);
+  const [selectedPatientForSampling, setSelectedPatientForSampling] = useState<string | null>(null); // Track which patient is selected for sampling
   const [isEntryModeOpen, setIsEntryModeOpen] = useState(false);
   const [selectedTestsForEntry, setSelectedTestsForEntry] = useState<LabTestRow[]>([]);
   const [testSubTests, setTestSubTests] = useState<Record<string, any[]>>({});
+
+  // Helper function to get patient key for a test
+  const getPatientKey = (test: LabTestRow) => `${test.patient_name}_${test.order_number}`;
+
+  // Get the patient key of included tests (if any)
+  const getSelectedPatientFromIncludedTests = () => {
+    if (includedTests.length === 0) return null;
+    const firstIncludedTest = filteredTestRows.find(t => includedTests.includes(t.id));
+    return firstIncludedTest ? getPatientKey(firstIncludedTest) : null;
+  };
+
+  // Handler for entry form close
+  const handleEntryFormClose = (open: boolean) => {
+    setIsEntryModeOpen(open);
+    // Note: We don't clear selectedPatientForSampling here so user can still work with the same patient
+    // Patient selection will be cleared when samples are saved or filters are reset
+  };
 
   // DEBUG: Function to check if data is actually in lab_results table
   const checkLabResultsData = async () => {
@@ -1074,7 +1093,8 @@ const LabOrders = () => {
       // Clear sample taken tests and reset included tests
       setSampleTakenTests([]);
       setIncludedTests([]);
-      
+      setSelectedPatientForSampling(null); // Clear selected patient
+
       toast({
         title: "Samples Saved Successfully",
         description: `${testIds.length} test sample(s) status updated. Now you can select Incl. checkbox for entry mode.`,
@@ -1424,13 +1444,15 @@ const LabOrders = () => {
 
   // Fetch lab test rows from visit_labs table (JOIN with visits and lab tables)
   const { data: labTestRows = [], isLoading: testRowsLoading } = useQuery({
-    queryKey: ['visit-lab-orders', getHospitalFilter()],
+    queryKey: ['visit-lab-orders', getHospitalFilter(), patientStatusFilter],
     queryFn: async () => {
       console.log('🔍 Fetching lab test data from visit_labs...');
 
       const hospitalFilter = getHospitalFilter();
+      console.log('🔍 Patient status filter:', patientStatusFilter);
+
       // Fetch from visit_labs table with JOINs
-      const { data, error } = await supabase
+      let query = supabase
         .from('visit_labs')
         .select(`
           id,
@@ -1450,6 +1472,8 @@ const LabOrders = () => {
             visit_id,
             patient_id,
             visit_date,
+            admission_date,
+            discharge_date,
             appointment_with,
             reason_for_visit,
             patients!inner(
@@ -1469,8 +1493,19 @@ const LabOrders = () => {
             test_method
           )
         `)
-        .eq('visits.patients.hospital_name', hospitalFilter)
-        .order('ordered_date', { ascending: false });
+        .eq('visits.patients.hospital_name', hospitalFilter);
+
+      // Apply patient status filter
+      if (patientStatusFilter === 'Currently Admitted') {
+        query = query.is('visits.discharge_date', null);
+        console.log('🔍 Filtering for currently admitted patients (no discharge date)');
+      } else if (patientStatusFilter === 'Discharged') {
+        query = query.not('visits.discharge_date', 'is', null);
+        console.log('🔍 Filtering for discharged patients (has discharge date)');
+      }
+      // If 'All', no additional filter is applied
+
+      const { data, error } = await query.order('ordered_date', { ascending: false });
 
       // 🏥 Only filter by patient hospital, lab tests are shared
 
@@ -2323,6 +2358,16 @@ const LabOrders = () => {
     console.log('📝 Current form data:', labResultsForm);
     console.log('🧪 Test sub-tests:', testSubTests);
     console.log('🗂️ Saved lab results:', savedLabResults);
+    console.log('🔑 All available form keys:', Object.keys(labResultsForm));
+    console.log('🔑 All available saved keys:', Object.keys(savedLabResults));
+
+    // Debug each test individually
+    selectedTestsForEntry.forEach(testRow => {
+      console.log(`🔍 Debug for test ${testRow.test_name} (ID: ${testRow.id}):`);
+      console.log('  - Direct form data:', labResultsForm[testRow.id]);
+      console.log('  - Direct saved data:', savedLabResults[testRow.id]);
+      console.log('  - Sub-tests available:', testSubTests[testRow.test_name]);
+    });
 
     if (selectedTestsForEntry.length === 0) return '';
 
@@ -2621,15 +2666,44 @@ const LabOrders = () => {
                 const subTestRows = subTests.map(subTest => {
                   const subTestKey = `${testRow.id}_subtest_${subTest.id}`;
                   console.log('🔑 Looking for sub-test data with key:', subTestKey);
-                  const subTestFormData = savedLabResults[subTestKey] || labResultsForm[subTestKey] || {
-                    result_value: '',
-                    result_unit: '',
-                    reference_range: '',
-                    comments: '',
-                    is_abnormal: false,
-                    result_status: 'Preliminary'
-                  };
-                  console.log('📝 Sub-test form data found:', subTestFormData);
+
+                  // Try multiple approaches to find the data
+                  let subTestFormData = savedLabResults[subTestKey] || labResultsForm[subTestKey];
+
+                  // If not found, try alternative keys
+                  if (!subTestFormData || !subTestFormData.result_value) {
+                    const alternativeKeys = [
+                      `${testRow.id}_subtest_main`,
+                      `${testRow.id}`,
+                      testRow.id.toString(),
+                      subTest.name,
+                      `${testRow.id}_${subTest.name}`,
+                      `${testRow.test_name}_${subTest.name}`
+                    ];
+
+                    for (const altKey of alternativeKeys) {
+                      const altData = savedLabResults[altKey] || labResultsForm[altKey];
+                      if (altData && altData.result_value) {
+                        subTestFormData = altData;
+                        console.log('✅ Found data with alternative key:', altKey, altData);
+                        break;
+                      }
+                    }
+                  }
+
+                  // Fallback to empty data
+                  if (!subTestFormData) {
+                    subTestFormData = {
+                      result_value: '',
+                      result_unit: '',
+                      reference_range: '',
+                      comments: '',
+                      is_abnormal: false,
+                      result_status: 'Preliminary'
+                    };
+                  }
+
+                  console.log('📝 Final sub-test form data:', subTestFormData);
 
                   const displayValue = subTestFormData.result_value ?
                     `${subTestFormData.result_value} ${subTest.unit || ''}`.trim() :
@@ -2694,14 +2768,39 @@ const LabOrders = () => {
                 }
               } else {
                 // Display single test without sub-tests
-                const formData = savedLabResults[testRow.id] || labResultsForm[testRow.id] || {
-                  result_value: '',
-                  result_unit: '',
-                  reference_range: '',
-                  comments: '',
-                  is_abnormal: false,
-                  result_status: 'Preliminary'
-                };
+                let formData = savedLabResults[testRow.id] || labResultsForm[testRow.id];
+
+                // If no data found, try alternative keys
+                if (!formData || !formData.result_value) {
+                  const alternativeKeys = [
+                    testRow.id.toString(),
+                    `${testRow.id}_main`,
+                    `${testRow.id}_subtest_main`,
+                    testRow.test_name,
+                    testRow.test_category
+                  ];
+
+                  for (const altKey of alternativeKeys) {
+                    const altData = savedLabResults[altKey] || labResultsForm[altKey];
+                    if (altData && altData.result_value) {
+                      formData = altData;
+                      console.log('✅ Found single test data with key:', altKey, altData);
+                      break;
+                    }
+                  }
+                }
+
+                // Fallback to empty data
+                if (!formData) {
+                  formData = {
+                    result_value: '',
+                    result_unit: '',
+                    reference_range: '',
+                    comments: '',
+                    is_abnormal: false,
+                    result_status: 'Preliminary'
+                  };
+                }
 
                 const displayValue = formData.result_value ?
                   `${formData.result_value} ${formData.result_unit || ''}`.trim() :
@@ -2926,10 +3025,30 @@ const LabOrders = () => {
               </Select>
             </div>
 
+            <div>
+              <Label>Patient Status</Label>
+              <Select value={patientStatusFilter} onValueChange={setPatientStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Currently Admitted">Currently Admitted</SelectItem>
+                  <SelectItem value="Discharged">Discharged</SelectItem>
+                  <SelectItem value="All">All Patients</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="flex items-end">
               <Button variant="outline" onClick={() => {
                 setSearchTerm('');
                 setStatusFilter('All');
+                setPatientStatusFilter('Currently Admitted');
+                // Clear sample selection states
+                setSampleTakenTests([]);
+                setIncludedTests([]);
+                setSelectedPatientForSampling(null);
+                setTestSampleStatus({});
               }}>
                 <RotateCcw className="h-4 w-4 mr-2" />
                 Reset Filters
@@ -3033,15 +3152,36 @@ const LabOrders = () => {
                         <div className="flex items-center gap-2">
                           <Checkbox
                             checked={sampleTakenTests.includes(testRow.id) || testSampleStatus[testRow.id] === 'saved'}
-                            disabled={testSampleStatus[testRow.id] === 'saved'}
+                            disabled={
+                              testSampleStatus[testRow.id] === 'saved' ||
+                              (selectedPatientForSampling !== null && selectedPatientForSampling !== getPatientKey(testRow)) ||
+                              (isEntryModeOpen && !selectedTestsForEntry.some(t => getPatientKey(t) === getPatientKey(testRow))) ||
+                              (getSelectedPatientFromIncludedTests() !== null && getSelectedPatientFromIncludedTests() !== getPatientKey(testRow))
+                            }
                             onCheckedChange={(checked) => {
+                              const currentPatientKey = getPatientKey(testRow);
+
                               if (checked) {
+                                // If this is the first sample selection, set this patient as selected
+                                if (selectedPatientForSampling === null) {
+                                  setSelectedPatientForSampling(currentPatientKey);
+                                }
                                 setSampleTakenTests(prev => [...prev, testRow.id]);
                                 setTestSampleStatus(prev => ({ ...prev, [testRow.id]: 'taken' }));
                               } else {
                                 setSampleTakenTests(prev => prev.filter(id => id !== testRow.id));
                                 setTestSampleStatus(prev => ({ ...prev, [testRow.id]: 'not_taken' }));
                                 setIncludedTests(prev => prev.filter(id => id !== testRow.id));
+
+                                // If no more samples are selected for this patient, clear the selected patient
+                                const remainingSamplesForPatient = sampleTakenTests.filter(id => {
+                                  const testForId = filteredTestRows.find(t => t.id === id);
+                                  return testForId && getPatientKey(testForId) === currentPatientKey && id !== testRow.id;
+                                });
+
+                                if (remainingSamplesForPatient.length === 0) {
+                                  setSelectedPatientForSampling(null);
+                                }
                               }
                             }}
                           />
@@ -3053,7 +3193,12 @@ const LabOrders = () => {
                       <TableCell>
                         <Checkbox
                           checked={includedTests.includes(testRow.id)}
-                          disabled={testSampleStatus[testRow.id] !== 'saved'}
+                          disabled={
+                            testSampleStatus[testRow.id] !== 'saved' ||
+                            (selectedPatientForSampling !== null && selectedPatientForSampling !== getPatientKey(testRow)) ||
+                            (isEntryModeOpen && !selectedTestsForEntry.some(t => getPatientKey(t) === getPatientKey(testRow))) ||
+                            (getSelectedPatientFromIncludedTests() !== null && getSelectedPatientFromIncludedTests() !== getPatientKey(testRow))
+                          }
                           onCheckedChange={(checked) => {
                             console.log('📝 Updating "Incl" status for test (local only):', testRow.id, checked);
 
@@ -3463,7 +3608,7 @@ const LabOrders = () => {
       </Dialog>
 
       {/* Entry Mode Dialog */}
-      <Dialog open={isEntryModeOpen} onOpenChange={setIsEntryModeOpen}>
+      <Dialog open={isEntryModeOpen} onOpenChange={handleEntryFormClose}>
         <DialogContent className="max-w-6xl max-h-[95vh] overflow-y-auto">
           <DialogHeader className="pb-4 border-b">
             <DialogTitle className="text-lg font-semibold">Lab Results Entry Form</DialogTitle>
@@ -3865,7 +4010,7 @@ const LabOrders = () => {
                   className="px-8"
                   onClick={() => {
                     // Only close the dialog - keep saved data intact
-                    setIsEntryModeOpen(false);
+                    handleEntryFormClose(false);
                   }}
                 >
                   Back
