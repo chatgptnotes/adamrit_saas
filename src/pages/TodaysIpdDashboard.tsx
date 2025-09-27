@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDebounce } from 'use-debounce';
 import { Badge } from '@/components/ui/badge';
-import { Eye, FileText, Search, Calendar, DollarSign, Trash2, FolderOpen, FolderX, CheckCircle, XCircle, Clock, MinusCircle, RotateCcw, Printer, Filter, MessageSquare } from 'lucide-react';
+import { Eye, FileText, Search, Calendar, DollarSign, Trash2, FolderOpen, FolderX, CheckCircle, XCircle, Clock, MinusCircle, RotateCcw, Printer, Filter, MessageSquare, ClipboardList } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2002,6 +2002,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Admission Date</TableHead>
                 <TableHead className="font-semibold">Days Admitted</TableHead>
                 <TableHead className="font-semibold">Discharge Date</TableHead>
+                <TableHead className="font-semibold">Discharge Summary</TableHead>
                 {isAdmin && <TableHead className="font-semibold">Actions</TableHead>}
               </TableRow>
               <TableRow className="bg-muted/30">
@@ -2033,6 +2034,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead>
                   <ColumnFilter options={additionalApprovalsOptions} selected={additionalApprovalsFilter} onChange={setAdditionalApprovalsFilter} />
                 </TableHead>
+                <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
@@ -2242,6 +2244,17 @@ const TodaysIpdDashboard = () => {
                   </TableCell>
                   <TableCell>
                     {visit.discharge_date ? format(new Date(visit.discharge_date), 'MMM dd, yyyy HH:mm') : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 hover:bg-blue-50"
+                      onClick={() => navigate(`/ipd-discharge-summary/${visit.visit_id}`)}
+                      title="IPD Discharge Summary"
+                    >
+                      <ClipboardList className="h-4 w-4 text-blue-600" />
+                    </Button>
                   </TableCell>
                   {isAdmin && (
                    <TableCell>
