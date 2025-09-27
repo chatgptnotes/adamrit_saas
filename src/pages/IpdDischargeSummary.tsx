@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { Calendar, CalendarDays } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
@@ -85,12 +86,6 @@ const IpdDischargeSummary = () => {
 
   // Diagnosis States
   const [diagnosis, setDiagnosis] = useState('');
-  const [diagnosisTemplates] = useState([
-    'OPD Summary',
-    'differential daignosis',
-    'ROAD TRAFFIC ACCIDENT WITH RIGHT KNEE INJURY WITH K/C/O: Diabetes mellitus (DM); Hypertension (HTN) WITH PROXIMAL TIBIA RIGHT FRACTURE WITH ISCHEMIC HEART DISEASE (IHD) WITH CORONARY ARTERY BYPASS GRAFT (CABG)',
-    'opd_Summary'
-  ]);
 
   // Treatment on Discharge States
   const [medicationRows, setMedicationRows] = useState<MedicationRow[]>([
@@ -126,21 +121,35 @@ const IpdDischargeSummary = () => {
   const [investigations, setInvestigations] = useState('');
   const [printRecentOnly, setPrintRecentOnly] = useState(false);
 
+  // Surgery Details States
+  const [surgeryDetails, setSurgeryDetails] = useState({
+    date: '',
+    procedurePerformed: '',
+    surgeon: '',
+    anesthetist: '',
+    anesthesia: '',
+    implant: '',
+    description: ''
+  });
+
+
   // OT Notes States
   const [stayNotes, setStayNotes] = useState('');
-  const [stayNotesTemplates] = useState([
-    'Patient Advice',
-    'Medication On Discharge',
-    'OT Notes',
-    'Investigations During Stay',
-    'Differential Diagnosis',
-    'Difference Dalgnosis'
+  const [stayNotesTemplates, setStayNotesTemplates] = useState([
+    { name: 'Patient Advice', content: 'Patient advised regarding medication compliance and follow-up care.' },
+    { name: 'Medication On Discharge', content: 'Continue prescribed medications as per discharge summary.' },
+    { name: 'OT Notes', content: 'Surgical procedure completed successfully without complications.' },
+    { name: 'Investigations During Stay', content: 'All investigations completed and results reviewed.' },
+    { name: 'Differential Diagnosis', content: 'Primary diagnosis confirmed based on clinical findings.' },
+    { name: 'Post-operative Care', content: 'Patient monitored post-operatively. Wound healing satisfactory.' }
   ]);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateContent, setNewTemplateContent] = useState('');
+  const [editingTemplateIndex, setEditingTemplateIndex] = useState<number | null>(null);
+  const [editingTemplateName, setEditingTemplateName] = useState('');
+  const [editingTemplateContent, setEditingTemplateContent] = useState('');
+  const [showAddTemplate, setShowAddTemplate] = useState(false);
 
-  // Stay Medicines States
-  const [stayMedicines, setStayMedicines] = useState([
-    { name: '', date: '' }
-  ]);
 
   // Treatment During Hospital Stay States
   const [treatmentCondition, setTreatmentCondition] = useState('Satisfactory');
@@ -253,23 +262,72 @@ const IpdDischargeSummary = () => {
     queryFn: async () => {
       console.log('🧪 Fetching lab results for visit_id:', visitId);
 
-      const { data, error } = await supabase
-        .from('lab_results')
-        .select(`
-          id,
-          visit_id,
-          test_name,
-          test_category,
-          result_value,
-          result_unit,
-          main_test_name,
-          patient_name,
-          patient_age,
-          patient_gender,
-          created_at
-        `)
+      let data, error;
+
+      // First, try to find the UUID for this visit_id string
+      console.log('🔍 Looking for visit UUID for visit_id:', visitId);
+      const { data: visitData } = await supabase
+        .from('visits')
+        .select('id')
         .eq('visit_id', visitId)
-        .order('created_at', { ascending: false });
+        .single();
+
+      let visitUUID = visitData?.id;
+      console.log('📋 Found visit UUID:', visitUUID);
+
+      // Try to get lab results using the UUID
+      if (visitUUID) {
+        console.log('🧪 Searching lab results using UUID:', visitUUID);
+        const result = await supabase
+          .from('lab_results')
+          .select(`
+            id,
+            visit_id,
+            test_name,
+            test_category,
+            result_value,
+            result_unit,
+            main_test_name,
+            patient_name,
+            patient_age,
+            patient_gender,
+            created_at
+          `)
+          .eq('visit_id', visitUUID)
+          .order('created_at', { ascending: false });
+
+        data = result.data;
+        error = result.error;
+      } else {
+        // Fallback: search by patient name if available from patientData
+        if (patientData?.patients?.name) {
+          console.log('🔍 Searching lab results by patient name:', patientData.patients.name);
+          const result = await supabase
+            .from('lab_results')
+            .select(`
+              id,
+              visit_id,
+              test_name,
+              test_category,
+              result_value,
+              result_unit,
+              main_test_name,
+              patient_name,
+              patient_age,
+              patient_gender,
+              created_at
+            `)
+            .ilike('patient_name', `%${patientData.patients.name}%`)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+          data = result.data;
+          error = result.error;
+        } else {
+          data = [];
+          error = { message: 'No visit UUID found and no patient name available' };
+        }
+      }
 
       if (error) {
         console.log('❌ No lab results found for visit_id:', visitId, error.message);
@@ -480,7 +538,316 @@ const IpdDischargeSummary = () => {
     staleTime: 30000
   });
 
+  // Fetch real surgery data for this visit - moved after patient data query
+  const { data: visitSurgeryData, isLoading: isSurgeryLoading } = useQuery({
+    queryKey: ['visit-surgery-data', visitId],
+    queryFn: async () => {
+      if (!visitId) return null;
+
+      console.log('🔪 Fetching surgery data for visit:', visitId);
+
+      // First try to get the visit UUID from the string visit ID
+      let visitUUID = null;
+
+      try {
+        const { data: visitData } = await supabase
+          .from('visits')
+          .select('id')
+          .eq('visit_id', visitId)
+          .single();
+        visitUUID = visitData?.id;
+      } catch (error) {
+        console.log('❌ Error finding visit UUID:', error);
+      }
+
+      if (!visitUUID) {
+        console.log('❌ No visit UUID found for surgery data fetch');
+        return null;
+      }
+
+      console.log('🔍 Fetching surgery data with visit UUID:', visitUUID);
+
+      try {
+        const { data, error } = await supabase
+          .from('visit_surgeries')
+          .select(`
+            *,
+            cghs_surgery:surgery_id (
+              name,
+              code,
+              NABH_NABL_Rate,
+              description
+            )
+          `)
+          .eq('visit_id', visitUUID)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.log('❌ Error fetching surgery data:', error.message);
+          return null;
+        }
+
+        console.log('✅ Surgery data found:', data?.length || 0, 'surgeries');
+        console.log('🔍 Raw surgery data:', JSON.stringify(data, null, 2));
+        return data;
+      } catch (error) {
+        console.log('❌ Surgery query failed:', error);
+        return null;
+      }
+    },
+    enabled: !!visitId,
+    retry: false,
+    staleTime: 30000
+  });
+
+  // Fetch OT Notes data to get surgeon, anesthetist, implant info
+  const { data: otNotesData, isLoading: isOtNotesLoading } = useQuery({
+    queryKey: ['ot-notes-data', visitId],
+    queryFn: async () => {
+      if (!visitId) return null;
+
+      console.log('🏥 Fetching OT Notes data for visit:', visitId);
+
+      // First try to get the visit UUID from the string visit ID
+      let visitUUID = null;
+
+      try {
+        const { data: visitData } = await supabase
+          .from('visits')
+          .select('id')
+          .eq('visit_id', visitId)
+          .single();
+        visitUUID = visitData?.id;
+      } catch (error) {
+        console.log('❌ Error finding visit UUID for OT notes:', error);
+      }
+
+      if (!visitUUID) {
+        console.log('❌ No visit UUID found for OT notes fetch');
+        return null;
+      }
+
+      console.log('🔍 Fetching OT notes with visit UUID:', visitUUID);
+
+      try {
+        const { data, error } = await supabase
+          .from('ot_notes')
+          .select('*')
+          .eq('visit_id', visitUUID)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (error) {
+          console.log('❌ Error fetching OT notes:', error.message);
+          return null;
+        }
+
+        console.log('✅ OT Notes data found:', data?.length || 0, 'records');
+        console.log('🔍 Raw OT notes data:', JSON.stringify(data, null, 2));
+        return data?.[0] || null;
+      } catch (error) {
+        console.log('❌ OT notes query failed:', error);
+        return null;
+      }
+    },
+    enabled: !!visitId,
+    retry: false,
+    staleTime: 30000
+  });
+
+  // Fetch diagnosis data from billing system
+  const { data: visitDiagnosisData, isLoading: isDiagnosisLoading } = useQuery({
+    queryKey: ['visit-diagnosis-data', visitId],
+    queryFn: async () => {
+      if (!visitId) return null;
+
+      console.log('🏥 Fetching diagnosis data for visit:', visitId);
+
+      // First try to get the visit UUID from the string visit ID
+      let visitUUID = null;
+
+      try {
+        const { data: visitData } = await supabase
+          .from('visits')
+          .select('id')
+          .eq('visit_id', visitId)
+          .single();
+        visitUUID = visitData?.id;
+      } catch (error) {
+        console.log('❌ Error finding visit UUID for diagnosis:', error);
+      }
+
+      if (!visitUUID) {
+        console.log('❌ No visit UUID found for diagnosis fetch');
+        return null;
+      }
+
+      console.log('🔍 Fetching diagnosis with visit UUID:', visitUUID);
+
+      try {
+        // First, let's check if there's any data in visit_diagnoses for this visit
+        const { data: allVisitDiagnoses, error: checkError } = await supabase
+          .from('visit_diagnoses')
+          .select('*')
+          .eq('visit_id', visitUUID);
+
+        console.log('🔍 All visit_diagnoses for UUID:', visitUUID, allVisitDiagnoses);
+
+        // Fetch diagnosis data with proper join
+        const { data, error } = await supabase
+          .from('visit_diagnoses')
+          .select(`
+            id,
+            visit_id,
+            diagnosis_id,
+            is_primary,
+            notes,
+            created_at,
+            diagnoses!visit_diagnoses_diagnosis_id_fkey (
+              id,
+              name
+            )
+          `)
+          .eq('visit_id', visitUUID)
+          .order('is_primary', { ascending: false })
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.log('❌ Error fetching diagnosis data:', error.message);
+          return null;
+        }
+
+        console.log('✅ Diagnosis data found:', data?.length || 0, 'diagnoses');
+        console.log('🔍 Detailed diagnosis data:', JSON.stringify(data, null, 2));
+
+        // Also check what's in visit_diagnoses table without join
+        if (!data || data.length === 0) {
+          console.log('🔍 No data found, checking visit_diagnoses table directly...');
+          const { data: rawData } = await supabase
+            .from('visit_diagnoses')
+            .select('*');
+          console.log('🔍 All visit_diagnoses in table:', rawData);
+        }
+
+        return data;
+      } catch (error) {
+        console.log('❌ Diagnosis query failed:', error);
+        return null;
+      }
+    },
+    enabled: !!visitId,
+    retry: false,
+    staleTime: 30000
+  });
+
   const isInvestigationsLoading = isLabResultsLoading || isRadiologyLoading;
+
+  // Fetch existing discharge summary data for editing
+  const { data: existingDischargeSummary, isLoading: isLoadingDischargeSummary } = useQuery({
+    queryKey: ['existing-discharge-summary', visitId],
+    queryFn: async () => {
+      if (!visitId) return null;
+
+      console.log('📋 Loading existing discharge summary for visit:', visitId);
+
+      try {
+        // Get main discharge summary
+        const { data: summaryData, error: summaryError } = await supabase
+          .from('discharge_summaries')
+          .select('*')
+          .eq('visit_id', visitId)
+          .single();
+
+        if (summaryError) {
+          if (summaryError.code === 'PGRST116') {
+            console.log('📋 No existing discharge summary found - creating new one');
+            return null;
+          }
+          throw summaryError;
+        }
+
+        console.log('📋 Found existing discharge summary:', summaryData.id);
+
+        // Get medications
+        const { data: medicationsData, error: medicationsError } = await supabase
+          .from('discharge_medications')
+          .select('*')
+          .eq('discharge_summary_id', summaryData.id)
+          .order('medication_order');
+
+        if (medicationsError) throw medicationsError;
+
+        // Get examination data
+        const { data: examinationData, error: examinationError } = await supabase
+          .from('discharge_examinations')
+          .select('*')
+          .eq('discharge_summary_id', summaryData.id)
+          .single();
+
+        if (examinationError && examinationError.code !== 'PGRST116') {
+          throw examinationError;
+        }
+
+        // Get surgery details
+        const { data: surgeryData, error: surgeryError } = await supabase
+          .from('discharge_surgery_details')
+          .select('*')
+          .eq('discharge_summary_id', summaryData.id)
+          .single();
+
+        if (surgeryError && surgeryError.code !== 'PGRST116') {
+          throw surgeryError;
+        }
+
+        console.log('📋 Loaded discharge summary data:', {
+          summary: !!summaryData,
+          medications: medicationsData?.length || 0,
+          examination: !!examinationData,
+          surgery: !!surgeryData
+        });
+
+        return {
+          summary: summaryData,
+          medications: medicationsData || [],
+          examination: examinationData,
+          surgery: surgeryData
+        };
+
+      } catch (error) {
+        console.error('❌ Error loading existing discharge summary:', error);
+        return null;
+      }
+    },
+    enabled: !!visitId,
+    retry: false,
+    staleTime: 30000
+  });
+
+  // Fetch medications for the searchable dropdown
+  const [medicationSearchTerm, setMedicationSearchTerm] = useState('');
+  const [activeSearchRowId, setActiveSearchRowId] = useState(null);
+  const { data: availableMedications = [] } = useQuery({
+    queryKey: ['medications', medicationSearchTerm],
+    queryFn: async () => {
+      if (!medicationSearchTerm || medicationSearchTerm.length < 2) return [];
+
+      const { data, error } = await supabase
+        .from('medication')
+        .select('id, name, generic_name, category, dosage, strength, manufacturer')
+        .or(`name.ilike.%${medicationSearchTerm}%,generic_name.ilike.%${medicationSearchTerm}%,category.ilike.%${medicationSearchTerm}%`)
+        .order('name')
+        .limit(10);
+
+      if (error) {
+        console.error('Error fetching medications:', error);
+        return [];
+      }
+
+      return data || [];
+    },
+    enabled: medicationSearchTerm.length >= 2,
+    staleTime: 30000
+  });
 
   // Update patient info when data is loaded
   useEffect(() => {
@@ -526,6 +893,15 @@ const IpdDischargeSummary = () => {
             console.log('Error parsing examination data:', e);
           }
         }
+
+        if (summary.surgery_details) {
+          try {
+            const surgeryData = JSON.parse(summary.surgery_details);
+            setSurgeryDetails(surgeryData);
+          } catch (e) {
+            console.log('Error parsing surgery details:', e);
+          }
+        }
       }
 
       // Set vital signs from visit data if available and no examination data in summary
@@ -568,6 +944,223 @@ const IpdDischargeSummary = () => {
       setInvestigations('Lab and radiology investigations will be populated here when data is available.');
     }
   }, [labResultsData, radiologyData, investigations]);
+
+  // Update surgery details when data is loaded (combine visit_surgeries + ot_notes data)
+  useEffect(() => {
+    if (visitSurgeryData && visitSurgeryData.length > 0) {
+      try {
+        const surgery = visitSurgeryData[0]; // Get the first/primary surgery
+        const surgeryInfo = surgery?.cghs_surgery;
+
+        // Prefer OT notes data for surgeon, anesthetist, implant info, fallback to surgery table
+        const surgeon = otNotesData?.surgeon || surgery?.surgeon || '';
+        const anesthetist = otNotesData?.anaesthetist || surgery?.anaesthetist_name || '';
+        const anesthesia = otNotesData?.anaesthesia || surgery?.anaesthesia_type || '';
+        const implant = otNotesData?.implant || surgery?.implant || '';
+
+        // Use OT notes date if available, otherwise surgery date
+        const surgeryDate = (otNotesData?.date ? new Date(otNotesData.date) : null) ||
+                           (surgery?.created_at ? new Date(surgery.created_at) : null);
+
+        // Use OT notes procedure if available, otherwise CGHS surgery info
+        const procedurePerformed = otNotesData?.procedure_performed ||
+                                 (surgeryInfo?.name ? `${surgeryInfo.name} (${surgeryInfo.code || ''})` : '');
+
+        setSurgeryDetails({
+          date: surgeryDate ? format(surgeryDate, "yyyy-MM-dd'T'HH:mm") : '',
+          procedurePerformed: procedurePerformed,
+          surgeon: surgeon,
+          anesthetist: anesthetist,
+          anesthesia: anesthesia,
+          implant: implant,
+          description: otNotesData?.description || `**Surgical Operation Record**
+
+**Patient Information:**
+- Name: ${patientData?.patients?.name || 'Patient'}
+- Age: ${patientData?.patients?.age || 'N/A'}
+- Gender: ${patientData?.patients?.gender || 'N/A'}
+
+**Date of Surgery:** ${surgeryDate ? format(surgeryDate, 'MMMM dd, yyyy') : 'N/A'}
+
+**Surgery Details:**
+- Procedure: ${procedurePerformed || 'N/A'}
+- Code: ${surgeryInfo?.code || 'N/A'}
+- Rate: ₹${surgeryInfo?.NABH_NABL_Rate || otNotesData?.surgery_rate || 'N/A'}
+- Status: ${surgery?.sanction_status || otNotesData?.surgery_status || 'N/A'}
+- Surgeon: ${surgeon || 'N/A'}
+- Anesthetist: ${anesthetist || 'N/A'}
+- Anesthesia Type: ${anesthesia || 'N/A'}
+- Implant: ${implant || 'N/A'}
+
+${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure performed successfully.'}`
+        });
+
+        console.log('✅ Surgery details updated with data from:', {
+          surgeryTable: !!visitSurgeryData,
+          otNotes: !!otNotesData,
+          surgeon,
+          anesthetist,
+          anesthesia,
+          implant
+        });
+
+      } catch (error) {
+        console.log('❌ Error updating surgery details:', error);
+      }
+    }
+  }, [visitSurgeryData, otNotesData, patientData]);
+
+  // Update diagnosis when data is loaded from visit_diagnoses table
+  useEffect(() => {
+    if (visitDiagnosisData && visitDiagnosisData.length > 0) {
+      try {
+        console.log('🔄 Processing diagnosis data:', visitDiagnosisData);
+
+        // Format diagnosis data for display
+        const primaryDiagnosis = visitDiagnosisData.find(d => d.is_primary === true);
+        const secondaryDiagnoses = visitDiagnosisData.filter(d => d.is_primary !== true);
+
+        let diagnosisText = '';
+
+        // Add primary diagnosis
+        if (primaryDiagnosis && primaryDiagnosis.diagnoses) {
+          diagnosisText += `${primaryDiagnosis.diagnoses.name}`;
+          if (primaryDiagnosis.notes) {
+            diagnosisText += `\nNotes: ${primaryDiagnosis.notes}`;
+          }
+        }
+
+        // Add secondary diagnoses
+        if (secondaryDiagnoses.length > 0) {
+          if (diagnosisText) diagnosisText += '\n';
+          secondaryDiagnoses.forEach((diag, index) => {
+            if (diag.diagnoses && diag.diagnoses.name) {
+              diagnosisText += `${diag.diagnoses.name}`;
+              if (diag.notes) {
+                diagnosisText += ` (${diag.notes})`;
+              }
+              diagnosisText += '\n';
+            }
+          });
+        }
+
+        // If no primary/secondary structure, just list all diagnoses
+        if (!primaryDiagnosis && visitDiagnosisData.length > 0) {
+          diagnosisText = '';
+          visitDiagnosisData.forEach((diag, index) => {
+            if (diag.diagnoses && diag.diagnoses.name) {
+              if (index > 0) diagnosisText += '\n';
+              diagnosisText += `${diag.diagnoses.name}`;
+              if (diag.notes) diagnosisText += ` - ${diag.notes}`;
+            }
+          });
+        }
+
+        // Update diagnosis field only if empty
+        if (!diagnosis || diagnosis.trim() === '' || diagnosis === 'Enter diagnosis details...') {
+          setDiagnosis(diagnosisText.trim());
+          console.log('✅ Diagnosis field updated with:', diagnosisText.trim());
+        }
+
+        console.log('✅ Diagnosis data processed:', {
+          primaryFound: !!primaryDiagnosis,
+          primaryName: primaryDiagnosis?.diagnoses?.name,
+          secondaryCount: secondaryDiagnoses.length,
+          totalDiagnoses: visitDiagnosisData.length
+        });
+
+      } catch (error) {
+        console.log('❌ Error formatting diagnosis data:', error);
+      }
+    }
+  }, [visitDiagnosisData, diagnosis]);
+
+  // Populate form fields when existing discharge summary is loaded
+  useEffect(() => {
+    if (existingDischargeSummary) {
+      try {
+        console.log('📝 Populating form with existing discharge summary data');
+
+        const { summary, medications, examination, surgery } = existingDischargeSummary;
+
+        // Populate main fields
+        if (summary) {
+          setDiagnosis(summary.diagnosis || '');
+          setInvestigations(summary.investigations || '');
+          setStayNotes(summary.stay_notes || '');
+          setTreatmentCondition(summary.treatment_condition || 'Satisfactory');
+          setTreatmentStatus(summary.treatment_status || 'Please select');
+          setReviewDate(summary.review_date || '2025-09-26');
+          setResidentOnDischarge(summary.resident_on_discharge || 'Please select');
+          setEnableSmsAlert(summary.enable_sms_alert || false);
+
+          // Update patient info
+          setPatientInfo(prev => ({
+            ...prev,
+            otherConsultants: summary.other_consultants || '',
+            reasonOfDischarge: summary.reason_of_discharge || 'Please select'
+          }));
+        }
+
+        // Populate medications
+        if (medications && medications.length > 0) {
+          const formattedMedications = medications.map((med, index) => ({
+            id: (index + 1).toString(),
+            name: med.medication_name || '',
+            unit: med.unit || '',
+            remark: med.remark || '',
+            route: med.route || 'Select',
+            dose: med.dose || 'Select',
+            quantity: med.quantity || '',
+            days: med.days || '0',
+            startDate: med.start_date || '',
+            timing: {
+              morning: med.timing_morning || false,
+              afternoon: med.timing_afternoon || false,
+              evening: med.timing_evening || false,
+              night: med.timing_night || false
+            },
+            isSos: med.is_sos || false
+          }));
+
+          setMedicationRows(formattedMedications);
+          console.log('💊 Populated', formattedMedications.length, 'medications');
+        }
+
+        // Populate examination data
+        if (examination) {
+          setExamination({
+            temp: examination.temperature || '',
+            pr: examination.pulse_rate || '',
+            rr: examination.respiratory_rate || '',
+            bp: examination.blood_pressure || '',
+            spo2: examination.spo2 || '',
+            details: examination.examination_details || ''
+          });
+          console.log('🔍 Populated examination data');
+        }
+
+        // Populate surgery details
+        if (surgery) {
+          setSurgeryDetails({
+            date: surgery.surgery_date ? format(new Date(surgery.surgery_date), "yyyy-MM-dd'T'HH:mm") : '',
+            procedurePerformed: surgery.procedure_performed || '',
+            surgeon: surgery.surgeon || '',
+            anesthetist: surgery.anesthetist || '',
+            anesthesia: surgery.anesthesia_type || '',
+            implant: surgery.implant || '',
+            description: surgery.surgery_description || ''
+          });
+          console.log('🏥 Populated surgery details');
+        }
+
+        console.log('✅ Form populated with existing discharge summary data');
+
+      } catch (error) {
+        console.error('❌ Error populating form with existing data:', error);
+      }
+    }
+  }, [existingDischargeSummary]);
 
   // Error boundary to catch and properly handle database errors
   React.useEffect(() => {
@@ -641,15 +1234,91 @@ const IpdDischargeSummary = () => {
     ));
   };
 
-  const addStayMedicineRow = () => {
-    setStayMedicines([...stayMedicines, { name: '', date: '' }]);
+  // Template management functions
+  const addNewTemplate = () => {
+    if (newTemplateName.trim() && newTemplateContent.trim()) {
+      const newTemplate = {
+        name: newTemplateName.trim(),
+        content: newTemplateContent.trim()
+      };
+      setStayNotesTemplates([...stayNotesTemplates, newTemplate]);
+      setNewTemplateName('');
+      setNewTemplateContent('');
+      setShowAddTemplate(false);
+      toast({
+        title: "Success",
+        description: "Template added successfully",
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: "Please provide both template name and content",
+        variant: "destructive"
+      });
+    }
   };
 
-  const updateStayMedicine = (index: number, field: string, value: string) => {
-    const updated = [...stayMedicines];
-    updated[index] = { ...updated[index], [field]: value };
-    setStayMedicines(updated);
+  const editTemplate = (index: number) => {
+    setEditingTemplateIndex(index);
+    setEditingTemplateName(stayNotesTemplates[index].name);
+    setEditingTemplateContent(stayNotesTemplates[index].content);
   };
+
+  const saveEditTemplate = () => {
+    if (editingTemplateIndex !== null && editingTemplateName.trim() && editingTemplateContent.trim()) {
+      const updatedTemplates = [...stayNotesTemplates];
+      updatedTemplates[editingTemplateIndex] = {
+        name: editingTemplateName.trim(),
+        content: editingTemplateContent.trim()
+      };
+      setStayNotesTemplates(updatedTemplates);
+      setEditingTemplateIndex(null);
+      setEditingTemplateName('');
+      setEditingTemplateContent('');
+      toast({
+        title: "Success",
+        description: "Template updated successfully",
+      });
+    } else {
+      toast({
+        title: "Error",
+        description: "Please provide both template name and content",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const cancelEditTemplate = () => {
+    setEditingTemplateIndex(null);
+    setEditingTemplateName('');
+    setEditingTemplateContent('');
+  };
+
+  const deleteTemplate = (index: number) => {
+    const updatedTemplates = stayNotesTemplates.filter((_, i) => i !== index);
+    setStayNotesTemplates(updatedTemplates);
+    toast({
+      title: "Success",
+      description: "Template deleted successfully",
+    });
+  };
+
+  const moveTemplateUp = (index: number) => {
+    if (index > 0) {
+      const updatedTemplates = [...stayNotesTemplates];
+      [updatedTemplates[index], updatedTemplates[index - 1]] = [updatedTemplates[index - 1], updatedTemplates[index]];
+      setStayNotesTemplates(updatedTemplates);
+    }
+  };
+
+  const moveTemplateDown = (index: number) => {
+    if (index < stayNotesTemplates.length - 1) {
+      const updatedTemplates = [...stayNotesTemplates];
+      [updatedTemplates[index], updatedTemplates[index + 1]] = [updatedTemplates[index + 1], updatedTemplates[index]];
+      setStayNotesTemplates(updatedTemplates);
+    }
+  };
+
 
   const handleSave = async () => {
     try {
@@ -661,14 +1330,27 @@ const IpdDischargeSummary = () => {
         return;
       }
 
-      // Prepare data for saving
+      console.log('💾 Starting discharge summary save process...');
+
+      // Start a transaction by using multiple queries
+      // 1. First, get or create the visit UUID
+      let visitUUID = patientData.id;
+      if (!visitUUID) {
+        const { data: visitData } = await supabase
+          .from('visits')
+          .select('id')
+          .eq('visit_id', visitId)
+          .single();
+        visitUUID = visitData?.id;
+      }
+
+      // 2. Prepare main discharge summary data
       const dischargeData = {
         visit_id: visitId,
+        visit_uuid: visitUUID,
         diagnosis,
         investigations,
         stay_notes: stayNotes,
-        medications: JSON.stringify(medicationRows),
-        examination_data: JSON.stringify(examination),
         other_consultants: patientInfo.otherConsultants,
         reason_of_discharge: patientInfo.reasonOfDischarge,
         treatment_condition: treatmentCondition,
@@ -679,13 +1361,106 @@ const IpdDischargeSummary = () => {
         updated_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
+      console.log('💾 Saving main discharge summary...', dischargeData);
+
+      // 3. Upsert main discharge summary
+      const { data: dischargeSummary, error: summaryError } = await supabase
         .from('discharge_summaries')
         .upsert(dischargeData)
         .select()
         .single();
 
-      if (error) throw error;
+      if (summaryError) throw summaryError;
+
+      console.log('✅ Discharge summary saved:', dischargeSummary.id);
+
+      // 4. Save medications to junction table
+      if (medicationRows && medicationRows.length > 0) {
+        console.log('💊 Saving medications...', medicationRows.length, 'medications');
+
+        // Delete existing medications for this discharge summary
+        await supabase
+          .from('discharge_medications')
+          .delete()
+          .eq('discharge_summary_id', dischargeSummary.id);
+
+        // Insert new medications
+        const medicationsToInsert = medicationRows
+          .filter(med => med.name && med.name.trim() !== '') // Only save non-empty medications
+          .map((med, index) => ({
+            discharge_summary_id: dischargeSummary.id,
+            medication_name: med.name,
+            unit: med.unit,
+            remark: med.remark,
+            route: med.route,
+            dose: med.dose,
+            quantity: med.quantity,
+            days: med.days,
+            start_date: med.startDate ? med.startDate : null,
+            timing_morning: med.timing?.morning || false,
+            timing_afternoon: med.timing?.afternoon || false,
+            timing_evening: med.timing?.evening || false,
+            timing_night: med.timing?.night || false,
+            is_sos: med.isSos || false,
+            medication_order: index
+          }));
+
+        if (medicationsToInsert.length > 0) {
+          const { error: medicationsError } = await supabase
+            .from('discharge_medications')
+            .insert(medicationsToInsert);
+
+          if (medicationsError) throw medicationsError;
+          console.log('✅ Medications saved:', medicationsToInsert.length);
+        }
+      }
+
+      // 5. Save examination data
+      if (examination && Object.keys(examination).length > 0) {
+        console.log('🔍 Saving examination data...', examination);
+
+        const examinationData = {
+          discharge_summary_id: dischargeSummary.id,
+          temperature: examination.temp,
+          pulse_rate: examination.pr,
+          respiratory_rate: examination.rr,
+          blood_pressure: examination.bp,
+          spo2: examination.spo2,
+          examination_details: examination.details
+        };
+
+        const { error: examinationError } = await supabase
+          .from('discharge_examinations')
+          .upsert(examinationData);
+
+        if (examinationError) throw examinationError;
+        console.log('✅ Examination data saved');
+      }
+
+      // 6. Save surgery details
+      if (surgeryDetails && Object.keys(surgeryDetails).some(key => surgeryDetails[key])) {
+        console.log('🏥 Saving surgery details...', surgeryDetails);
+
+        const surgeryData = {
+          discharge_summary_id: dischargeSummary.id,
+          surgery_date: surgeryDetails.date ? new Date(surgeryDetails.date).toISOString() : null,
+          procedure_performed: surgeryDetails.procedurePerformed,
+          surgeon: surgeryDetails.surgeon,
+          anesthetist: surgeryDetails.anesthetist,
+          anesthesia_type: surgeryDetails.anesthesia,
+          implant: surgeryDetails.implant,
+          surgery_description: surgeryDetails.description
+        };
+
+        const { error: surgeryError } = await supabase
+          .from('discharge_surgery_details')
+          .upsert(surgeryData);
+
+        if (surgeryError) throw surgeryError;
+        console.log('✅ Surgery details saved');
+      }
+
+      console.log('🎉 All discharge summary data saved successfully!');
 
       toast({
         title: "Success",
@@ -693,10 +1468,10 @@ const IpdDischargeSummary = () => {
       });
 
     } catch (error) {
-      console.error('Error saving discharge summary:', error);
+      console.error('❌ Error saving discharge summary:', error);
       toast({
         title: "Error",
-        description: "Failed to save discharge summary. Please try again.",
+        description: `Failed to save discharge summary: ${error.message}`,
       });
     }
   };
@@ -723,20 +1498,50 @@ const IpdDischargeSummary = () => {
       // Search for lab results using the visit_id directly (same as dashboard)
       console.log('🧪 Searching lab results for visit_id:', visitId);
 
-      const { data, error } = await supabase
-        .from('lab_results')
-        .select(`
-          id,
-          visit_id,
-          test_name,
-          test_category,
-          result_value,
-          result_unit,
-          main_test_name,
-          created_at
-        `)
-        .eq('visit_id', visitId)
-        .order('created_at', { ascending: false });
+      // Try with visit_id_string first, fallback to visit_id if column doesn't exist
+      let data, error;
+
+      try {
+        const result = await supabase
+          .from('lab_results')
+          .select(`
+            id,
+            visit_id,
+            visit_id_string,
+            test_name,
+            test_category,
+            result_value,
+            result_unit,
+            main_test_name,
+            created_at
+          `)
+          .or(`visit_id_string.eq.${visitId},visit_id.eq.${visitId}`)
+          .order('created_at', { ascending: false });
+
+        data = result.data;
+        error = result.error;
+      } catch (columnError) {
+        console.log('🔄 visit_id_string column not found, using visit_id fallback');
+
+        // Fallback: query without visit_id_string column
+        const result = await supabase
+          .from('lab_results')
+          .select(`
+            id,
+            visit_id,
+            test_name,
+            test_category,
+            result_value,
+            result_unit,
+            main_test_name,
+            created_at
+          `)
+          .eq('visit_id', visitId)
+          .order('created_at', { ascending: false });
+
+        data = result.data;
+        error = result.error;
+      }
 
       // If no results for this visit ID, try to get any recent lab results to show example format
       if (!data || data.length === 0) {
@@ -1312,38 +2117,30 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
       {/* Diagnosis */}
       <Card>
         <CardHeader>
-          <CardTitle>Diagnosis</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>Diagnosis</span>
+            {isDiagnosisLoading && (
+              <div className="flex items-center text-sm text-gray-500">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                Loading diagnosis data...
+              </div>
+            )}
+            {visitDiagnosisData && visitDiagnosisData.length > 0 && (
+              <Badge variant="secondary" className="text-green-700 bg-green-100">
+                {visitDiagnosisData.length} Diagnosis(es) Found
+              </Badge>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Templates:</Label>
-              <div className="border rounded p-2 h-32 overflow-y-auto">
-                <div className="space-y-1">
-                  {diagnosisTemplates.map((template, index) => (
-                    <div key={index} className="flex items-center space-x-2 text-sm">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDiagnosis(diagnosis + template)}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        {template}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Diagnosis Details:</Label>
-              <Textarea
-                value={diagnosis}
-                onChange={(e) => setDiagnosis(e.target.value)}
-                placeholder="Enter diagnosis details..."
-                className="min-h-[120px]"
-              />
-            </div>
+          <div className="space-y-2">
+            <Label>Diagnosis Details:</Label>
+            <Textarea
+              value={diagnosis}
+              onChange={(e) => setDiagnosis(e.target.value)}
+              placeholder="Enter diagnosis details..."
+              className="min-h-[120px]"
+            />
           </div>
         </CardContent>
       </Card>
@@ -1373,12 +2170,49 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
               <tbody>
                 {medicationRows.map((row, index) => (
                   <tr key={row.id}>
-                    <td className="border border-gray-300 px-1 py-1">
-                      <Input
-                        value={row.name}
-                        onChange={(e) => updateMedicationRow(row.id, 'name', e.target.value)}
-                        className="border-0 focus:ring-0 text-sm"
-                      />
+                    <td className="border border-gray-300 px-1 py-1 relative">
+                      <div className="relative">
+                        <Input
+                          value={row.name}
+                          onChange={(e) => {
+                            updateMedicationRow(row.id, 'name', e.target.value);
+                            setMedicationSearchTerm(e.target.value);
+                            setActiveSearchRowId(row.id);
+                          }}
+                          onFocus={() => setActiveSearchRowId(row.id)}
+                          onBlur={() => setTimeout(() => setActiveSearchRowId(null), 300)}
+                          className="border-0 focus:ring-0 text-sm"
+                          placeholder="Search medicine name..."
+                        />
+                        {medicationSearchTerm.length >= 2 && availableMedications.length > 0 && activeSearchRowId === row.id && (
+                          <div className="absolute top-full left-0 right-0 z-50 bg-white border border-gray-200 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                            {availableMedications.map((medication) => (
+                              <div
+                                key={medication.id}
+                                className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm border-b border-gray-100 last:border-b-0"
+                                onMouseDown={(e) => {
+                                  e.preventDefault(); // Prevent blur event
+                                  const medicationName = medication.name + (medication.strength ? ` ${medication.strength}` : '');
+                                  updateMedicationRow(row.id, 'name', medicationName);
+                                  setMedicationSearchTerm('');
+                                  setActiveSearchRowId(null);
+                                }}
+                              >
+                                <div className="font-medium text-gray-900">{medication.name}</div>
+                                {medication.strength && (
+                                  <div className="text-xs text-gray-500">Strength: {medication.strength}</div>
+                                )}
+                                {medication.generic_name && (
+                                  <div className="text-xs text-gray-500">Generic: {medication.generic_name}</div>
+                                )}
+                                {medication.manufacturer && (
+                                  <div className="text-xs text-gray-400">Mfg: {medication.manufacturer}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="border border-gray-300 px-1 py-1">
                       <Input
@@ -1404,10 +2238,18 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Select">Select</SelectItem>
-                          <SelectItem value="Oral">Oral</SelectItem>
+                          <SelectItem value="PO">PO</SelectItem>
                           <SelectItem value="IV">IV</SelectItem>
                           <SelectItem value="IM">IM</SelectItem>
+                          <SelectItem value="S/C">S/C</SelectItem>
+                          <SelectItem value="PR">PR</SelectItem>
+                          <SelectItem value="P/V">P/V</SelectItem>
+                          <SelectItem value="R.T">R.T</SelectItem>
+                          <SelectItem value="LA">LA</SelectItem>
                           <SelectItem value="Topical">Topical</SelectItem>
+                          <SelectItem value="Oral">Oral</SelectItem>
+                          <SelectItem value="Sublingual">Sublingual</SelectItem>
+                          <SelectItem value="Inhalation">Inhalation</SelectItem>
                         </SelectContent>
                       </Select>
                     </td>
@@ -1421,9 +2263,22 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Select">Select</SelectItem>
+                          <SelectItem value="SOS">SOS</SelectItem>
+                          <SelectItem value="OD">OD</SelectItem>
+                          <SelectItem value="BD">BD</SelectItem>
+                          <SelectItem value="TDS">TDS</SelectItem>
+                          <SelectItem value="QID">QID</SelectItem>
+                          <SelectItem value="HS">HS</SelectItem>
+                          <SelectItem value="Twice a week">Twice a week</SelectItem>
+                          <SelectItem value="Once a week">Once a week</SelectItem>
+                          <SelectItem value="Once fort nightly">Once fort nightly</SelectItem>
+                          <SelectItem value="Once a month">Once a month</SelectItem>
+                          <SelectItem value="A/D">A/D</SelectItem>
                           <SelectItem value="1">1</SelectItem>
                           <SelectItem value="2">2</SelectItem>
                           <SelectItem value="0.5">0.5</SelectItem>
+                          <SelectItem value="1/2">1/2</SelectItem>
+                          <SelectItem value="1/4">1/4</SelectItem>
                         </SelectContent>
                       </Select>
                     </td>
@@ -1453,14 +2308,34 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
                       <div className="flex space-x-1">
                         {['I', 'II', 'III', 'IV'].map((timing, timingIndex) => (
                           <Select key={timing}>
-                            <SelectTrigger className="border-0 focus:ring-0 text-xs h-6 w-12">
+                            <SelectTrigger className="border-0 focus:ring-0 text-xs h-6 w-16">
                               <SelectValue placeholder={timing} />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="morning">M</SelectItem>
-                              <SelectItem value="afternoon">A</SelectItem>
-                              <SelectItem value="evening">E</SelectItem>
-                              <SelectItem value="night">N</SelectItem>
+                              <SelectItem value="1AM">1AM</SelectItem>
+                              <SelectItem value="2AM">2AM</SelectItem>
+                              <SelectItem value="3AM">3AM</SelectItem>
+                              <SelectItem value="4AM">4AM</SelectItem>
+                              <SelectItem value="5AM">5AM</SelectItem>
+                              <SelectItem value="6AM">6AM</SelectItem>
+                              <SelectItem value="7AM">7AM</SelectItem>
+                              <SelectItem value="8AM">8AM</SelectItem>
+                              <SelectItem value="9AM">9AM</SelectItem>
+                              <SelectItem value="10AM">10AM</SelectItem>
+                              <SelectItem value="11AM">11AM</SelectItem>
+                              <SelectItem value="12AM">12AM</SelectItem>
+                              <SelectItem value="1PM">1PM</SelectItem>
+                              <SelectItem value="2PM">2PM</SelectItem>
+                              <SelectItem value="3PM">3PM</SelectItem>
+                              <SelectItem value="4PM">4PM</SelectItem>
+                              <SelectItem value="5PM">5PM</SelectItem>
+                              <SelectItem value="6PM">6PM</SelectItem>
+                              <SelectItem value="7PM">7PM</SelectItem>
+                              <SelectItem value="8PM">8PM</SelectItem>
+                              <SelectItem value="9PM">9PM</SelectItem>
+                              <SelectItem value="10PM">10PM</SelectItem>
+                              <SelectItem value="11PM">11PM</SelectItem>
+                              <SelectItem value="12PM">12PM</SelectItem>
                             </SelectContent>
                           </Select>
                         ))}
@@ -1609,6 +2484,120 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
         </CardContent>
       </Card>
 
+      {/* Surgery Details */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Surgery Details</span>
+            {(isSurgeryLoading || isOtNotesLoading) && (
+              <div className="flex items-center text-sm text-gray-500">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                {isSurgeryLoading && isOtNotesLoading ? 'Loading surgery & OT data...' :
+                 isSurgeryLoading ? 'Loading surgery data...' :
+                 'Loading OT notes...'}
+              </div>
+            )}
+            {visitSurgeryData && visitSurgeryData.length > 0 && (
+              <Badge variant="secondary" className="text-green-700 bg-green-100">
+                {visitSurgeryData.length} Surgery(s) Found
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Date:</Label>
+              <Input
+                type="datetime-local"
+                value={surgeryDetails.date}
+                onChange={(e) => setSurgeryDetails({...surgeryDetails, date: e.target.value})}
+                placeholder="Select date and time"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Procedure Performed:</Label>
+              <Input
+                value={surgeryDetails.procedurePerformed}
+                onChange={(e) => setSurgeryDetails({...surgeryDetails, procedurePerformed: e.target.value})}
+                placeholder="e.g., Femoral Hernia Repair (427), Hernia Repair (CGHS-003), 2D echocardiography (592)"
+                className={visitSurgeryData && visitSurgeryData.length > 0 ? 'bg-green-50 border-green-200' : ''}
+                readOnly={isSurgeryLoading}
+              />
+              {visitSurgeryData && visitSurgeryData.length > 0 && (
+                <div className="text-xs text-green-600">
+                  ✅ Loaded from billing system
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Surgeon:</Label>
+              <Input
+                value={surgeryDetails.surgeon}
+                onChange={(e) => setSurgeryDetails({...surgeryDetails, surgeon: e.target.value})}
+                placeholder="Enter surgeon name"
+                className={isSurgeryLoading ? 'bg-gray-50' : ''}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Anesthetist:</Label>
+              <Input
+                value={surgeryDetails.anesthetist}
+                onChange={(e) => setSurgeryDetails({...surgeryDetails, anesthetist: e.target.value})}
+                placeholder="Enter anesthetist name"
+                className={isSurgeryLoading ? 'bg-gray-50' : ''}
+                readOnly={isSurgeryLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Anesthesia:</Label>
+              <Input
+                value={surgeryDetails.anesthesia}
+                onChange={(e) => setSurgeryDetails({...surgeryDetails, anesthesia: e.target.value})}
+                placeholder="Enter anesthesia type"
+                className={isSurgeryLoading ? 'bg-gray-50' : ''}
+                readOnly={isSurgeryLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Implant:</Label>
+              <Input
+                value={surgeryDetails.implant}
+                onChange={(e) => setSurgeryDetails({...surgeryDetails, implant: e.target.value})}
+                placeholder="e.g., asssssassax or N/A if no implant"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Description:</Label>
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+              >
+                🤖 AI Generate
+              </Button>
+            </div>
+            <Textarea
+              value={surgeryDetails.description}
+              onChange={(e) => setSurgeryDetails({...surgeryDetails, description: e.target.value})}
+              placeholder={`**Surgical Operation Record**
+
+**Patient Information:**
+- Name: USA
+- Age: 25
+- Gender: Male
+
+**Date of Surgery:** September 25, 2025
+
+Enter surgical procedure description here...`}
+              className="min-h-[150px]"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       {/* OT Notes / Stay Notes */}
       <Card>
         <CardHeader>
@@ -1618,23 +2607,181 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Favorite Templates:</Label>
-                <div className="border rounded p-2 h-40 overflow-y-auto">
-                  {stayNotesTemplates.map((template, index) => (
-                    <div key={index} className="flex items-center justify-between p-1 hover:bg-gray-50">
-                      <span className="text-sm cursor-pointer" onClick={() => setStayNotes(stayNotes + template)}>
-                        {template}
-                      </span>
-                      <div className="space-x-1">
-                        <Button variant="ghost" size="sm">✏️</Button>
-                        <Button variant="ghost" size="sm">🗑️</Button>
+                <div className="flex justify-end mb-2">
+                  <Button
+                    onClick={() => setShowAddTemplate(!showAddTemplate)}
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700 text-white px-3"
+                  >
+                    {showAddTemplate ? 'Cancel' : 'Add'}
+                  </Button>
+                </div>
+
+                {/* Collapsible Add New Template */}
+                {showAddTemplate && (
+                  <div className="mb-2 p-3 border rounded bg-gray-50 animate-in slide-in-from-top-2 duration-200">
+                    <Label className="text-sm font-medium mb-2 block">Add New Template:</Label>
+                    <div className="space-y-2">
+                      <Input
+                        placeholder="Template name..."
+                        className="text-sm"
+                        value={newTemplateName}
+                        onChange={(e) => setNewTemplateName(e.target.value)}
+                        autoFocus
+                      />
+                      <Textarea
+                        placeholder="Template content..."
+                        className="text-sm min-h-[60px]"
+                        value={newTemplateContent}
+                        onChange={(e) => setNewTemplateContent(e.target.value)}
+                      />
+                      <div className="flex space-x-2">
+                        <Button
+                          onClick={addNewTemplate}
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 text-white flex-1"
+                          disabled={!newTemplateName.trim() || !newTemplateContent.trim()}
+                        >
+                          Add Template
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setShowAddTemplate(false);
+                            setNewTemplateName('');
+                            setNewTemplateContent('');
+                          }}
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                        >
+                          Cancel
+                        </Button>
                       </div>
                     </div>
-                  ))}
+                  </div>
+                )}
+
+                <Label>Favorite Templates:</Label>
+                <div className="border rounded p-2 h-48 overflow-y-auto bg-cyan-50">
+                  {stayNotesTemplates.map((template, index) => {
+                    const isEditing = editingTemplateIndex === index;
+
+                    return (
+                      <div key={index} className="p-2 hover:bg-white hover:shadow-sm rounded mb-2 border-b border-gray-100 last:border-b-0">
+                        {isEditing ? (
+                          <div className="space-y-2">
+                            <Input
+                              value={editingTemplateName}
+                              onChange={(e) => setEditingTemplateName(e.target.value)}
+                              className="text-sm h-8 font-medium"
+                              placeholder="Template name..."
+                              autoFocus
+                            />
+                            <Textarea
+                              value={editingTemplateContent}
+                              onChange={(e) => setEditingTemplateContent(e.target.value)}
+                              className="text-sm min-h-[60px]"
+                              placeholder="Template content..."
+                            />
+                            <div className="flex space-x-2">
+                              <Button
+                                onClick={saveEditTemplate}
+                                size="sm"
+                                className="bg-green-600 hover:bg-green-700 text-white text-xs flex-1"
+                              >
+                                Save
+                              </Button>
+                              <Button
+                                onClick={cancelEditTemplate}
+                                size="sm"
+                                variant="outline"
+                                className="text-xs flex-1"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 cursor-pointer" onClick={() => setStayNotes(prev => prev + (prev ? '\n\n' : '') + template.content)}>
+                                <div className="text-sm font-medium text-gray-800 mb-1">{template.name}</div>
+                                <div className="text-xs text-gray-600 line-clamp-2">{template.content}</div>
+                              </div>
+                              <div className="flex space-x-1 ml-2">
+                                <Button
+                                  onClick={() => editTemplate(index)}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800"
+                                  title="Edit template"
+                                >
+                                  ✏️
+                                </Button>
+                                <Button
+                                  onClick={() => deleteTemplate(index)}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-red-600 hover:text-red-800"
+                                  title="Delete template"
+                                >
+                                  🗑️
+                                </Button>
+                                <Button
+                                  onClick={() => moveTemplateUp(index)}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-gray-600 hover:text-gray-800"
+                                  disabled={index === 0}
+                                  title="Move up"
+                                >
+                                  ⬆️
+                                </Button>
+                                <Button
+                                  onClick={() => moveTemplateDown(index)}
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 text-gray-600 hover:text-gray-800"
+                                  disabled={index === stayNotesTemplates.length - 1}
+                                  title="Move down"
+                                >
+                                  ⬇️
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="flex space-x-2">
-                  <Button size="sm" className="bg-blue-600 hover:bg-blue-700">Message Chat GPT Ask</Button>
-                  <Button size="sm" variant="outline" onClick={handleFetchInvestigations}>Fetch Data</Button>
+                <div className="space-y-2">
+                  <Textarea
+                    placeholder="Choose from above or type here..."
+                    className="min-h-[80px] text-sm"
+                    value={newTemplateContent}
+                    onChange={(e) => setNewTemplateContent(e.target.value)}
+                  />
+                  <div className="flex space-x-2">
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                      onClick={() => {
+                        if (newTemplateContent.trim()) {
+                          setStayNotes(prev => prev + (prev ? '\n\n' : '') + newTemplateContent.trim());
+                          setNewTemplateContent('');
+                        }
+                      }}
+                    >
+                      Message chat GPT as
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Fetch Data
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="space-y-2">
@@ -1642,51 +2789,11 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
                 <Textarea
                   value={stayNotes}
                   onChange={(e) => setStayNotes(e.target.value)}
-                  placeholder="Enter stay notes..."
-                  className="min-h-[180px]"
+                  className="min-h-[280px]"
                 />
               </div>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Stay Medicines */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Stay Medicines:</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <table className="w-full border-collapse border border-gray-300">
-            <thead>
-              <tr className="bg-gray-50">
-                <th className="border border-gray-300 px-4 py-2 text-left">Name of Medication</th>
-                <th className="border border-gray-300 px-4 py-2 text-left">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stayMedicines.map((medicine, index) => (
-                <tr key={index}>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <Input
-                      value={medicine.name}
-                      onChange={(e) => updateStayMedicine(index, 'name', e.target.value)}
-                      className="border-0 focus:ring-0"
-                    />
-                  </td>
-                  <td className="border border-gray-300 px-2 py-2">
-                    <Input
-                      type="date"
-                      value={medicine.date}
-                      onChange={(e) => updateStayMedicine(index, 'date', e.target.value)}
-                      className="border-0 focus:ring-0"
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <Button onClick={addStayMedicineRow} size="sm" className="mt-2">Add Row</Button>
         </CardContent>
       </Card>
 
