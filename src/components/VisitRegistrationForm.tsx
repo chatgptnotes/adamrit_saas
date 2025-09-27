@@ -239,6 +239,18 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
         // Close the form
         onClose();
 
+        // Redirect to appropriate dashboard based on patient type
+        setTimeout(() => {
+          if (formData.patientType === 'OPD' || formData.patientType === 'OPD (Outpatient)') {
+            navigate('/todays-opd');
+          } else if (formData.patientType === 'IPD' || formData.patientType === 'IPD (Inpatient)') {
+            navigate('/todays-ipd');
+          } else if (formData.patientType === 'Emergency') {
+            // For emergency, redirect to IPD dashboard as well
+            navigate('/todays-ipd');
+          }
+        }, 1500); // Wait 1.5 seconds to let user see the success message
+
       } else {
         // Create new visit (existing code)
         const visitId = await generateVisitId(visitDate);
@@ -412,14 +424,26 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
       queryClient.invalidateQueries({ queryKey: ['patients'] });
       queryClient.invalidateQueries({ queryKey: ['patient-data'] }); // This will refresh Reports page data
       queryClient.invalidateQueries({ queryKey: ['spreadsheet-data'] }); // Refresh spreadsheet data
-      
+
       handleCancel();
-      
+
       // Show success message with confirmation
       toast({
         title: "Data Stored Successfully",
         description: `Patient ID ${readablePatientId} and Visit ID ${visitData.visit_id} stored properly!`,
       });
+
+      // Redirect to appropriate dashboard based on patient type
+      setTimeout(() => {
+        if (formData.patientType === 'OPD' || formData.patientType === 'OPD (Outpatient)') {
+          navigate('/todays-opd');
+        } else if (formData.patientType === 'IPD' || formData.patientType === 'IPD (Inpatient)') {
+          navigate('/todays-ipd');
+        } else if (formData.patientType === 'Emergency') {
+          // For emergency, redirect to IPD dashboard as well
+          navigate('/todays-ipd');
+        }
+      }, 1500); // Wait 1.5 seconds to let user see the success message
       }  // Close the else block for create new visit
 
     } catch (error) {
