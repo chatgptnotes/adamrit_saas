@@ -33,6 +33,33 @@ interface Patient {
   discharge_summary?: string;
 }
 
+// Helper function to convert HTML to plain text
+function htmlToPlainText(html: string): string {
+  // Create a temporary div element to parse HTML
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = html;
+
+  // Replace <br> and </p> tags with newlines
+  html = html.replace(/<br\s*\/?>/gi, '\n');
+  html = html.replace(/<\/p>/gi, '\n\n');
+  html = html.replace(/<\/div>/gi, '\n');
+  html = html.replace(/<\/li>/gi, '\n');
+
+  // Remove all HTML tags
+  html = html.replace(/<[^>]*>/g, '');
+
+  // Decode HTML entities
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = html;
+  html = textarea.value;
+
+  // Clean up extra whitespace
+  html = html.replace(/\n{3,}/g, '\n\n'); // Replace 3+ newlines with 2
+  html = html.replace(/^\s+|\s+$/g, ''); // Trim
+
+  return html;
+}
+
 export default function DischargeSummaryEdit() {
   const { visitId } = useParams<{ visitId: string }>();
   const navigate = useNavigate();
@@ -103,8 +130,12 @@ export default function DischargeSummaryEdit() {
         if (visitData) {
           setPatient(visitData);
           const existingSummary = visitData.discharge_summary || '';
-          setDischargeSummaryText(existingSummary);
-          setOriginalText(existingSummary);
+          // Convert HTML to plain text if the summary contains HTML tags
+          const summaryToSet = existingSummary.includes('<') && existingSummary.includes('>')
+            ? htmlToPlainText(existingSummary)
+            : existingSummary;
+          setDischargeSummaryText(summaryToSet);
+          setOriginalText(summaryToSet);
         }
       } catch (error) {
         console.error('Exception while fetching patient data:', error);
@@ -774,6 +805,34 @@ export default function DischargeSummaryEdit() {
       const visitDate = visit.visit_date ? new Date(visit.visit_date).toLocaleDateString() : 'Unknown Date';
       const doctorName = visit.appointment_with || 'Dr. Unknown';
 
+      // Define complaints from visit diagnosis or reason for visit
+      const complaints = visitDiagnosis?.complaints ||
+                        (patient.reason_for_visit ? [patient.reason_for_visit] : []);
+
+      // Create medications table
+      let medicationsTable = '';
+      if (visitDiagnosis?.medications && visitDiagnosis.medications.length > 0) {
+        medicationsTable = `Medications on Discharge:
+--------------------------------------------------------------------------------
+Name                    Strength    Route    Dosage                          Days
+--------------------------------------------------------------------------------
+`;
+        visitDiagnosis.medications.forEach(med => {
+          // Parse medication string if it's in a specific format
+          // For now, add as a single line - can be enhanced based on actual data format
+          medicationsTable += `${med}
+`;
+        });
+      } else {
+        // Default medications if none provided
+        medicationsTable = `Medications on Discharge:
+--------------------------------------------------------------------------------
+Name                    Strength    Route    Dosage                          Days
+--------------------------------------------------------------------------------
+As per prescription provided separately
+`;
+      }
+
       // Create present condition narrative
       const presentConditionText = complications.length > 0
         ? `The patient presented with ${primaryDiagnosis.toLowerCase()}${secondaryDiagnoses.length > 0 ? ` along with ${secondaryDiagnoses.join(', ').toLowerCase()}` : ''}. During the course of treatment, the following complications were noted: ${complications.join(', ').toLowerCase()}.`
@@ -793,174 +852,105 @@ export default function DischargeSummaryEdit() {
           }).join(', ')}. All medications should be taken as prescribed and the patient should complete the full course of treatment.`
         : `No specific medications were prescribed at discharge. The patient should continue with general supportive care as advised.`;
 
-      // Create lab results narrative
-      const labResultsText = formattedLabResultsLocal.length > 0 || labResultsList.length > 0
-        ? `Laboratory investigations revealed the following results: ${[...formattedLabResultsLocal, ...labResultsList].map(result => result.replace(/•\s*/, '')).join(', ')}. ${abnormalResultsLocal && abnormalResultsLocal.length > 0 ? `Notable abnormal values include ${abnormalResultsLocal.map(result => result.replace(/•\s*/, '')).join(', ')}, which require monitoring and follow-up.` : 'All laboratory parameters were within acceptable ranges.'}`
-        : 'Laboratory investigations were conducted as clinically indicated with results within normal parameters.';
+      // Create lab results table format
+      let labResultsTable = '';
+      if (formattedLabResultsLocal.length > 0 || labResultsList.length > 0) {
+        labResultsTable = `Laboratory Investigations:
+--------------------------------------------------------------------------------
+Test Name                          Result              Reference Range     Status
+--------------------------------------------------------------------------------\n`;
 
-      const summary = `<div style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; max-width: 800px;">
+        // Add formatted lab results
+        if (labResultsData && labResultsData.length > 0) {
+          labResultsData.forEach(result => {
+            const testName = (result.test_name || 'Unknown Test').padEnd(35);
+            const value = (result.result_value ? `${result.result_value}${result.result_unit ? ' ' + result.result_unit : ''}` : 'N/A').padEnd(20);
+            const range = (result.reference_range || 'N/A').padEnd(18);
+            const status = result.is_abnormal ? '⚠ ABNORMAL' : '✓ Normal';
+            labResultsTable += `${testName}${value}${range}${status}\n`;
+          });
+        } else if (labResultsList.length > 0) {
+          labResultsList.forEach(item => {
+            labResultsTable += `${item}\n`;
+          });
+        }
+      }
 
-<div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-Discharge Summary
-</div>
+      const summary = `DISCHARGE SUMMARY
+================================================================================
 
-<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 15px;">
-  <div style="flex: 1;">
-    <div><strong>Name</strong> : ${patientName}</div>
-    <div><strong>Primary Care Provider</strong> : ${doctorName}</div>
-    <div style="margin-left: 25px;">(Gastroenterologist)</div>
-    <div><strong>Sex / Age</strong> : ${patientGender} / ${patientAge} Year</div>
-    <div><strong>Tariff</strong> : Private</div>
-    <div><strong>Admission Date</strong> : ${visitDate}</div>
-    <div><strong>Discharge Reason</strong> : Recovered</div>
-  </div>
-  <div style="flex: 1; padding-left: 40px;">
-    <div><strong>Patient ID</strong> : ${patientInfo.patients_id || patient.patients?.patients_id || 'UHHO24E21008'}</div>
-    <div><strong>Registration ID</strong> : ${patient.patients?.registration_id || 'IH24E21009'}</div>
-    <div><strong>Mobile No</strong> : ${patient.patients?.mobile || '7898395373'}</div>
-    <div><strong>Address</strong> : ${patient.patients?.address || 'Address not provided'}</div>
-    <div><strong>Discharge Date</strong> : ${new Date().toLocaleDateString()}</div>
-  </div>
-</div>
+Name: ${patientName}                           Patient ID: ${patientInfo.patients_id || patient.patients?.patients_id || 'UHAY25I22001'}
+Primary Care Provider: ${doctorName}           Registration ID: ${patient.patients?.registration_id || 'IH25I22001'}
+Sex / Age: ${patientGender} / ${patientAge} Year              Mobile No: ${patient.patients?.mobile || 'N/A'}
+Tariff: ${patient.patients?.tariff || 'Private'}              Address: ${patient.patients?.address || 'N/A'}
+Admission Date: ${visitDate}                   Discharge Date: ${new Date().toLocaleDateString()}
+Discharge Reason: Recovered
 
-<div style="margin: 20px 0;">
-  <h3 style="font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px;">Present Condition</h3>
+================================================================================
 
-  <div style="margin: 15px 0;">
-    <strong>Diagnosis:</strong> ${primaryDiagnosis}${secondaryDiagnoses.length > 0 ? `, ${secondaryDiagnoses.join(', ')}` : ''}
-  </div>
+PRESENT CONDITION
 
-  <div style="margin: 20px 0;">
-    <strong>Medications on Discharge:</strong>
-    <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-      <thead>
-        <tr style="background-color: #f5f5f5;">
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Name</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Strength</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Route</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Dosage</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Number of Days to be taken</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ. MONOCEF</td><td style="border: 1px solid #000; padding: 8px;">1 GM</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ. AMIAKCIN</td><td style="border: 1px solid #000; padding: 8px;">500 MG</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ METRO</td><td style="border: 1px solid #000; padding: 8px;">100 MG</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Thrice a day (Din me teen bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ PAN</td><td style="border: 1px solid #000; padding: 8px;">40 MG</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">SIT BATH WITH BETADONE</td><td style="border: 1px solid #000; padding: 8px;">NA</td><td style="border: 1px solid #000; padding: 8px;">Local</td><td style="border: 1px solid #000; padding: 8px;">Thrice a day (Din me teen bar)</td><td style="border: 1px solid #000; padding: 8px;">14</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">SYP CREMAFFIN PLUS</td><td style="border: 1px solid #000; padding: 8px;">20 ML</td><td style="border: 1px solid #000; padding: 8px;">Oral</td><td style="border: 1px solid #000; padding: 8px;">One time (Raat ko Ek bar)</td><td style="border: 1px solid #000; padding: 8px;">14</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">TAB COBADEX CZ5</td><td style="border: 1px solid #000; padding: 8px;">NA</td><td style="border: 1px solid #000; padding: 8px;">Oral</td><td style="border: 1px solid #000; padding: 8px;">One time per day (Roz Ek bar)</td><td style="border: 1px solid #000; padding: 8px;">30</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">ANOBLISS CREAM</td><td style="border: 1px solid #000; padding: 8px;">NA</td><td style="border: 1px solid #000; padding: 8px;">Local</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">14</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
+Diagnosis: ${primaryDiagnosis}${secondaryDiagnoses.length > 0 ? `, ${secondaryDiagnoses.join(', ')}` : ''}
 
-<div style="margin: 20px 0;">
-  <strong>Case Summary:</strong><br>
-  The patient was admitted with serious complaints of per rectal bleeding and generalized weakness occurring intermittently for around 15 days.
-</div>
+${medicationsTable}
 
-<div style="margin: 15px 0;">
-  <strong>Upon thorough examination, vitals were recorded as follows:</strong>
-  <ul style="margin: 10px 0; padding-left: 20px;">
-    <li><strong>Temperature</strong>: 97.6°F</li>
-    <li><strong>Pulse Rate</strong>: 80/min</li>
-    <li><strong>Blood Pressure</strong>: 110/70mmHg</li>
-    <li><strong>SpO2</strong>: 98 % in Room Air</li>
-  </ul>
-</div>
+CASE SUMMARY:
+${complaints && complaints.length > 0 ? `The patient was admitted with complaints of ${complaints.join(', ')}.` : 'The patient was admitted for medical evaluation.'}
 
-<div style="margin: 15px 0;">
-  Post-examination, a surgical intervention was necessary and a Fissurectomy with open lateral sphincterotomy alongside an Excision haemorrhoidectomy was performed.
-</div>
+Upon thorough examination, vitals were recorded as follows:
+- Temperature: 98.6°F
+- Pulse Rate: 80/min
+- Blood Pressure: 120/80mmHg
+- SpO2: 98% in Room Air
 
-${labResultsText ? `<div style="margin: 20px 0;">
-  <strong>Laboratory Results:</strong><br>
-  ${labResultsText}
-</div>` : ''}
+Post-examination, treatment was initiated based on clinical findings.
 
-<div style="margin: 20px 0;">
-  <strong>Procedure Details:</strong>
-  <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; width: 25%; background-color: #f5f5f5;">Aspect</td><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Detail</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px;">Date and Time</td><td style="border: 1px solid #000; padding: 8px;">${new Date().toLocaleDateString()}, 11:00 am</td></tr>
-  </table>
-</div>
+${labResultsTable ? `\n${labResultsTable}` : ''}
 
-${otNote ? `
-<div style="margin: 20px 0;">
-  <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; width: 25%; background-color: #f5f5f5;">Procedure</td><td style="border: 1px solid #000; padding: 8px;">${otNote.surgery_name || 'Fissurectomy with open lateral sphincterotomy with Excision haemorrhoidectomy'}</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Surgeon</td><td style="border: 1px solid #000; padding: 8px;">${otNote.surgeon || 'Dr. Vishal Nandagawali'}</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Anaesthetist</td><td style="border: 1px solid #000; padding: 8px;">${otNote.anaesthetist || 'Dr. Sagar Chimalwar'}</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Anesthesia Type</td><td style="border: 1px solid #000; padding: 8px;">${otNote.anaesthesia || 'Epidural anesthesia'}</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Surgery description</td><td style="border: 1px solid #000; padding: 8px;">${otNote.procedure_performed || otNote.description || 'The patient was prepped and draped in the usual sterile fashion. Fissurectomy was first performed. A longitudinal incision was made in the hemorrhoid. The hemorrhoid was then dissected from the underlying internal sphincter muscle, and the wound left open to heal by secondary intention. No complications were encountered during the procedure.'}</td></tr>
-  </table>
-</div>
+${otNote ? `PROCEDURE DETAILS:
+Aspect                 Detail
+Date and Time:         ${new Date().toLocaleDateString()}, 11:00 am
+Procedure:             ${otNote.surgery_name || 'Surgical procedure performed'}
+Surgeon:               ${otNote.surgeon || 'Dr. Surgeon'}
+Anaesthetist:          ${otNote.anaesthetist || 'Dr. Anaesthetist'}
+Anesthesia Type:       ${otNote.anaesthesia || 'General anesthesia'}
+Surgery Description:   ${otNote.procedure_performed || otNote.description || 'The procedure was performed successfully without complications.'}
 
-<div style="margin: 20px 0;">
-  The patient responded adequately to the surgery and treatment. He is recommended to continue the prescribed medication and should observe the following precautions at home:
-</div>` : `<div style="margin: 20px 0;">
-  The patient responded adequately to the treatment. He is recommended to continue the prescribed medication and should observe the following precautions at home:
-</div>`}
+` : ''}
+The patient responded adequately to the treatment. He/She is recommended to continue the prescribed medication and should observe the following precautions at home:
+- Maintain hydration and adequate rest
+- Follow prescribed diet restrictions
+- Take medications as directed
+- Avoid heavy lifting and strenuous activities
+- Monitor for any warning signs
 
-<div style="margin: 15px 0;">
-  <ul style="margin: 10px 0; padding-left: 20px;">
-    <li>Maintain hydration and a high fiber diet to prevent constipation</li>
-    <li>Avoid heavy lifting and strenuous activities for 2 weeks</li>
-    <li>Continue sitz baths with Betadine twice daily</li>
-    <li>Clean the wound area gently and apply Anobliss cream as directed.</li>
-    <li>Monitor for any signs of infection i.e. increasing pain, pus discharge, fever</li>
-  </ul>
-</div>
+The patient should return to the hospital immediately:
+- If symptoms worsen or recur
+- If experiencing severe pain or discomfort
+- If fever persists even after medication
+- Any unusual swelling or complications
 
-<div style="margin: 20px 0;">
-  <strong>The patient should return to the hospital immediately:</strong>
-  <ul style="margin: 10px 0; padding-left: 20px;">
-    <li>If noticing any increase in rectal bleeding</li>
-    <li>If severe abdominal pain is observed</li>
-    <li>If fever or dizziness persists even after medication</li>
-    <li>Any unusual swelling or discomfort in the anal area after discharge</li>
-  </ul>
-</div>
+URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
 
-<div style="margin: 20px 0; font-weight: bold; background-color: #fff2cc; padding: 10px; border: 1px solid #d6b656;">
-  URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT:-7030974619, 9373111709.
-</div>
+Disclaimer: The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
 
-<div style="margin: 15px 0;">
-  <strong>Disclaimer:</strong> The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
-</div>
+ADVICE
 
-<div style="margin: 20px 0;">
-  <h3 style="font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px;">ADVICE</h3>
+Advice:
+Follow up after 7 days/SOS.
 
-  <div style="margin: 15px 0;">
-    <strong>Advice:</strong><br>
-    Follow up after 7 days/SOS.
-  </div>
+--------------------------------------------------------------------------------
+Review on                     : ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+Resident On Discharge         : ${doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName}
+--------------------------------------------------------------------------------
 
-  <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; width: 50%; background-color: #f5f5f5;">Review on</td><td style="border: 1px solid #000; padding: 8px;">: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Resident On Discharge</td><td style="border: 1px solid #000; padding: 8px;">: ${doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName}</td></tr>
-  </table>
-</div>
+                                        Dr. ${doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName} (Gastroenterologist)
 
-<div style="margin: 30px 0; text-align: center;">
-  <div style="margin: 20px 0; font-weight: bold;">
-    Dr. Dr. ${doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName} (Gastroenterologist)
-  </div>
-</div>
+================================================================================
+Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+`;
 
-<hr style="border: 1px solid #000; margin: 20px 0;">
-
-<div style="margin: 20px 0; font-weight: bold; text-align: center; background-color: #fff2cc; padding: 15px; border: 2px solid #d6b656;">
-  Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
-</div>
-
-</div>`;
-
+      // Summary is already in plain text format
       setDischargeSummaryText(summary);
 
       // Show success message
@@ -1020,62 +1010,83 @@ ${otNote ? `
     setEditablePatientData(patientData);
 
     // Prepare the prompt
-    const prompt = `You are an expert medical professional creating a professional discharge summary. Generate a comprehensive discharge summary in HTML format that matches exactly the same structure as our working template.
+    const prompt = `Generate a complete discharge summary in plain text format.
 
-CRITICAL: You MUST return ONLY HTML content that matches this EXACT structure:
+Start with:
+DISCHARGE SUMMARY
+================================================================================
 
-<div style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; max-width: 800px;">
+Name: ${editablePatientData.name || 'Patient Name'}                           Patient ID: ${editablePatientData.patientId || 'UHAY25I22001'}
+Primary Care Provider: ${editablePatientData.consultant || 'Dr. Unknown'}     Registration ID: ${editablePatientData.registrationId || 'IH25I22001'}
+Sex / Age: ${editablePatientData.gender || 'Gender'} / ${editablePatientData.age || 'Age'} Year              Mobile No: ${editablePatientData.mobile || 'N/A'}
+Tariff: ${editablePatientData.tariff || 'Private'}                            Address: ${editablePatientData.address || 'N/A'}
+Admission Date: ${editablePatientData.admissionDate || new Date().toLocaleDateString()}                   Discharge Date: ${editablePatientData.dischargeDate || new Date().toLocaleDateString()}
+Discharge Reason: Recovered
 
-<div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-Discharge Summary
-</div>
+================================================================================
 
-<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 15px;">
-  <div style="flex: 1;">
-    <div><strong>Name</strong> : [PATIENT_NAME]</div>
-    <div><strong>Primary Care Provider</strong> : [DOCTOR_NAME]</div>
-    <div style="margin-left: 25px;">(Gastroenterologist)</div>
-    <div><strong>Sex / Age</strong> : [GENDER] / [AGE] Year</div>
-    <div><strong>Tariff</strong> : Private</div>
-    <div><strong>Admission Date</strong> : [ADMISSION_DATE]</div>
-    <div><strong>Discharge Reason</strong> : Recovered</div>
-  </div>
-  <div style="flex: 1; padding-left: 40px;">
-    <div><strong>Patient ID</strong> : [PATIENT_ID]</div>
-    <div><strong>Registration ID</strong> : [REGISTRATION_ID]</div>
-    <div><strong>Mobile No</strong> : [MOBILE]</div>
-    <div><strong>Address</strong> : [ADDRESS]</div>
-    <div><strong>Discharge Date</strong> : [DISCHARGE_DATE]</div>
-  </div>
-</div>
+Present Condition
 
-[Continue with Present Condition section, Medications HTML table, Case Summary, etc...]
+Diagnosis: ${patientData.primaryDiagnosis}${patientData.secondaryDiagnoses.length > 0 ? ', ' + patientData.secondaryDiagnoses.join(', ') : ''}
 
-CRITICAL REQUIREMENTS:
-- Return ONLY HTML content in the exact format above
-- Use proper HTML table tags with borders and styling for medications
-- Include both English and Hindi dosage instructions in medications table
-- Use HTML list tags for vital signs and precautions
-- Maintain all styling attributes exactly as shown
-- DO NOT return plain text or ASCII tables
+Medications on Discharge:
+--------------------------------------------------------------------------------
+Name                    Strength    Route    Dosage                          Days
+--------------------------------------------------------------------------------
+[Generate appropriate medications based on diagnosis with Hindi translations]
+Example format:
+INJ. MONOCEF           1 GM        IV       Twice a day (Din me do bar)     7
 
-PATIENT DATA PROVIDED:
-${JSON.stringify(editablePatientData, null, 2)}
+CASE SUMMARY:
+${patientData.complaints.length > 0 ? 'The patient was admitted with complaints of ' + patientData.complaints.join(', ') + '.' : 'The patient was admitted for medical evaluation.'}
 
-Generate the complete HTML discharge summary using the patient data provided.
+Upon thorough examination, vitals were recorded as follows:
+- Temperature: 98.6°F
+- Pulse Rate: 80/min
+- Blood Pressure: 120/80mmHg
+- SpO2: 98% in Room Air
 
-**Patient Information:**
-- Primary Diagnosis: ${patientData.primaryDiagnosis}
-- Secondary Diagnoses: ${patientData.secondaryDiagnoses.join(', ') || 'None'}
-- Complications: ${patientData.complications.join(', ') || 'None'}
-- Current Medications: ${patientData.medications.join(', ') || 'None specified'}
-- Chief Complaints: ${patientData.complaints.join(', ') || 'General consultation'}
-- Admission Date: ${patientData.admissionDate}
-- Discharge Date: ${patientData.dischargeDate}
-- Lab Results: ${patientData.labResults && patientData.labResults.length > 0 ? patientData.labResults.join('\n') : 'No lab results available'}
-- Critical Lab Values: ${patientData.abnormalLabResults && patientData.abnormalLabResults.length > 0 ? patientData.abnormalLabResults.join(', ') : 'None'}
+[Add relevant treatment details based on diagnosis]
 
-Please create a comprehensive discharge summary following the exact format and requirements specified above.`;
+${patientData.labResults && patientData.labResults.length > 0 ? 'Laboratory Investigations:\n' + patientData.labResults.join('\n') : ''}
+
+The patient responded adequately to the treatment. He/She is recommended to continue the prescribed medication and should observe the following precautions at home:
+- Maintain proper medication schedule
+- Follow prescribed diet restrictions
+- Adequate rest and hydration
+- Monitor for any warning signs
+
+The patient should return to the hospital immediately:
+- If symptoms worsen or recur
+- If experiencing severe pain or discomfort
+- If fever persists even after medication
+- Any other concerning symptoms
+
+URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+
+Disclaimer: The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
+
+ADVICE
+
+Advice:
+Follow up after 7 days/SOS.
+
+--------------------------------------------------------------------------------
+Review on                     : 25/09/2025
+Resident On Discharge         : Sachin Gathibandhe
+--------------------------------------------------------------------------------
+
+                                           Dr. Dr. Nikhil Khobragade (Gastroenterologist)
+
+================================================================================
+Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+
+IMPORTANT INSTRUCTIONS:
+1. Include the complete format starting with patient details as shown above
+2. Generate medications appropriate for the diagnosis with Hindi translations in parentheses
+3. Format lab results as a table if provided
+4. Keep the format clean and readable as plain text
+5. Do NOT return HTML - return plain text only`;
 
       setEditablePrompt(prompt);
       setShowGenerationModal(true);
@@ -1123,7 +1134,7 @@ Please create a comprehensive discharge summary following the exact format and r
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer REMOVED_OPENAI_KEY_1'
+          'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
         },
         body: JSON.stringify(requestBody)
       });
@@ -1158,13 +1169,11 @@ Please create a comprehensive discharge summary following the exact format and r
       const aiResponse = data.choices[0].message.content;
       console.log('🤖 AI Response received:', aiResponse ? aiResponse.substring(0, 200) + '...' : 'No content');
 
-      // Check if AI response is properly formatted HTML
+      // Check if AI response is properly formatted
       let aiGeneratedSummary;
 
       // Additional validation: check if AI response contains prompt echo or technical fields
       const hasPromptEcho = aiResponse && (
-        aiResponse.includes('Primary Diagnosis:') ||
-        aiResponse.includes('Secondary Diagnoses:') ||
         aiResponse.includes('PATIENT DATA PROVIDED:') ||
         aiResponse.includes('**Patient Information:**')
       );
@@ -1172,174 +1181,114 @@ Please create a comprehensive discharge summary following the exact format and r
       if (hasPromptEcho) {
         console.log('🚨 AI response contains prompt echo - using fallback template');
         aiGeneratedSummary = null; // Force fallback
-      } else if (aiResponse && aiResponse.includes('<div style="font-family: Arial') && aiResponse.includes('</div>')) {
-        // AI returned proper HTML format
+      } else if (aiResponse && (aiResponse.includes('DISCHARGE SUMMARY') || aiResponse.includes('Diagnosis:'))) {
+        // AI returned proper plain text format
         aiGeneratedSummary = aiResponse;
-        console.log('✅ AI returned proper HTML format');
+        console.log('✅ AI returned proper plain text format');
       } else {
-        aiGeneratedSummary = null; // Force fallback for non-HTML content
+        aiGeneratedSummary = null; // Force fallback for invalid content
       }
 
       // Generate fallback template if needed
       if (!aiGeneratedSummary) {
-        console.log('⚠️ Using fallback template with proper HTML formatting');
-        aiGeneratedSummary = `<div style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; max-width: 800px;">
+        console.log('⚠️ Using fallback template with plain text formatting');
+        aiGeneratedSummary = `DISCHARGE SUMMARY
+================================================================================
 
-<div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-Discharge Summary
-</div>
+Name: ${editablePatientData.name || 'Patient Name'}                           Patient ID: ${editablePatientData.patientId || 'UHAY25I22001'}
+Primary Care Provider: ${editablePatientData.consultant || 'Dr. Unknown'}     Registration ID: ${editablePatientData.registrationId || 'IH25I22001'}
+Sex / Age: ${editablePatientData.gender || 'Gender'} / ${editablePatientData.age || 'Age'} Year              Mobile No: ${editablePatientData.mobile || 'N/A'}
+Tariff: ${editablePatientData.tariff || 'Private'}                            Address: ${editablePatientData.address || 'N/A'}
+Admission Date: ${editablePatientData.admissionDate || new Date().toLocaleDateString()}                   Discharge Date: ${editablePatientData.dischargeDate || new Date().toLocaleDateString()}
+Discharge Reason: Recovered
 
-<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 15px;">
-  <div style="flex: 1;">
-    <div><strong>Name</strong> : ${editablePatientData.name || 'Patient Name'}</div>
-    <div><strong>Primary Care Provider</strong> : ${editablePatientData.consultant || 'Dr. Attending Physician'}</div>
-    <div style="margin-left: 25px;">(Gastroenterologist)</div>
-    <div><strong>Sex / Age</strong> : ${editablePatientData.gender || 'Gender'} / ${editablePatientData.age || 'Age'} Year</div>
-    <div><strong>Tariff</strong> : Private</div>
-    <div><strong>Admission Date</strong> : ${editablePatientData.admission_date || new Date().toLocaleDateString()}</div>
-    <div><strong>Discharge Reason</strong> : Recovered</div>
-  </div>
-  <div style="flex: 1; padding-left: 40px;">
-    <div><strong>Patient ID</strong> : ${editablePatientData.patient_id || 'UHHO24E21008'}</div>
-    <div><strong>Registration ID</strong> : ${editablePatientData.registration_id || 'IH24E21009'}</div>
-    <div><strong>Mobile No</strong> : ${editablePatientData.mobile || '7898395373'}</div>
-    <div><strong>Address</strong> : ${editablePatientData.address || 'Address not provided'}</div>
-    <div><strong>Discharge Date</strong> : ${new Date().toLocaleDateString()}</div>
-  </div>
-</div>
+================================================================================
 
-<div style="margin: 20px 0;">
-  <h3 style="font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px;">Present Condition</h3>
+Present Condition
 
-  <div style="margin: 15px 0;">
-    <strong>Diagnosis:</strong> ${editablePatientData.primaryDiagnosis}${editablePatientData.secondaryDiagnoses?.length > 0 ? `, ${editablePatientData.secondaryDiagnoses.join(', ')}` : ''}
-  </div>
+Diagnosis: ${editablePatientData.primaryDiagnosis || 'Primary diagnosis'}${editablePatientData.secondaryDiagnoses?.length > 0 ? `, ${editablePatientData.secondaryDiagnoses.join(', ')}` : ''}
 
-  <div style="margin: 20px 0;">
-    <strong>Medications on Discharge:</strong>
-    <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-      <thead>
-        <tr style="background-color: #f5f5f5;">
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Name</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Strength</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Route</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Dosage</th>
-          <th style="border: 1px solid #000; padding: 8px; text-align: left;">Number of Days to be taken</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ. MONOCEF</td><td style="border: 1px solid #000; padding: 8px;">1 GM</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ. AMIAKCIN</td><td style="border: 1px solid #000; padding: 8px;">500 MG</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ METRO</td><td style="border: 1px solid #000; padding: 8px;">100 MG</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Thrice a day (Din me teen bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">INJ PAN</td><td style="border: 1px solid #000; padding: 8px;">40 MG</td><td style="border: 1px solid #000; padding: 8px;">IV</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">7</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">SIT BATH WITH BETADONE</td><td style="border: 1px solid #000; padding: 8px;">NA</td><td style="border: 1px solid #000; padding: 8px;">Local</td><td style="border: 1px solid #000; padding: 8px;">Thrice a day (Din me teen bar)</td><td style="border: 1px solid #000; padding: 8px;">14</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">SYP CREMAFFIN PLUS</td><td style="border: 1px solid #000; padding: 8px;">20 ML</td><td style="border: 1px solid #000; padding: 8px;">Oral</td><td style="border: 1px solid #000; padding: 8px;">One time (Raat ko Ek bar)</td><td style="border: 1px solid #000; padding: 8px;">14</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">TAB COBADEX CZ5</td><td style="border: 1px solid #000; padding: 8px;">NA</td><td style="border: 1px solid #000; padding: 8px;">Oral</td><td style="border: 1px solid #000; padding: 8px;">One time per day (Roz Ek bar)</td><td style="border: 1px solid #000; padding: 8px;">30</td></tr>
-        <tr><td style="border: 1px solid #000; padding: 8px;">ANOBLISS CREAM</td><td style="border: 1px solid #000; padding: 8px;">NA</td><td style="border: 1px solid #000; padding: 8px;">Local</td><td style="border: 1px solid #000; padding: 8px;">Twice a day (Din me do bar)</td><td style="border: 1px solid #000; padding: 8px;">14</td></tr>
-      </tbody>
-    </table>
-  </div>
-</div>
+Medications on Discharge:
+--------------------------------------------------------------------------------
+Name                    Strength    Route    Dosage                          Days
+--------------------------------------------------------------------------------
+INJ. MONOCEF           1 GM        IV       Twice a day (Din me do bar)     7
+INJ. AMIAKCIN          500 MG      IV       Twice a day (Din me do bar)     7
+INJ METRO              100 MG      IV       Thrice a day (Din me teen bar)  7
+INJ PAN                40 MG       IV       Twice a day (Din me do bar)     7
+SIT BATH WITH BETADONE NA          Local    Thrice a day (Din me teen bar)  14
+SYP CREMAFFIN PLUS     20 ML       Oral     One time (Raat ko Ek bar)       14
+TAB COBADEX CZ5        NA          Oral     One time per day (Roz Ek bar)   30
+ANOBLISS CREAM         NA          Local    Twice a day (Din me do bar)     14
 
-<div style="margin: 20px 0;">
-  <strong>Case Summary:</strong><br>
-  The patient was admitted with serious complaints of per rectal bleeding and generalized weakness occurring intermittently for around 15 days.
-</div>
+CASE SUMMARY:
+The patient was admitted with complaints as documented in the medical records.
 
-<div style="margin: 15px 0;">
-  <strong>Upon thorough examination, vitals were recorded as follows:</strong>
-  <ul style="margin: 10px 0; padding-left: 20px;">
-    <li><strong>Temperature</strong>: 97.6°F</li>
-    <li><strong>Pulse Rate</strong>: 80/min</li>
-    <li><strong>Blood Pressure</strong>: 110/70mmHg</li>
-    <li><strong>SpO2</strong>: 98 % in Room Air</li>
-  </ul>
-</div>
+Upon thorough examination, vitals were recorded as follows:
+- Temperature: 98.6°F
+- Pulse Rate: 80/min
+- Blood Pressure: 120/80mmHg
+- SpO2: 98% in Room Air
 
-<div style="margin: 15px 0;">
-  Post-examination, a surgical intervention was necessary and a Fissurectomy with open lateral sphincterotomy alongside an Excision haemorrhoidectomy was performed.
-</div>
+Post-examination, appropriate treatment was initiated.
 
-<div style="margin: 20px 0;">
-  <strong>Procedure Details:</strong>
-  <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; width: 25%; background-color: #f5f5f5;">Aspect</td><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Detail</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px;">Date and Time</td><td style="border: 1px solid #000; padding: 8px;">${new Date().toLocaleDateString()}, 11:00 am</td></tr>
-  </table>
-</div>
+${editablePatientData.labResults && editablePatientData.labResults.length > 0 ? `Laboratory Investigations:
+--------------------------------------------------------------------------------
+Test Name                          Result              Reference Range     Status
+--------------------------------------------------------------------------------
+${editablePatientData.labResults.map(test => {
+  const testName = (test.test_name || 'Test').padEnd(35);
+  const result = (test.result_value || 'Pending').padEnd(20);
+  const range = (test.reference_range || 'N/A').padEnd(18);
+  const status = test.is_abnormal ? '⚠ ABNORMAL' : '✓ Normal';
+  return `${testName}${result}${range}${status}`;
+}).join('\n')}
 
-<div style="margin: 20px 0;">
-  <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; width: 25%; background-color: #f5f5f5;">Procedure</td><td style="border: 1px solid #000; padding: 8px;">Fissurectomy with open lateral sphincterotomy with Excision haemorrhoidectomy</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Surgeon</td><td style="border: 1px solid #000; padding: 8px;">Dr. Vishal Nandagawali</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Anaesthetist</td><td style="border: 1px solid #000; padding: 8px;">Dr. Sagar Chimalwar</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Anesthesia Type</td><td style="border: 1px solid #000; padding: 8px;">Epidural anesthesia</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Surgery description</td><td style="border: 1px solid #000; padding: 8px;">The patient was prepped and draped in the usual sterile fashion. Fissurectomy was first performed. A longitudinal incision was made in the hemorrhoid. The hemorrhoid was then dissected from the underlying internal sphincter muscle, and the wound left open to heal by secondary intention. No complications were encountered during the procedure.</td></tr>
-  </table>
-</div>
+` : ''}The patient responded adequately to the treatment. He/She is recommended to continue the prescribed medication and should observe the following precautions at home:
+- Maintain adequate hydration and rest
+- Follow prescribed diet restrictions
+- Take medications as directed
+- Avoid strenuous activities
+- Monitor for any warning signs
 
-<div style="margin: 20px 0;">
-  The patient responded adequately to the surgery and treatment. He is recommended to continue the prescribed medication and should observe the following precautions at home:
-</div>
+The patient should return to the hospital immediately:
+- If symptoms worsen or recur
+- If experiencing severe pain or discomfort
+- If fever persists even after medication
+- Any unusual complications
 
-<div style="margin: 15px 0;">
-  <ul style="margin: 10px 0; padding-left: 20px;">
-    <li>Maintain hydration and a high fiber diet to prevent constipation</li>
-    <li>Avoid heavy lifting and strenuous activities for 2 weeks</li>
-    <li>Continue sitz baths with Betadine twice daily</li>
-    <li>Clean the wound area gently and apply Anobliss cream as directed.</li>
-    <li>Monitor for any signs of infection i.e. increasing pain, pus discharge, fever</li>
-  </ul>
-</div>
+IMPORTANT INSTRUCTIONS:
+1. Take medications as prescribed
+2. Maintain a low-fat diet
+3. Adequate rest and hydration
+4. Monitor for any warning signs and seek immediate medical attention if needed
 
-<div style="margin: 20px 0;">
-  <strong>The patient should return to the hospital immediately:</strong>
-  <ul style="margin: 10px 0; padding-left: 20px;">
-    <li>If noticing any increase in rectal bleeding</li>
-    <li>If severe abdominal pain is observed</li>
-    <li>If fever or dizziness persists even after medication</li>
-    <li>Any unusual swelling or discomfort in the anal area after discharge</li>
-  </ul>
-</div>
+URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
 
-<div style="margin: 20px 0; font-weight: bold; background-color: #fff2cc; padding: 10px; border: 1px solid #d6b656;">
-  URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT:-7030974619, 9373111709.
-</div>
+Disclaimer: The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
 
-<div style="margin: 15px 0;">
-  <strong>Disclaimer:</strong> The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
-</div>
+ADVICE
 
-<div style="margin: 20px 0;">
-  <h3 style="font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px;">ADVICE</h3>
+Advice:
+Follow up after 7 days/SOS.
 
-  <div style="margin: 15px 0;">
-    <strong>Advice:</strong><br>
-    Follow up after 7 days/SOS.
-  </div>
+--------------------------------------------------------------------------------
+Review on                     : 25/09/2025
+Resident On Discharge         : Sachin Gathibandhe
+--------------------------------------------------------------------------------
 
-  <table style="width: 100%; border-collapse: collapse; margin: 10px 0; border: 1px solid #000;">
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; width: 50%; background-color: #f5f5f5;">Review on</td><td style="border: 1px solid #000; padding: 8px;">: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}</td></tr>
-    <tr><td style="border: 1px solid #000; padding: 8px; font-weight: bold; background-color: #f5f5f5;">Resident On Discharge</td><td style="border: 1px solid #000; padding: 8px;">: ${(editablePatientData.consultant || 'Attending Physician').replace('Dr. ', '')}</td></tr>
-  </table>
-</div>
+                                           Dr. Dr. Nikhil Khobragade (Gastroenterologist)
 
-<div style="margin: 30px 0; text-align: center;">
-  <div style="margin: 20px 0; font-weight: bold;">
-    Dr. Dr. ${(editablePatientData.consultant || 'Attending Physician').replace('Dr. ', '')} (Gastroenterologist)
-  </div>
-</div>
-
-<hr style="border: 1px solid #000; margin: 20px 0;">
-
-<div style="margin: 20px 0; font-weight: bold; text-align: center; background-color: #fff2cc; padding: 15px; border: 2px solid #d6b656;">
-  Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
-</div>
-
-</div>`;
+================================================================================
+Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+`;
       }
 
-      setDischargeSummaryText(aiGeneratedSummary);
+      // AI response should already be in plain text, but convert if it contains HTML
+      const finalSummary = aiGeneratedSummary.includes('<') && aiGeneratedSummary.includes('>')
+        ? htmlToPlainText(aiGeneratedSummary)
+        : aiGeneratedSummary;
+      setDischargeSummaryText(finalSummary);
       alert('✅ AI-powered discharge summary generated successfully using edited patient data!');
 
     } catch (error) {
@@ -1379,50 +1328,230 @@ Discharge Summary
         console.log('🚨 WARNING: Content is not HTML format - this may cause display issues');
       }
 
-      // Since discharge summary is now in HTML format, use it directly with minimal processing
-      let formattedContent = dischargeSummaryText;
+      // Format content for printing
+      let formattedContent = '';
 
-      // If content is not proper HTML format, provide a fallback
+      // Parse the plain text content and format it for HTML printing
       if (!isHtmlContent) {
-        console.log('🔧 Content is not HTML - creating HTML-formatted version');
+        console.log('🔧 Content is plain text - formatting for print');
+
+        // Parse the discharge summary text to extract all sections
+        const lines = dischargeSummaryText.split('\n');
+        let patientInfo = {};
+        let currentSection = '';
+        let medications = [];
+        let labResults = [];
+        let caseSummary = [];
+        let procedureDetails = [];
+        let precautions = [];
+        let advice = '';
+        let inMedicationsTable = false;
+        let inLabTable = false;
+        let skipNextLine = false;
+
+        lines.forEach((line, index) => {
+          // Skip separator lines
+          if (line.includes('================')) return;
+
+          // Extract patient information
+          if (line.includes('Name:') && line.includes('Patient ID:')) {
+            const parts = line.split(/\s{2,}/);
+            parts.forEach(part => {
+              if (part.includes('Name:')) patientInfo.name = part.replace('Name:', '').trim();
+              if (part.includes('Patient ID:')) patientInfo.patientId = part.replace('Patient ID:', '').trim();
+            });
+          } else if (line.includes('Primary Care Provider:')) {
+            const parts = line.split(/\s{2,}/);
+            parts.forEach(part => {
+              if (part.includes('Primary Care Provider:')) patientInfo.doctor = part.replace('Primary Care Provider:', '').trim();
+              if (part.includes('Registration ID:')) patientInfo.registrationId = part.replace('Registration ID:', '').trim();
+            });
+          } else if (line.includes('Sex / Age:')) {
+            const parts = line.split(/\s{2,}/);
+            parts.forEach(part => {
+              if (part.includes('Sex / Age:')) {
+                const ageGender = part.replace('Sex / Age:', '').trim();
+                const ageParts = ageGender.split('/');
+                if (ageParts.length >= 2) {
+                  patientInfo.gender = ageParts[0].trim();
+                  patientInfo.age = ageParts[1].trim();
+                }
+              }
+              if (part.includes('Mobile No:')) patientInfo.mobile = part.replace('Mobile No:', '').trim();
+            });
+          } else if (line.includes('Tariff:')) {
+            const parts = line.split(/\s{2,}/);
+            parts.forEach(part => {
+              if (part.includes('Tariff:')) patientInfo.tariff = part.replace('Tariff:', '').trim();
+              if (part.includes('Address:')) patientInfo.address = part.replace('Address:', '').trim();
+            });
+          } else if (line.includes('Admission Date:')) {
+            const parts = line.split(/\s{2,}/);
+            parts.forEach(part => {
+              if (part.includes('Admission Date:')) patientInfo.admissionDate = part.replace('Admission Date:', '').trim();
+              if (part.includes('Discharge Date:')) patientInfo.dischargeDate = part.replace('Discharge Date:', '').trim();
+            });
+          } else if (line.includes('Discharge Reason:')) {
+            patientInfo.dischargeReason = line.replace('Discharge Reason:', '').trim();
+          }
+
+          // Extract diagnosis
+          if (line.includes('Diagnosis:')) {
+            patientInfo.diagnosis = line.replace('Diagnosis:', '').trim();
+          }
+
+          // Handle medications table
+          if (line.includes('Medications on Discharge:')) {
+            inMedicationsTable = true;
+            skipNextLine = 2; // Skip headers
+          } else if (inMedicationsTable) {
+            if (skipNextLine > 0) {
+              skipNextLine--;
+            } else if (line.trim() === '') {
+              inMedicationsTable = false;
+            } else if (!line.includes('------')) {
+              // Parse medication row
+              medications.push(line);
+            }
+          }
+
+          // Handle case summary section
+          if (line.startsWith('CASE SUMMARY:') || line.includes('Case Summary:')) {
+            currentSection = 'caseSummary';
+          } else if (currentSection === 'caseSummary' && line.trim()) {
+            if (line.startsWith('Upon thorough') || line.startsWith('Laboratory')) {
+              currentSection = '';
+            } else {
+              caseSummary.push(line);
+            }
+          }
+        });
+
+        // Create formatted HTML content
         formattedContent = `
-<div style="font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; max-width: 800px;">
+          <style>
+            table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+            th, td { border: 1px solid black; padding: 8px; text-align: left; }
+            th { background-color: #f0f0f0; font-weight: bold; }
+            .patient-info-table { border: none; margin: 0; }
+            .patient-info-table td { border: none; padding: 5px 15px 5px 0; }
+            h3 { font-size: 14pt; font-weight: bold; margin: 20px 0 10px 0; border-bottom: 2px solid black; padding-bottom: 5px; }
+            .precautions { margin: 15px 0; }
+            .precautions li { margin: 5px 0; }
+          </style>
 
-<div style="text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px;">
-DISCHARGE SUMMARY
-</div>
+          <table class="patient-info-table">
+            <tr>
+              <td><strong>Name</strong></td>
+              <td>: ${patientInfo.name || patient?.patients?.name || 'N/A'}</td>
+              <td style="padding-left: 50px;"><strong>Patient ID</strong></td>
+              <td>: ${patientInfo.patientId || patient?.visit_id || 'N/A'}</td>
+            </tr>
+            <tr>
+              <td><strong>Primary Care Provider</strong></td>
+              <td>: ${patientInfo.doctor || 'Dr. ' + (patient?.appointment_with || 'Unknown')}<br>&nbsp;&nbsp;(Gastroenterologist)</td>
+              <td style="padding-left: 50px;"><strong>Registration ID</strong></td>
+              <td>: ${patientInfo.registrationId || patient?.patients?.patients_id || 'N/A'}</td>
+            </tr>
+            <tr>
+              <td><strong>Sex / Age</strong></td>
+              <td>: ${patientInfo.gender || patient?.patients?.gender || 'N/A'} / ${patientInfo.age || patient?.patients?.age || 'N/A'}</td>
+              <td style="padding-left: 50px;"><strong>Mobile No</strong></td>
+              <td>: ${patientInfo.mobile || patient?.patients?.phone || 'N/A'}</td>
+            </tr>
+            <tr>
+              <td><strong>Tariff</strong></td>
+              <td>: ${patientInfo.tariff || patient?.patients?.corporate || 'Private'}</td>
+              <td style="padding-left: 50px;"><strong>Address</strong></td>
+              <td>: ${patientInfo.address || patient?.patients?.address || 'N/A'}</td>
+            </tr>
+            <tr>
+              <td><strong>Admission Date</strong></td>
+              <td>: ${patientInfo.admissionDate || patient?.visit_date || new Date().toLocaleDateString()}</td>
+              <td style="padding-left: 50px;"><strong>Discharge Date</strong></td>
+              <td>: ${patientInfo.dischargeDate || patient?.discharge_date || new Date().toLocaleDateString()}</td>
+            </tr>
+            <tr>
+              <td><strong>Discharge Reason</strong></td>
+              <td>: ${patientInfo.dischargeReason || 'Recovered'}</td>
+              <td></td>
+              <td></td>
+            </tr>
+          </table>
 
-<div style="display: flex; justify-content: space-between; margin-bottom: 20px; border-bottom: 1px solid #000; padding-bottom: 15px;">
-  <div style="flex: 1;">
-    <div><strong>Name</strong> : ${patient?.patients?.name || 'Patient Name'}</div>
-    <div><strong>Primary Care Provider</strong> : Dr. ${patient?.appointment_with || 'Attending Physician'}</div>
-    <div><strong>Sex / Age</strong> : ${patient?.patients?.gender || 'N/A'} / ${patient?.patients?.age || 'N/A'} Year</div>
-    <div><strong>Tariff</strong> : ${patient?.patients?.corporate || 'Private'}</div>
-    <div><strong>Admission Date</strong> : ${patient?.admission_date || patient?.visit_date || new Date().toLocaleDateString()}</div>
-    <div><strong>Discharge Reason</strong> : Recovered</div>
-  </div>
-  <div style="flex: 1; padding-left: 40px;">
-    <div><strong>Patient ID</strong> : ${patient?.visit_id || 'N/A'}</div>
-    <div><strong>Registration ID</strong> : ${patient?.patients?.patients_id || 'N/A'}</div>
-    <div><strong>Mobile No</strong> : ${patient?.patients?.phone || 'N/A'}</div>
-    <div><strong>Address</strong> : ${patient?.patients?.address || 'N/A'}</div>
-    <div><strong>Discharge Date</strong> : ${patient?.discharge_date || new Date().toLocaleDateString()}</div>
-  </div>
-</div>
+          <h3>Present Condition</h3>
+          <p><strong>Diagnosis:</strong> ${patientInfo.diagnosis || 'As per medical records'}</p>
 
-<div style="margin: 20px 0;">
-  <h3 style="font-size: 16px; font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #000; padding-bottom: 5px;">Present Condition</h3>
-  <div style="margin: 15px 0;">
-    <p style="white-space: pre-line;">${dischargeSummaryText.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
-  </div>
-</div>
+          <p><strong>Medications on Discharge:</strong></p>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Strength</th>
+                <th>Route</th>
+                <th>Dosage</th>
+                <th>Number of Days to be taken</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${medications.length > 0 ? medications.map(med => {
+                // Try to parse medication line
+                const parts = med.match(/^(.+?)\s+(\S+\s+\S+)\s+(\S+)\s+(.+?)\s+(\d+)$/);
+                if (parts) {
+                  return `<tr>
+                    <td>${parts[1].trim()}</td>
+                    <td>${parts[2].trim()}</td>
+                    <td>${parts[3].trim()}</td>
+                    <td>${parts[4].trim()}</td>
+                    <td>${parts[5].trim()}</td>
+                  </tr>`;
+                } else {
+                  // Fallback for unparseable lines
+                  return `<tr><td colspan="5">${med}</td></tr>`;
+                }
+              }).join('') : '<tr><td colspan="5">As per prescription</td></tr>'}
+            </tbody>
+          </table>
 
-<div style="margin: 30px 0; text-align: center; font-size: 12px;">
-  <strong>EMERGENCY CARE IS AVAILABLE 24 X 7</strong><br>
-  <strong>PLEASE CONTACT: 7030974619, 9373111709</strong>
-</div>
+          ${caseSummary.length > 0 ? `
+          <p><strong>Case Summary:</strong></p>
+          ${caseSummary.map(line => `<p>${line}</p>`).join('')}
+          ` : ''}
 
-</div>`;
+          <div style="margin-top: 40px; padding-top: 20px; page-break-inside: avoid;">
+            <h3 style="font-size: 16pt; font-weight: bold; margin: 20px 0 15px 0; text-align: left;">ADVICE</h3>
+
+            <p style="margin: 15px 0; font-style: italic;">
+              <em>Advice:</em><br/>
+              Follow up after 7 days/SOS.
+            </p>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+              <tr>
+                <td style="border: 1px solid black; padding: 10px; font-weight: bold; width: 30%;">Review on</td>
+                <td style="border: 1px solid black; padding: 10px; width: 70%;">: 25/09/2025</td>
+              </tr>
+              <tr>
+                <td style="border: 1px solid black; padding: 10px; font-weight: bold;">Resident On Discharge</td>
+                <td style="border: 1px solid black; padding: 10px;">: Sachin Gathibandhe</td>
+              </tr>
+            </table>
+
+            <div style="text-align: right; margin: 30px 0; font-weight: bold;">
+              Dr. Dr. Nikhil Khobragade (Gastroenterologist)
+            </div>
+
+            <hr style="border: none; border-top: 2px solid black; margin: 40px 0 20px 0;">
+
+            <div style="text-align: center; font-weight: bold; font-size: 11pt; margin: 20px 0;">
+              Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE<br>
+              CONTACT: 7030974619, 9373111709.
+            </div>
+          </div>
+        `;
+      } else {
+        // Already HTML format
+        formattedContent = dischargeSummaryText;
       }
 
       // Create complete HTML document for printing
@@ -1435,13 +1564,13 @@ DISCHARGE SUMMARY
     <style>
         @page {
             size: A4;
-            margin: 1cm;
+            margin: 20mm;
         }
 
         body {
-            font-family: 'Times New Roman', Times, serif;
-            font-size: 12pt;
-            line-height: 1.5;
+            font-family: Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.4;
             color: black;
             margin: 0;
             padding: 0;
@@ -1449,15 +1578,15 @@ DISCHARGE SUMMARY
 
         .header {
             text-align: center;
-            border-bottom: 2pt solid black;
-            padding-bottom: 15pt;
-            margin-bottom: 20pt;
+            margin-bottom: 15px;
         }
 
         .header h1 {
-            font-size: 18pt;
+            font-size: 16pt;
             font-weight: bold;
-            margin: 0 0 15pt 0;
+            margin: 0;
+            padding-bottom: 10px;
+            border-bottom: 3px solid black;
         }
 
         .patient-info {
@@ -1536,29 +1665,84 @@ DISCHARGE SUMMARY
             color: #e74c3c;
             font-size: 11pt;
         }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 15px 0;
+        }
+
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+            font-size: 10pt;
+        }
+
+        th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+
+        .patient-info-table {
+            border: none;
+            margin: 20px 0;
+            width: 100%;
+        }
+
+        .patient-info-table td {
+            border: none;
+            padding: 4px 10px;
+            font-size: 11pt;
+        }
+
+        h3 {
+            font-size: 13pt;
+            font-weight: bold;
+            margin: 25px 0 10px 0;
+            border-bottom: 2px solid black;
+            padding-bottom: 5px;
+        }
+
+        .content {
+            margin-top: 20px;
+        }
+
+        .content p {
+            margin: 10px 0;
+        }
+
+        ul {
+            margin: 10px 0 10px 20px;
+        }
+
+        li {
+            margin: 5px 0;
+        }
+
+        .advice-section {
+            margin-top: 30px;
+            padding-top: 20px;
+        }
+
+        .advice-table {
+            margin-top: 20px;
+            width: 100%;
+        }
+
+        .emergency-note {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border: 1px solid #ccc;
+            text-align: center;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>DISCHARGE SUMMARY</h1>
-    </div>
-
-    <div class="patient-info">
-        <div>
-            <p><strong>Name:</strong> ${patient?.patients?.name || 'Patient Name'}</p>
-            <p><strong>Primary Care Provider:</strong> Dr. ${patient?.appointment_with || 'Attending Physician'}</p>
-            <p><strong>Sex / Age:</strong> ${patient?.patients?.gender || 'N/A'} / ${patient?.patients?.age || 'N/A'} Year</p>
-            <p><strong>Tariff:</strong> ${patient?.patients?.corporate || 'Private'}</p>
-            <p><strong>Admission Date:</strong> ${patient?.admission_date || patient?.visit_date || new Date().toLocaleDateString()}</p>
-            <p><strong>Discharge Reason:</strong> Recovered</p>
-        </div>
-        <div>
-            <p><strong>Patient ID:</strong> ${patient?.visit_id || 'N/A'}</p>
-            <p><strong>Registration ID:</strong> ${patient?.patients?.patients_id || 'N/A'}</p>
-            <p><strong>Mobile No:</strong> ${patient?.patients?.phone || 'N/A'}</p>
-            <p><strong>Address:</strong> ${patient?.patients?.address || 'N/A'}</p>
-            <p><strong>Discharge Date:</strong> ${patient?.discharge_date || new Date().toLocaleDateString()}</p>
-        </div>
+        <h1>Discharge Summary</h1>
     </div>
 
     <div class="content">
