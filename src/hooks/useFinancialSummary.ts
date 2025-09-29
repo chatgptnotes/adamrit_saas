@@ -284,19 +284,33 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         return 0;
       }
 
-      // Calculate total using private rates
+      // Calculate total using quantity and cost columns (updated after migration)
       let total = 0;
       visitLabsData.forEach((visitLab: any, index) => {
         const labDetail = labsData.find((l: any) => l.id === visitLab.lab_id);
-        const cost = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
-        total += cost;
-        
-        console.log(`💰 Lab ${index + 1}:`, { 
+
+        // Use cost column if available, otherwise use quantity × private rate
+        let itemTotal = 0;
+        if (visitLab.cost && visitLab.cost > 0) {
+          // Migration complete: use cost column directly
+          itemTotal = parseFloat(visitLab.cost) || 0;
+        } else {
+          // Fallback: calculate from quantity × private rate
+          const quantity = visitLab.quantity || 1;
+          const unitRate = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
+          itemTotal = quantity * unitRate;
+        }
+
+        total += itemTotal;
+
+        console.log(`💰 Lab ${index + 1}:`, {
           labName: labDetail?.name || 'Unknown',
           labId: visitLab.lab_id,
-          cost: cost,
-          privateRate: labDetail?.private,
-          usingFallback: !labDetail?.private || labDetail.private === 0
+          quantity: visitLab.quantity || 1,
+          unitRate: labDetail?.private || 100,
+          costColumn: visitLab.cost,
+          itemTotal: itemTotal,
+          usingCostColumn: !!(visitLab.cost && visitLab.cost > 0)
         });
       });
 

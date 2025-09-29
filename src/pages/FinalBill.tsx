@@ -1924,14 +1924,16 @@ const FinalBill = () => {
                 return {
                   ...item,
                   lab_name: labDetails?.name || 'Unknown Lab',
-                  cost: (labDetails?.private && labDetails.private > 0) ? labDetails.private : 100,
+                  cost: item.cost || ((labDetails?.private && labDetails.private > 0) ? labDetails.private : 100), // Preserve saved cost
+                  quantity: item.quantity || 1, // Preserve quantity from database
                   description: labDetails?.description || ''
                 };
               }
               return {
                 ...item,
                 lab_name: 'Unknown Lab',
-                cost: 0,
+                cost: item.cost || 0, // Preserve saved cost
+                quantity: item.quantity || 1, // Preserve quantity from database
                 description: ''
               };
             })
@@ -2175,14 +2177,16 @@ const FinalBill = () => {
               return {
                 ...item,
                 lab_name: labDetails?.name || 'Unknown Lab',
-                cost: (labDetails?.private && labDetails.private > 0) ? labDetails.private : 100,
+                cost: item.cost || ((labDetails?.private && labDetails.private > 0) ? labDetails.private : 100), // Preserve saved cost
+                quantity: item.quantity || 1, // Preserve quantity from database
                 description: labDetails?.description || ''
               };
             }
             return {
               ...item,
               lab_name: 'Unknown Lab',
-              cost: 0,
+              cost: item.cost || 0, // Preserve saved cost
+              quantity: item.quantity || 1, // Preserve quantity from database
               description: ''
             };
           })
@@ -4706,7 +4710,8 @@ INSTRUCTIONS:
                 lab_name: labDetail?.name || `Lab ID: ${item.lab_id}`,
                 description: labDetail?.description || '',
                 ordered_date: item.ordered_date,
-                cost: (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100,
+                cost: item.cost || ((labDetail?.private && labDetail.private > 0) ? labDetail.private : 100), // Preserve saved cost, fallback to lab rate
+                quantity: item.quantity || 1, // Preserve quantity from database
                 created_at: item.created_at
               };
             }
@@ -4715,7 +4720,8 @@ INSTRUCTIONS:
               lab_name: `Unknown Lab Test`,
               ordered_date: item.ordered_date,
               created_at: item.created_at,
-              cost: 0,
+              cost: item.cost || 0, // Preserve saved cost
+              quantity: item.quantity || 1, // Preserve quantity from database
               description: ''
             };
           })
@@ -7359,13 +7365,125 @@ INSTRUCTIONS:
           return;
         }
 
-        // Prepare lab data for visit_labs table (including cost)
+        // DUPLICATE DETECTION: Check if this lab service already exists for this visit
+        console.log('🔍 [LAB DUPLICATE CHECK] Checking for existing lab service...');
+        const { data: existingLabs, error: checkError } = await supabase
+          .from('visit_labs')
+          .select('*')
+          .eq('visit_id', visitData.id)
+          .eq('lab_id', labService.id);
+
+        if (checkError) {
+          console.error('❌ [LAB DUPLICATE CHECK] Error checking for duplicates:', checkError);
+          // Continue with normal save if check fails
+        } else if (existingLabs && existingLabs.length > 0) {
+          // DUPLICATE FOUND: Handle quantity-based update
+          const existingLab = existingLabs[0];
+          const currentQuantity = existingLab.quantity || 1;
+          // Get unit rate from the new service being added, not from existing total cost
+          const unitRate = labService.amount || labService.cost || 0;
+          const currentTotalCost = unitRate * currentQuantity;
+          const newQuantity = currentQuantity + 1;
+          const newTotalAmount = unitRate * newQuantity;
+
+          console.log('⚠️ [LAB DUPLICATE] Lab service already exists:', {
+            existingLab,
+            currentQuantity,
+            unitRate,
+            currentTotalCost,
+            newQuantity,
+            newTotalAmount
+          });
+
+          // Show quantity-based duplicate confirmation dialog
+          const userChoice = confirm(
+            `"${labService.name}" is already added to this visit.\n\n` +
+            `Current: Quantity ${currentQuantity} × ₹${unitRate} = ₹${currentTotalCost}\n` +
+            `New: Quantity ${newQuantity} × ₹${unitRate} = ₹${newTotalAmount}\n\n` +
+            `Click OK to increase quantity to ${newQuantity}, or Cancel to keep current quantity.`
+          );
+
+          if (!userChoice) {
+            toast.info(`"${labService.name}" quantity unchanged (${currentQuantity}).`);
+            return; // User chose to keep existing quantity
+          }
+
+          // UPDATE EXISTING RECORD: Increase quantity and recalculate total
+          console.log('🔢 [LAB QUANTITY UPDATE] Updating existing lab quantity...');
+
+          // First try to update with quantity column
+          let updateResult, updateError;
+          try {
+            const result = await supabase
+              .from('visit_labs')
+              .update({
+                quantity: newQuantity,
+                cost: newTotalAmount,
+                unit_rate: unitRate, // Store unit rate separately for consistent display
+                ordered_date: new Date().toISOString() // Update date to reflect latest addition
+              })
+              .eq('id', existingLab.id)
+              .select('*');
+
+            updateResult = result.data;
+            updateError = result.error;
+          } catch (error) {
+            updateError = error;
+          }
+
+          // Check if the error is due to missing quantity column
+          if (updateError && updateError.message && updateError.message.includes('quantity')) {
+            console.log('⚠️ [LAB QUANTITY UPDATE] Quantity column not found, using fallback approach...');
+            toast.warning('Quantity tracking not available - please run database migration. Creating duplicate entry instead.');
+
+            // Fallback: Just update the cost and proceed with normal save for the new entry
+            try {
+              const { data: fallbackResult, error: fallbackError } = await supabase
+                .from('visit_labs')
+                .update({
+                  cost: newTotalAmount,
+                  ordered_date: new Date().toISOString()
+                })
+                .eq('id', existingLab.id)
+                .select('*');
+
+              if (fallbackError) {
+                console.error('❌ [LAB QUANTITY UPDATE] Fallback also failed:', fallbackError);
+                toast.error('Failed to update lab service');
+                return;
+              }
+
+              console.log('✅ [LAB QUANTITY UPDATE] Used fallback approach:', fallbackResult);
+              toast.info(`Updated "${labService.name}" cost to ₹${newTotalAmount} (quantity tracking unavailable)`);
+            } catch (fallbackError2) {
+              console.error('❌ [LAB QUANTITY UPDATE] Complete fallback failure:', fallbackError2);
+              toast.error('Database update failed - please contact administrator');
+              return;
+            }
+          } else if (updateError) {
+            console.error('❌ [LAB QUANTITY UPDATE] Failed to update lab quantity:', updateError);
+            toast.error(`Failed to update lab service quantity: ${updateError.message}`);
+            return;
+          } else {
+            console.log('✅ [LAB QUANTITY UPDATE] Successfully updated lab quantity:', updateResult);
+            toast.success(`"${labService.name}" quantity updated to ${newQuantity} (₹${newTotalAmount})`);
+          }
+
+          // Refresh saved labs data after successful update
+          await fetchSavedLabs(visitId);
+          return; // Exit early - don't proceed with normal save
+        }
+
+        // NEW SERVICE: Prepare lab data for visit_labs table (including cost and quantity)
+        const unitRate = labService.amount || labService.cost || 0;
         const labToSave = {
           visit_id: visitData.id,
           lab_id: labService.id,
           status: 'ordered',
           ordered_date: new Date().toISOString(),
-          cost: labService.amount || labService.cost || 0  // Save the actual displayed rate
+          cost: unitRate,  // Total cost (for quantity 1, this equals unit rate)
+          unit_rate: unitRate,  // Store unit rate separately for consistent display
+          quantity: 1  // Default quantity for new lab services
         };
 
         console.log('💾 Lab data to save:', labToSave);
@@ -7385,9 +7503,34 @@ INSTRUCTIONS:
 
         if (insertError) {
           console.error('❌ Error saving lab to visit_labs:', insertError);
-          
+
+          // If error is due to quantity field not existing, retry without quantity
+          if (insertError.message && insertError.message.includes('quantity')) {
+            console.log('🔄 Retrying lab save without quantity field...');
+            const labToSaveWithoutQuantity = {
+              visit_id: visitData.id,
+              lab_id: labService.id,
+              status: 'ordered',
+              ordered_date: new Date().toISOString(),
+              cost: labService.amount || labService.cost || 0
+            };
+
+            const { data: retryData, error: retryError } = await supabase
+              .from('visit_labs' as any)
+              .insert([labToSaveWithoutQuantity])
+              .select();
+
+            if (retryError) {
+              console.error('❌ Retry without quantity also failed:', retryError);
+              toast.error('Failed to save lab to visit record');
+              return;
+            } else {
+              console.log('✅ Lab saved without quantity field:', retryData);
+              toast.success(`${labService.name} saved to visit (quantity tracking unavailable)`);
+            }
+          }
           // If error is due to cost field not existing, retry without cost
-          if (insertError.message && insertError.message.includes('cost')) {
+          else if (insertError.message && insertError.message.includes('cost')) {
             console.log('🔄 Retrying lab save without cost field...');
             const labToSaveWithoutCost = {
               visit_id: visitData.id,
@@ -9039,23 +9182,35 @@ INSTRUCTIONS:
         privateRate: lab.private
       })));
 
-      // Combine the data using private rates
+      // Combine the data preserving database values when available
       const formattedLabs = visitLabsData.map((visitLab: any) => {
         const labDetail = labsData?.find((l: any) => l.id === visitLab.lab_id);
-        
-        // Use private rate, fallback to 100 if null/0 (temporary until DB updated)
-        const cost = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
-        console.log('🎯 Using private rate from lab table:', {
-          privateRate: labDetail?.private,
-          finalCost: cost,
-          usingFallback: !labDetail?.private || labDetail.private === 0
-        });
-        
-        console.log('🔍 fetchSavedLabs mapping:', {
-          labId: labDetail?.id,
+
+        // Use stored database values first, fallback to calculated values only if missing
+        const storedCost = visitLab.cost;
+        const storedUnitRate = visitLab.unit_rate;
+        const quantity = visitLab.quantity || 1;
+
+        // Only calculate if database values are missing/invalid
+        let finalCost = storedCost;
+        let finalUnitRate = storedUnitRate;
+
+        if (!storedCost || storedCost <= 0 || !storedUnitRate || storedUnitRate <= 0) {
+          // Fallback calculation for older data without proper cost/unit_rate
+          const fallbackUnitRate = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
+          finalUnitRate = storedUnitRate || fallbackUnitRate;
+          finalCost = storedCost || (fallbackUnitRate * quantity);
+        }
+
+        console.log('🎯 fetchSavedLabs data resolution:', {
           labName: labDetail?.name,
-          privateRate: labDetail?.private,
-          finalCost: cost
+          storedCost,
+          storedUnitRate,
+          quantity,
+          finalCost,
+          finalUnitRate,
+          usingFallback: !storedCost || !storedUnitRate,
+          privateRate: labDetail?.private
         });
 
         return {
@@ -9063,7 +9218,8 @@ INSTRUCTIONS:
           lab_name: labDetail?.name || `Unknown Lab (${visitLab.lab_id})`,
           description: labDetail?.description || 'No description available',
           category: labDetail?.category || '',
-          cost: cost,
+          cost: finalCost, // Use database cost or calculated fallback
+          unit_rate: finalUnitRate, // Ensure unit_rate is preserved/calculated
           cghs_code: labDetail?.['CGHS_code'] || '',
           status: visitLab.status || 'ordered',
           ordered_date: visitLab.ordered_date
@@ -16016,8 +16172,10 @@ Dr. Murali B K
                                         />
                                       </th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Test Name</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Qty</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Total</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Ordered Date</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Cost</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Action</th>
                                     </tr>
                                   </thead>
@@ -16035,13 +16193,21 @@ Dr. Murali B K
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
                                           {lab.lab_name}
                                         </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                          <input
-                                            type="date"
-                                            value={lab.ordered_date ? new Date(lab.ordered_date).toISOString().split('T')[0] : ''}
-                                            onChange={(e) => updateLabField(lab.id, 'ordered_date', e.target.value)}
-                                            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
-                                          />
+                                        <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-purple-600">
+                                          {lab.quantity || 1}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-700">
+                                          ₹{(() => {
+                                            // Use unit_rate if available, otherwise calculate from cost/quantity
+                                            if (lab.unit_rate && lab.unit_rate > 0) {
+                                              return parseFloat(lab.unit_rate).toLocaleString('en-IN');
+                                            }
+                                            // Fallback calculation for older data without unit_rate
+                                            const quantity = lab.quantity || 1;
+                                            const totalCost = parseFloat(lab.cost) || 0;
+                                            const ratePerUnit = quantity > 0 ? totalCost / quantity : totalCost;
+                                            return isNaN(ratePerUnit) ? '0' : ratePerUnit.toLocaleString('en-IN');
+                                          })()}
                                         </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
                                           <input
@@ -16051,6 +16217,7 @@ Dr. Murali B K
                                                 labId: lab.id,
                                                 labName: lab.lab_name,
                                                 rawCost: lab.cost,
+                                                quantity: lab.quantity,
                                                 displayValue: lab.cost ? String(lab.cost).replace('₹', '') : '',
                                                 fullLabObject: lab
                                               });
@@ -16058,9 +16225,17 @@ Dr. Murali B K
                                             })()}
                                             onChange={(e) => updateLabField(lab.id, 'cost', e.target.value)}
                                             className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
-                                            placeholder="Cost"
+                                            placeholder="Total Cost"
                                             min="0"
                                             step="0.01"
+                                          />
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          <input
+                                            type="date"
+                                            value={lab.ordered_date ? new Date(lab.ordered_date).toISOString().split('T')[0] : ''}
+                                            onChange={(e) => updateLabField(lab.id, 'ordered_date', e.target.value)}
+                                            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
                                           />
                                         </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-center">
