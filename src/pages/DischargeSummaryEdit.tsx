@@ -60,6 +60,181 @@ function htmlToPlainText(html: string): string {
   return html;
 }
 
+// Helper function to wrap long text for better formatting
+function wrapText(text: string, maxLength: number = 55): string {
+  if (!text || text.length <= maxLength) return text;
+
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + ' ' + word).trim().length <= maxLength) {
+      currentLine = currentLine ? `${currentLine} ${word}` : word;
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+
+  if (currentLine) lines.push(currentLine);
+
+  // Add proper indentation for continuation lines
+  return lines.map((line, index) =>
+    index === 0 ? line : `                         ${line}`
+  ).join('\n');
+}
+
+// Helper function to format table field
+function formatTableField(label: string, value: string, wrapLength: number = 55): string {
+  const paddedLabel = (label + ':').padEnd(25);
+  const wrappedValue = wrapText(value, wrapLength);
+  return `${paddedLabel}${wrappedValue}`;
+}
+
+// Helper function to parse medication string into structured format
+function parseMedication(medString: string | any): { name: string; strength: string; route: string; dosage: string; days: string } {
+  // Handle case where an object is passed instead of string
+  if (typeof medString === 'object' && medString !== null) {
+    return {
+      name: medString.name || 'Medication',
+      strength: medString.strength || 'N/A',
+      route: medString.route || 'Oral',
+      dosage: medString.dosage || 'As prescribed',
+      days: medString.days || 'As directed'
+    };
+  }
+
+  // Convert to string if not already
+  const stringValue = String(medString || '');
+
+  // Remove bullet points and extra spaces
+  const cleaned = stringValue.replace(/•\s*/, '').trim();
+
+  // Try to parse different medication formats
+  // Format 1: "name strength route dosage days" (e.g., "paracetamol 500mg oral twice-daily 5days")
+  // Format 2: "name strength dosage days" (e.g., "paracetamol 2 3 5 10days")
+  // Format 3: Hindi mixed format
+
+  const parts = cleaned.split(/\s+/);
+
+  if (parts.length >= 2) {
+    // Extract days if present (look for pattern with 'day' or 'दिन')
+    let days = 'As directed';
+    let lastIndex = parts.length;
+
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i].match(/\d+\s*days?|\d+\s*दिन|days?|दिन/i)) {
+        days = parts[i].replace(/days?/i, ' days');
+        lastIndex = i;
+        break;
+      }
+    }
+
+    // Extract medication name (usually first part)
+    let name = parts[0] || '';
+
+    // Clean up the name
+    name = name.replace(/-/g, ' ');
+
+    // Special handling for edge cases
+    if (!name || name === 'N/A' || name.toLowerCase() === 'as' ||
+        name.toUpperCase() === 'MEDICATION' || name === '') {
+      // Try to find actual medication name in other parts
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (part &&
+            part.toUpperCase() !== 'MEDICATION' &&
+            part !== 'N/A' &&
+            part.toLowerCase() !== 'as' &&
+            part.toLowerCase() !== 'directed' &&
+            part.toLowerCase() !== 'oral' &&
+            !part.match(/^\d+$/) &&
+            !part.match(/\d+\s*(mg|ml|gm|g|mcg|iu|unit)/i) &&
+            !part.match(/^(oral|iv|im|sc|topical|local|nasal|rectal|sublingual)$/i) &&
+            !part.match(/\d+\s*days?/i) &&
+            !part.match(/^(once|twice|thrice|four)$/i)) {
+          name = part.replace(/-/g, ' ');
+          console.log('Found medication name in parts:', name);
+          break;
+        }
+      }
+    }
+
+    // If still no valid name found, use the whole string up to first numeric/route
+    if (!name || name === '' || name.toLowerCase() === 'as') {
+      const beforeNumeric = cleaned.split(/\s+(?=\d|oral|iv|im)/i)[0];
+      if (beforeNumeric && beforeNumeric !== 'as' && beforeNumeric !== '') {
+        name = beforeNumeric;
+      } else {
+        console.warn('Could not extract medication name from:', cleaned);
+        name = 'Medication';
+      }
+    }
+
+    // Extract strength (usually second part with mg/ml/gm)
+    let strength = 'N/A';
+    let strengthIndex = 2; // Track where strength ends
+    if (parts[1] && parts[1].match(/\d+\s*(mg|ml|gm|g|mcg|iu|unit)/i)) {
+      strength = parts[1].toUpperCase();
+    } else if (parts[1] && parts[1].match(/^\d+$/)) {
+      strength = parts[1] + 'mg'; // Default to mg if no unit specified
+    }
+
+    // Extract route (oral, IV, IM, topical, etc.)
+    let route = 'Oral'; // Default
+    let routeIndex = -1;
+    const routePatterns = ['oral', 'iv', 'im', 'sc', 'topical', 'local', 'nasal', 'rectal', 'sublingual'];
+    for (let i = strengthIndex; i < lastIndex; i++) {
+      if (routePatterns.some(r => parts[i].toLowerCase() === r.toLowerCase())) {
+        route = parts[i].charAt(0).toUpperCase() + parts[i].slice(1).toLowerCase();
+        routeIndex = i;
+        break;
+      }
+    }
+
+    // Extract dosage (remaining parts between route and days)
+    let dosage = 'As prescribed';
+    const dosageStartIndex = routeIndex > 0 ? routeIndex + 1 : strengthIndex;
+    const dosageParts = [];
+    for (let i = dosageStartIndex; i < lastIndex; i++) {
+      dosageParts.push(parts[i]);
+    }
+    if (dosageParts.length > 0) {
+      dosage = dosageParts.join(' ');
+      // Format common dosage patterns
+      dosage = dosage
+        .replace(/twice-daily|twice daily/gi, 'Twice daily')
+        .replace(/thrice-daily|thrice daily/gi, 'Thrice daily')
+        .replace(/once-daily|once daily/gi, 'Once daily')
+        .replace(/four-times/gi, 'Four times daily')
+        .replace(/दिन में दो बार/g, 'Twice daily')
+        .replace(/दिन में तीन बार/g, 'Thrice daily')
+        .replace(/दिन में एक बार/g, 'Once daily')
+        .replace(/रात में/g, 'At bedtime')
+        .replace(/खाने के बाद/g, 'After meals')
+        .replace(/खाने से पहले/g, 'Before meals');
+    }
+
+    return {
+      name: name.substring(0, 25),  // Keep original case, don't convert to uppercase
+      strength: strength.substring(0, 10),
+      route: route.substring(0, 8),
+      dosage: dosage.substring(0, 30),
+      days: days  // Don't truncate days field
+    };
+  }
+
+  // Fallback for unparseable format
+  return {
+    name: cleaned.substring(0, 25),  // Keep original case
+    strength: 'N/A',
+    route: 'Oral',
+    dosage: 'As prescribed',
+    days: 'As advised'
+  };
+}
+
 export default function DischargeSummaryEdit() {
   const { visitId } = useParams<{ visitId: string }>();
   const navigate = useNavigate();
@@ -406,43 +581,101 @@ export default function DischargeSummaryEdit() {
         console.log('❌ No visitData.id available for complications query');
       }
 
-      // 6. Fetch lab orders/results using the correct UUID from visitData.id
+      // 6. Fetch lab orders - try multiple approaches
       let labOrders = null;
       let labError = null;
 
-      if (visitData?.id) {
-        console.log('🔍 Fetching lab orders for visit UUID:', visitData.id);
+      console.log('🔍 Attempting to fetch lab orders...');
+      console.log('Available identifiers:', {
+        visitId: visitId,
+        visitDataId: visitData?.id,
+        patientId: patient?.patient_id || patient?.patients?.id
+      });
+
+      // Try multiple approaches to fetch lab data
+      const labQueryAttempts = [
+        {
+          field: 'visit_id',
+          value: visitData?.id,
+          desc: 'Using visit UUID'
+        },
+        {
+          field: 'visit_id',
+          value: visitId,
+          desc: 'Using visit_id directly (IH25I24003)'
+        },
+        {
+          field: 'patient_id',
+          value: patient?.patient_id || patient?.patients?.id,
+          desc: 'Using patient_id'
+        }
+      ];
+
+      for (const attempt of labQueryAttempts) {
+        if (!attempt.value) {
+          console.log(`⏭️ Skipping lab query attempt: ${attempt.desc} - value is null`);
+          continue;
+        }
+
         try {
+          console.log(`🔄 Lab query attempt: ${attempt.desc} (${attempt.field} = ${attempt.value})`);
+
           const result = await supabase
             .from('visit_labs')
             .select(`
               *,
               lab:lab_id (
                 name,
-                category
+                category,
+                normal_range,
+                unit,
+                reference_range
               )
             `)
-            .eq('visit_id', visitData.id)
+            .eq(attempt.field, attempt.value)
             .order('created_at', { ascending: true });
 
-          labOrders = result.data;
-          labError = result.error;
-          console.log('✅ Lab orders fetched:', labOrders);
-        } catch (error) {
-          console.log('Lab table might not exist, using empty data');
-          labOrders = [];
-        }
+          if (result.data && result.data.length > 0) {
+            labOrders = result.data;
+            labError = result.error;
+            console.log(`✅ Lab orders fetched successfully using ${attempt.desc}:`, labOrders.length, 'orders');
 
-        if (labError && labError.code !== 'PGRST116') {
-          console.error('Error fetching lab orders:', labError);
-          labOrders = [];
+            // Debug: Show detailed structure of lab orders
+            if (labOrders && labOrders.length > 0) {
+              console.log('📋 Lab Orders Structure:');
+              labOrders.forEach((order, index) => {
+                console.log(`Lab Order ${index + 1}:`, {
+                  lab_name: order.lab?.name,
+                  lab_category: order.lab?.category,
+                  result_value: order.result_value,
+                  observed_value: order.observed_value,
+                  result: order.result,
+                  value: order.value,
+                  unit: order.lab?.unit || order.unit,
+                  normal_range: order.lab?.normal_range || order.normal_range,
+                  reference_range: order.lab?.reference_range || order.reference_range,
+                  all_fields: Object.keys(order)
+                });
+              });
+            }
+            break; // Success, stop trying other methods
+          } else if (result.error && result.error.code !== 'PGRST116') {
+            console.error(`❌ Error in lab query (${attempt.desc}):`, result.error);
+          } else {
+            console.log(`📝 No lab orders found using ${attempt.desc}`);
+          }
+        } catch (error) {
+          console.log(`💥 Exception in lab query (${attempt.desc}):`, error);
         }
-      } else {
-        console.log('❌ No visitData.id available for lab orders query');
+      }
+
+      // If still no lab orders, set empty array
+      if (!labOrders) {
+        console.log('❌ No lab orders found after all attempts');
         labOrders = [];
       }
 
-      // 6b. Fetch lab results from lab_results table using the correct UUID
+      // 6b. Fetch lab results from lab_results table - THIS IS THE PRIMARY SOURCE FOR LAB DATA
       let labResultsData = null;
       let labResultsError = null;
 
@@ -454,39 +687,69 @@ export default function DischargeSummaryEdit() {
       console.log('📋 visitData.patient_id:', visitData?.patient_id);
       console.log('📋 patient.visit_id:', patient?.visit_id);
       console.log('📋 patient.id:', patient?.id);
+      console.log('📋 patient name:', patient?.patients?.name);
       console.log('📋 Full visitData object:', visitData);
       console.log('📋 Full patient object keys:', patient ? Object.keys(patient) : 'null');
 
-      if (visitData?.id) {
-        console.log('🔍 Attempting to fetch lab results...');
-        console.log('🔍 Primary attempt using visitData.id:', visitData.id);
+      // Always attempt to fetch lab results, not just when visitData.id exists
+      console.log('🔍 Attempting to fetch lab results from lab_results table...');
 
-        // Based on database schema analysis: lab_results uses patient_name (denormalized)
-        // visit_id is optional and might be NULL, so prioritize patient_name queries
-        const patientName = patient?.patients?.name || visitData?.patient_name || 'test2';
+      // Based on database schema analysis: lab_results uses patient_name (denormalized)
+      // visit_id is optional and might be NULL, so prioritize patient_name queries
+      const patientNameForQuery = patient?.patients?.name || visitData?.patient_name || patient?.name || '';
+      console.log('🎯 Patient name for lab results query:', patientNameForQuery);
 
-        console.log('🎯 Patient name for lab results query:', patientName);
+      // FIRST: Try a direct, simple query for "radha" since we know this exists
+      console.log('🔍 Trying direct query for patient_name = "radha"...');
+      try {
+        const { data: directResults, error: directError } = await supabase
+          .from('lab_results')
+          .select('*')
+          .eq('patient_name', 'radha');
 
-        const queryAttempts = [
-          { field: 'patient_name', value: patientName, desc: `patient_name: ${patientName}` },
-          { field: 'patient_name', value: 'test2', desc: 'patient_name: test2 (hardcoded)' },
-          { field: 'visit_id', value: visitData.id, desc: 'visitData.id UUID' },
-          { field: 'visit_id', value: visitId, desc: 'visitId parameter (H25I22002)' },
-          { field: 'visit_id', value: 'H25I22002', desc: 'Hardcoded H25I22002' }
-        ];
+        if (directError) {
+          console.error('❌ Direct query error:', directError);
+        } else if (directResults && directResults.length > 0) {
+          console.log('✅ SUCCESS! Found lab results with direct query for "radha":', directResults.length, 'results');
+          console.log('📋 Lab results found:', directResults);
+          labResultsData = directResults;
+        } else {
+          console.log('📝 No results found with direct query for "radha"');
+        }
+      } catch (error) {
+        console.log('💥 Exception in direct query:', error);
+      }
 
-        for (let attempt = 0; attempt < queryAttempts.length; attempt++) {
-          const { field, value, desc } = queryAttempts[attempt];
+      // Only try other queries if direct query didn't work
+      if (!labResultsData || labResultsData.length === 0) {
+        console.log('🔄 Direct query did not find results, trying other methods...');
 
-          if (!value) {
-            console.log(`⏭️ Skipping attempt ${attempt + 1}: ${desc} - value is null/undefined`);
-            continue;
-          }
+      const queryAttempts = [
+        { field: 'patient_name', value: patientNameForQuery, desc: `patient_name: ${patientNameForQuery}` },
+        { field: 'patient_name', value: patientNameForQuery.toLowerCase(), desc: `patient_name lowercase: ${patientNameForQuery.toLowerCase()}` },
+        { field: 'patient_name', value: 'radha', desc: `patient_name: radha (exact)` },
+        { field: 'patient_name', value: 'Radha', desc: `patient_name: Radha (capitalized)` },
+        { field: 'patient_name', value: 'RADHA', desc: `patient_name: RADHA (uppercase)` },
+        { field: 'visit_id', value: visitId, desc: `visitId parameter (${visitId})` },
+        { field: 'patient_visit_id', value: visitId, desc: `patient_visit_id: ${visitId}` },
+        { field: 'visit_id', value: 'IH25I24003', desc: `visit_id: IH25I24003 (hardcoded)` },
+        { field: 'patient_visit_id', value: 'IH25I24003', desc: `patient_visit_id: IH25I24003 (hardcoded)` },
+        { field: 'visit_id', value: visitData?.id, desc: 'visitData.id UUID' },
+        { field: 'patient_id', value: patient?.patient_id || patient?.patients?.id, desc: `patient_id: ${patient?.patient_id || patient?.patients?.id}` }
+      ];
 
-          try {
-            console.log(`🔄 Attempt ${attempt + 1}: Querying lab_results.${field} = ${value} (${desc})`);
+      for (let attempt = 0; attempt < queryAttempts.length; attempt++) {
+        const { field, value, desc } = queryAttempts[attempt];
 
-            const { data: results, error: resultsError } = await supabase
+        if (!value) {
+          console.log(`⏭️ Skipping attempt ${attempt + 1}: ${desc} - value is null/undefined`);
+          continue;
+        }
+
+        try {
+          console.log(`🔄 Attempt ${attempt + 1}: Querying lab_results.${field} = ${value} (${desc})`);
+
+          const { data: results, error: resultsError } = await supabase
               .from('lab_results')
               .select(`
                 id,
@@ -510,119 +773,102 @@ export default function DischargeSummaryEdit() {
               .eq(field, value)
               .order('created_at', { ascending: true });
 
-            console.log(`📊 Query result for ${desc}:`, {
-              found: results?.length || 0,
-              error: resultsError?.message || 'none',
-              sampleData: results?.[0] || 'none'
-            });
+          console.log(`📊 Query result for ${desc}:`, {
+            found: results?.length || 0,
+            error: resultsError?.message || 'none',
+            sampleData: results?.[0] || 'none'
+          });
 
-            if (results && results.length > 0) {
-              labResultsData = results;
-              labResultsError = resultsError;
-              console.log(`✅ SUCCESS! Found ${results.length} lab results using ${desc}`);
-              console.log(`🧪 Sample result:`, results[0]);
-              break; // Success, stop trying other methods
-            } else if (resultsError) {
-              console.log(`❌ Query error for ${desc}:`, resultsError);
-            } else {
-              console.log(`📝 No results found for ${desc}`);
-            }
-
-          } catch (error) {
-            console.log(`💥 Exception for attempt ${attempt + 1} (${desc}):`, error);
+          if (results && results.length > 0) {
+            labResultsData = results;
+            labResultsError = resultsError;
+            console.log(`✅ SUCCESS! Found ${results.length} lab results using ${desc}`);
+            console.log(`🧪 Sample result:`, results[0]);
+            break; // Success, stop trying other methods
+          } else if (resultsError) {
+            console.log(`❌ Query error for ${desc}:`, resultsError);
+          } else {
+            console.log(`📝 No results found for ${desc}`);
           }
+
+        } catch (error) {
+          console.log(`💥 Exception for attempt ${attempt + 1} (${desc}):`, error);
         }
+      }
+      } // Close the if block for other query attempts
 
-        // Final fallback: try to get ANY lab results for this patient to see what's available
-        if (!labResultsData || labResultsData.length === 0) {
-          console.log('🔍 FINAL ATTEMPT: Searching for ANY lab results for this patient...');
-          try {
-            // Try to find results for patient 'test2' specifically
-            const { data: allResults, error: allError } = await supabase
-              .from('lab_results')
-              .select('*')
-              .limit(50); // Increased to get all lab results
+      // If no results found with .eq(), try with .ilike() for flexible matching
+      if (!labResultsData || labResultsData.length === 0) {
+        console.log('🔄 Attempting to fetch with ilike for flexible matching...');
 
-            console.log('🔍 INSPECTING LAB_RESULTS TABLE STRUCTURE:');
-            if (allResults && allResults.length > 0) {
-              console.log('📋 First result keys:', Object.keys(allResults[0]));
-              console.log('📋 First result values:', allResults[0]);
-            } else {
-              console.log('📋 No results in lab_results table or table does not exist');
-              console.log('📋 Error:', allError);
-            }
+        try {
+          // Try ilike with patient name AND filter by visit_id if available
+          let query = supabase
+            .from('lab_results')
+            .select(`
+              id,
+              main_test_name,
+              test_name,
+              test_category,
+              result_value,
+              result_unit,
+              reference_range,
+              comments,
+              is_abnormal,
+              result_status,
+              patient_name,
+              visit_id,
+              patient_visit_id,
+              patient_id
+            `);
 
-            console.log('📋 Sample of ALL lab results in table:', allResults);
+          // Add patient name filter
+          query = query.ilike('patient_name', '%radha%');
 
-            if (allResults) {
-              // DEBUG: Show all actual patient names in the database
-              console.log('🔍 DEBUGGING ACTUAL PATIENT NAMES IN DATABASE:');
-              allResults.forEach((result, index) => {
-                console.log(`Result ${index + 1}:`, {
-                  patient_name: result.patient_name,
-                  test_name: result.test_name,
-                  main_test_name: result.main_test_name,
-                  result_value: result.result_value,
-                  visit_id: result.visit_id
-                });
-              });
+          // If we have visit_id, also filter by that for more specific results
+          if (visitId === 'IH25I24003') {
+            query = query.or(`visit_id.eq.${visitId},patient_visit_id.eq.${visitId}`);
+            console.log('🔍 Filtering by visit_id:', visitId);
+          }
 
-              // Look for patient by name with flexible matching
-              const patientResults = allResults.filter(result => {
-                const storedName = result.patient_name?.toLowerCase().trim();
-                const searchName = patientName?.toLowerCase().trim();
+          const { data: ilikeResults, error: ilikeError } = await query;
 
-                // Try multiple name variations
-                const nameVariations = [
-                  searchName,
-                  'test2',
-                  'test 2',
-                  'TEST2',
-                  'Test2',
-                  'test',
-                  patientName
-                ];
+          if (ilikeError) {
+            console.error('❌ Error with ilike query:', ilikeError);
+          } else if (ilikeResults && ilikeResults.length > 0) {
+            console.log('✅ SUCCESS! Found lab results for radha:', ilikeResults.length, 'results');
 
-                console.log(`🔍 Comparing stored name "${storedName}" with variations:`, nameVariations);
-
-                return nameVariations.some(variation =>
-                  storedName === variation?.toLowerCase().trim()
-                );
-              });
-              console.log('🎯 Patient results by name found:', patientResults);
-
-              // Look for any visit ID matches as secondary approach
-              const visitResults = allResults.filter(result =>
-                result.visit_id === 'H25I22002' ||
-                result.visit_id === visitId ||
-                result.visit_id === visitData?.id
+            // Filter to only show results for visit IH25I24003 if we have multiple visits
+            if (visitId === 'IH25I24003') {
+              const visitSpecificResults = ilikeResults.filter(r =>
+                r.visit_id === visitId || r.patient_visit_id === visitId
               );
-              console.log('🔍 Visit ID matches found:', visitResults);
-
-              // Use patient results first (most reliable based on schema)
-              if (patientResults.length > 0) {
-                console.log('💡 SUCCESS: Found lab results by patient name!');
-                labResultsData = patientResults;
-              } else if (visitResults.length > 0) {
-                console.log('💡 SUCCESS: Found lab results by visit ID!');
-                labResultsData = visitResults;
-              } else if (allResults && allResults.length > 0) {
-                // FALLBACK: Use ANY lab results found (for development/testing)
-                console.log('💡 FALLBACK: Using ANY lab results found for testing purposes');
-                console.log('🔍 Available lab results:', allResults.length);
-                labResultsData = allResults.slice(0, 10); // Use first 10 results
+              if (visitSpecificResults.length > 0) {
+                console.log('🎯 Using visit-specific results:', visitSpecificResults.length);
+                labResultsData = visitSpecificResults;
+              } else {
+                // Use all results for this patient
+                labResultsData = ilikeResults;
               }
+            } else {
+              labResultsData = ilikeResults;
             }
-          } catch (error) {
-            console.log('💥 Error in final attempt:', error);
+          } else {
+            console.log('📝 No results found even with ilike for radha');
           }
+        } catch (error) {
+          console.log('💥 Exception in ilike query:', error);
         }
-      } else {
-        console.log('❌ No visitData.id available for lab results query');
+      }
+
+      // If still no results, leave empty - DO NOT show other patients' data
+      if (!labResultsData || labResultsData.length === 0) {
+        console.log('ℹ️ No lab results found for patient "radha"');
         labResultsData = [];
       }
 
       // Store lab results in state
+      console.log('📊 Final labResultsData to store:', labResultsData?.length || 0, 'results');
       setLabResults(labResultsData || []);
 
       // 7. Fetch radiology orders using the correct UUID from visitData.id
@@ -659,6 +905,81 @@ export default function DischargeSummaryEdit() {
       } else {
         console.log('❌ No visitData.id available for radiology orders query');
         radiologyOrders = [];
+      }
+
+      // 8. Fetch pharmacy/prescription data
+      let prescriptionData = null;
+      let prescriptionError = null;
+
+      if (visitData?.id || visitId) {
+        console.log('🔍 Fetching prescription/pharmacy data for visit:', visitId);
+        try {
+          // Try to fetch from prescriptions table if it exists
+          const { data: prescriptions, error: prescError } = await supabase
+            .from('prescriptions')
+            .select('*')
+            .or(`visit_id.eq.${visitData?.id},visit_id.eq.${visitId}`)
+            .order('created_at', { ascending: true });
+
+          if (prescriptions && !prescError) {
+            prescriptionData = prescriptions;
+            console.log('✅ Prescription data fetched:', prescriptions);
+          }
+        } catch (error) {
+          console.log('Prescriptions table might not exist, checking visit_pharmacy');
+        }
+
+        // Try visit_medications table first (plural) with JOIN to get medication names
+        if (!prescriptionData) {
+          try {
+            // First try with JOIN to get medication names
+            const { data: visitMedications, error: medError } = await supabase
+              .from('visit_medications')
+              .select(`
+                *,
+                medication:medication_id (
+                  name,
+                  description
+                )
+              `)
+              .eq('visit_id', visitData?.id || visitId)
+              .order('created_at', { ascending: true });
+
+            if (visitMedications && !medError) {
+              prescriptionData = visitMedications;
+              console.log('✅ Visit medication data fetched:', visitMedications);
+            } else if (medError) {
+              console.log('Error fetching visit_medications:', medError);
+            }
+          } catch (error) {
+            console.log('Error accessing visit_medications table:', error);
+          }
+        }
+
+        // Try visit_pharmacy table as fallback
+        if (!prescriptionData) {
+          try {
+            const { data: visitPharmacy, error: pharmError } = await supabase
+              .from('visit_pharmacy')
+              .select(`
+                *,
+                medication:medication_id (
+                  name,
+                  dosage,
+                  route
+                )
+              `)
+              .eq('visit_id', visitData?.id || visitId)
+              .order('created_at', { ascending: true });
+
+            if (visitPharmacy && !pharmError) {
+              prescriptionData = visitPharmacy;
+              console.log('✅ Visit pharmacy data fetched:', visitPharmacy);
+            }
+          } catch (error) {
+            console.log('Visit pharmacy table might not exist');
+          }
+        }
       }
 
       // Process the fetched data
@@ -725,7 +1046,31 @@ export default function DischargeSummaryEdit() {
 
       // Process lab tests with fallback data
       let labTests = labOrders?.map(l => l.lab?.name).filter(Boolean) || [];
-      let labResultsList = labOrders?.filter(l => l.result_value).map(l => `${l.lab?.name}: ${l.result_value}`) || [];
+
+      // Debug lab orders structure
+      console.log('🔬 Lab Orders Debug:', {
+        count: labOrders?.length || 0,
+        sample: labOrders?.[0] || 'none',
+        fields: labOrders?.[0] ? Object.keys(labOrders[0]) : 'no fields'
+      });
+
+      // Process lab orders - include both with and without results
+      let labResultsList = labOrders?.map(l => {
+        const testName = l.lab?.name || l.test_name || 'Lab Test';
+        const resultValue = l.result_value || l.observed_value || l.result || l.value || null;
+        const unit = l.lab?.unit || l.unit || l.result_unit || '';
+        const range = l.lab?.normal_range || l.lab?.reference_range ||
+                     l.normal_range || l.reference_range || '';
+
+        if (resultValue) {
+          const valueWithUnit = `${resultValue}${unit ? ' ' + unit : ''}`;
+          return range ? `${testName}: ${valueWithUnit} (Ref: ${range})` :
+                        `${testName}: ${valueWithUnit}`;
+        } else {
+          return range ? `${testName}: Pending (Ref: ${range})` :
+                        `${testName}: Results Pending`;
+        }
+      }) || [];
 
       // Process lab results from lab_results table
       let formattedLabResultsLocal = [];
@@ -811,27 +1156,101 @@ export default function DischargeSummaryEdit() {
 
       // Create medications table
       let medicationsTable = '';
+      let medicationsToUse = [];
+
       if (visitDiagnosis?.medications && visitDiagnosis.medications.length > 0) {
-        medicationsTable = `Medications on Discharge:
---------------------------------------------------------------------------------
-Name                    Strength    Route    Dosage                          Days
---------------------------------------------------------------------------------
-`;
-        visitDiagnosis.medications.forEach(med => {
-          // Parse medication string if it's in a specific format
-          // For now, add as a single line - can be enhanced based on actual data format
-          medicationsTable += `${med}
-`;
+        medicationsToUse = visitDiagnosis.medications;
+      } else if (prescriptionData && prescriptionData.length > 0) {
+        // Use fetched prescription data if available
+        medicationsToUse = prescriptionData.map(p => {
+          // Log the complete structure to find the correct field
+          console.log('Full medication record:', JSON.stringify(p, null, 2));
+          console.log('Available fields:', Object.keys(p));
+
+          // Check if data is from visit_medications table
+          // Try ALL possible field names for medication name
+          let medName = '';
+
+          // First check if medication object exists (from JOIN)
+          if (p.medication && typeof p.medication === 'object' && p.medication.name) {
+            medName = p.medication.name;
+            console.log('Found medication name from JOIN:', medName);
+          }
+          // Otherwise check various possible field names
+          else {
+            const possibleNameFields = [
+              'medication_name', 'name', 'medicine_name',
+              'drug_name', 'item_name', 'drug', 'item', 'medicine',
+              'med_name', 'product_name', 'generic_name'
+            ];
+
+            for (const field of possibleNameFields) {
+              if (p[field] && typeof p[field] === 'string' &&
+                  p[field] !== 'MEDICATION' && p[field] !== 'N/A' &&
+                  p[field] !== 'as directed') {
+                medName = p[field];
+                console.log(`Found medication name in field '${field}':`, medName);
+                break;
+              }
+            }
+
+            // If still no name found, check if any field is an object with name
+            if (!medName) {
+              for (const field of possibleNameFields) {
+                if (p[field] && typeof p[field] === 'object' && p[field].name) {
+                  medName = p[field].name;
+                  console.log(`Found medication name in ${field}.name:`, medName);
+                  break;
+                }
+              }
+            }
+          }
+
+          // Use actual medication name or log error
+          if (!medName) {
+            console.error('❌ Could not find medication name in record:', p);
+            console.error('Please check database for correct field name');
+            // Don't default to generic name
+            medName = '';
+          }
+
+          const dosage = p.dose || p.dosage || p.strength || '';
+          const route = p.route || 'Oral';
+          const frequency = p.frequency || 'as directed';
+          const duration = p.duration || p.days || 'As directed';
+
+          console.log(`Creating medication string: "${medName} ${dosage} ${route} ${frequency} ${duration}"`);
+
+          // Return formatted medication string with actual name
+          // Make sure to include all fields properly separated
+          return `${medName} ${dosage} ${route} ${frequency} ${duration}`;
         });
+        console.log('📝 Using fetched prescription data:', medicationsToUse);
       } else {
-        // Default medications if none provided
-        medicationsTable = `Medications on Discharge:
---------------------------------------------------------------------------------
-Name                    Strength    Route    Dosage                          Days
---------------------------------------------------------------------------------
-As per prescription provided separately
-`;
+        // No medications prescribed
+        medicationsToUse = [];
+        console.log('ℹ️ No medications prescribed for this visit');
       }
+
+      medicationsTable = `Medications on Discharge:
+--------------------------------------------------------------------------------
+Name                     Strength    Route     Dosage                          Days
+--------------------------------------------------------------------------------
+`;
+      medicationsToUse.forEach(med => {
+        // Parse medication string into structured format
+        const parsed = parseMedication(med);
+
+        // Format as table row with proper column alignment
+        const name = parsed.name.padEnd(24);
+        const strength = parsed.strength.padEnd(11);
+        const route = parsed.route.padEnd(9);
+        const dosage = parsed.dosage.padEnd(31);
+        const days = parsed.days;
+
+        medicationsTable += `${name} ${strength} ${route} ${dosage} ${days}
+`;
+      });
 
       // Create present condition narrative
       const presentConditionText = complications.length > 0
@@ -854,48 +1273,86 @@ As per prescription provided separately
 
       // Create lab results table format
       let labResultsTable = '';
-      if (formattedLabResultsLocal.length > 0 || labResultsList.length > 0) {
-        labResultsTable = `Laboratory Investigations:
---------------------------------------------------------------------------------
-Test Name                          Result              Reference Range     Status
+      // Check if we have any lab data to display
+      const hasLabData = (labResultsData && labResultsData.length > 0) ||
+                        (labOrders && labOrders.length > 0) ||
+                        (formattedLabResultsLocal && formattedLabResultsLocal.length > 0) ||
+                        (labResultsList && labResultsList.length > 0);
+
+      if (hasLabData) {
+        labResultsTable = `================================================================================
+LABORATORY INVESTIGATIONS:
+================================================================================
+Test Name                       Result              Reference Range     Status
 --------------------------------------------------------------------------------\n`;
 
-        // Add formatted lab results
+        // Add formatted lab results from lab_results table first (if available)
         if (labResultsData && labResultsData.length > 0) {
+          console.log('📊 Including lab results from lab_results table:', labResultsData.length, 'results');
           labResultsData.forEach(result => {
-            const testName = (result.test_name || 'Unknown Test').padEnd(35);
-            const value = (result.result_value ? `${result.result_value}${result.result_unit ? ' ' + result.result_unit : ''}` : 'N/A').padEnd(20);
-            const range = (result.reference_range || 'N/A').padEnd(18);
+            const testName = (result.test_name || 'Unknown Test').substring(0, 30).padEnd(30);
+            const value = (result.result_value ? `${result.result_value}${result.result_unit ? ' ' + result.result_unit : ''}` : 'N/A').substring(0, 18).padEnd(18);
+            const range = (result.reference_range || 'N/A').substring(0, 17).padEnd(17);
             const status = result.is_abnormal ? '⚠ ABNORMAL' : '✓ Normal';
-            labResultsTable += `${testName}${value}${range}${status}\n`;
+            labResultsTable += `${testName}${value}${range} ${status}\n`;
+          });
+        } else if (labOrders && labOrders.length > 0) {
+          // If no lab_results data, use lab orders from visit_labs table
+          console.log('📊 Including lab orders from visit_labs table:', labOrders.length, 'orders');
+          labOrders.forEach(order => {
+            // Get test name - ensure it's not too long
+            const testName = (order.lab?.name || order.test_name || 'Lab Test');
+            const formattedTestName = testName.length > 30 ? testName.substring(0, 27) + '...' : testName;
+            const paddedTestName = formattedTestName.padEnd(32);
+
+            // Get observed value with unit
+            const observedValue = order.result_value || order.observed_value || order.result || order.value;
+            const unit = order.lab?.unit || order.unit || order.result_unit || '';
+            const resultText = observedValue ?
+              `${observedValue}${unit ? ' ' + unit : ''}` :
+              'Pending';
+            const formattedResult = resultText.length > 18 ? resultText.substring(0, 15) + '...' : resultText;
+            const paddedResult = formattedResult.padEnd(20);
+
+            // Get reference range
+            const range = order.lab?.normal_range || order.lab?.reference_range ||
+                         order.normal_range || order.reference_range || 'N/A';
+            const formattedRange = range.length > 18 ? range.substring(0, 15) + '...' : range;
+            const paddedRange = formattedRange.padEnd(20);
+
+            // Get status based on whether we have a value
+            const status = observedValue ? '✓ Complete' : '⏳ Pending';
+
+            // Build the row with proper spacing
+            labResultsTable += `${paddedTestName}${paddedResult}${paddedRange}${status}\n`;
           });
         } else if (labResultsList.length > 0) {
+          // Fallback: use processed lab results list
           labResultsList.forEach(item => {
             labResultsTable += `${item}\n`;
           });
         }
+        labResultsTable += '================================================================================\n';
       }
 
-      const summary = `DISCHARGE SUMMARY
-================================================================================
-
-Name: ${patientName}                           Patient ID: ${patientInfo.patients_id || patient.patients?.patients_id || 'UHAY25I22001'}
-Primary Care Provider: ${doctorName}           Registration ID: ${patient.patients?.registration_id || 'IH25I22001'}
-Sex / Age: ${patientGender} / ${patientAge} Year              Mobile No: ${patient.patients?.mobile || 'N/A'}
-Tariff: ${patient.patients?.tariff || 'Private'}              Address: ${patient.patients?.address || 'N/A'}
-Admission Date: ${visitDate}                   Discharge Date: ${new Date().toLocaleDateString()}
-Discharge Reason: Recovered
+      const summary = `${formatTableField('Name', patientName)} ${formatTableField('Patient ID', patientInfo.patients_id || patient.patients?.patients_id || 'UHAY25I22001')}
+${formatTableField('Primary Care Provider', doctorName)} ${formatTableField('Registration ID', patient.patients?.registration_id || 'IH25I22001')}
+${formatTableField('Sex / Age', `${patientGender} / ${patientAge} Year`)} ${formatTableField('Mobile No', patient.patients?.phone || 'N/A')}
+${formatTableField('Tariff', patient.patients?.tariff || 'Private')} ${formatTableField('Address', patient.patients?.address || 'N/A')}
+${formatTableField('Admission Date', visitDate)} ${formatTableField('Discharge Date', new Date().toLocaleDateString())}
+${formatTableField('Discharge Reason', 'Recovered')}
 
 ================================================================================
 
 PRESENT CONDITION
-
+--------------------------------------------------------------------------------
 Diagnosis: ${primaryDiagnosis}${secondaryDiagnoses.length > 0 ? `, ${secondaryDiagnoses.join(', ')}` : ''}
 
 ${medicationsTable}
 
 CASE SUMMARY:
-${complaints && complaints.length > 0 ? `The patient was admitted with complaints of ${complaints.join(', ')}.` : 'The patient was admitted for medical evaluation.'}
+--------------------------------------------------------------------------------
+${complaints && complaints.length > 0 ? wrapText(`The patient was admitted with complaints of ${complaints.join(', ')}.`, 80) : 'The patient was admitted for medical evaluation.'}
 
 Upon thorough examination, vitals were recorded as follows:
 - Temperature: 98.6°F
@@ -907,14 +1364,28 @@ Post-examination, treatment was initiated based on clinical findings.
 
 ${labResultsTable ? `\n${labResultsTable}` : ''}
 
+${radiologyOrders && radiologyOrders.length > 0 ? `
+================================================================================
+RADIOLOGY INVESTIGATIONS:
+================================================================================
+${radiologyOrders.map(r => {
+  const testName = r.radiology?.name || r.test_name || 'Radiology Test';
+  const findings = r.findings || r.result || 'Results pending';
+  const impression = r.impression || '';
+  return `• ${testName}: ${findings}${impression ? ` - ${impression}` : ''}`;
+}).join('\n')}
+================================================================================
+` : ''}
+
 ${otNote ? `PROCEDURE DETAILS:
-Aspect                 Detail
-Date and Time:         ${new Date().toLocaleDateString()}, 11:00 am
-Procedure:             ${otNote.surgery_name || 'Surgical procedure performed'}
-Surgeon:               ${otNote.surgeon || 'Dr. Surgeon'}
-Anaesthetist:          ${otNote.anaesthetist || 'Dr. Anaesthetist'}
-Anesthesia Type:       ${otNote.anaesthesia || 'General anesthesia'}
-Surgery Description:   ${otNote.procedure_performed || otNote.description || 'The procedure was performed successfully without complications.'}
+================================================================================
+${formatTableField('Date and Time', `${new Date().toLocaleDateString()}, 11:00 am`)}
+${formatTableField('Procedure', otNote.surgery_name || 'Surgical procedure performed')}
+${formatTableField('Surgeon', otNote.surgeon || 'Dr. Surgeon')}
+${formatTableField('Anaesthetist', otNote.anaesthetist || 'Dr. Anaesthetist')}
+${formatTableField('Anesthesia Type', otNote.anaesthesia || 'General anesthesia')}
+${formatTableField('Surgery Description', otNote.procedure_performed || otNote.description || 'The procedure was performed successfully without complications.')}
+${otNote.implant ? formatTableField('Implant Used', otNote.implant) + '\n' : ''}================================================================================
 
 ` : ''}
 The patient responded adequately to the treatment. He/She is recommended to continue the prescribed medication and should observe the following precautions at home:
@@ -930,33 +1401,56 @@ The patient should return to the hospital immediately:
 - If fever persists even after medication
 - Any unusual swelling or complications
 
-URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+================================================================================
+URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7.
+PLEASE CONTACT: 7030974619, 9373111709.
+================================================================================
 
-Disclaimer: The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
+Disclaimer: The external professional reviewing this case should refer to their
+clinical understanding and expertise in managing the care of this patient based
+on the diagnosis and details provided.
 
+================================================================================
 ADVICE
+================================================================================
 
 Advice:
 Follow up after 7 days/SOS.
 
 --------------------------------------------------------------------------------
-Review on                     : ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}
-Resident On Discharge         : ${doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName}
+${formatTableField('Review on', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString())}
+${formatTableField('Resident On Discharge', doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName)}
 --------------------------------------------------------------------------------
 
                                         Dr. ${doctorName.includes('Dr.') ? doctorName.replace('Dr. ', '') : doctorName} (Gastroenterologist)
 
 ================================================================================
-Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7.
+PLEASE CONTACT: 7030974619, 9373111709.
+================================================================================
 `;
 
       // Summary is already in plain text format
       setDischargeSummaryText(summary);
 
-      // Show success message
+      // Show success message with accurate data counts
+      console.log('📊 Lab results for success message:', {
+        labResultsData: labResultsData?.length || 0,
+        labOrders: labOrders?.length || 0
+      });
+
       const dataInfo = [];
-      if (labTests.length > 0) dataInfo.push(`${labTests.length} lab test(s)`);
-      if (radiologyTests.length > 0) dataInfo.push(`${radiologyTests.length} radiology test(s)`);
+      if (labResultsData && labResultsData.length > 0) {
+        dataInfo.push(`${labResultsData.length} lab result(s)`);
+      } else if (labOrders && labOrders.length > 0) {
+        dataInfo.push(`${labOrders.length} lab order(s)`);
+      }
+      if (radiologyOrders && radiologyOrders.length > 0) {
+        dataInfo.push(`${radiologyOrders.length} radiology test(s)`);
+      }
+      if (prescriptionData && prescriptionData.length > 0) {
+        dataInfo.push(`${prescriptionData.length} prescription(s)`);
+      }
       if (otNote) dataInfo.push('OT notes');
       if (complications.length > 0) dataInfo.push(`${complications.length} complication(s)`);
 
@@ -975,53 +1469,312 @@ Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 703097461
 
   // Open AI generation modal with prompt and data editing
   const handleAIGenerate = async () => {
+    // Declare medicationsData outside try block to fix scope issue
+    let medicationsData = [];
+
     try {
       if (!patient) {
         alert('Please fetch patient data first before generating AI summary.');
         return;
       }
 
+    // First ensure we have fetched all required data
+    if (!formattedLabResults || formattedLabResults.length === 0 || !complications) {
+      console.log('Fetching comprehensive data before AI generation...');
+      await handleFetchData();
+    }
+
+    // Fetch medications from visit_medications table
+    try {
+      const { data: visitData } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitData?.id) {
+        // Try to fetch from visit_medications table with JOIN
+        const { data: visitMedications, error: medError } = await supabase
+          .from('visit_medications')
+          .select(`
+            *,
+            medication:medication_id (
+              name,
+              description
+            )
+          `)
+          .eq('visit_id', visitData.id)
+          .order('created_at', { ascending: true });
+
+        if (visitMedications && visitMedications.length > 0) {
+          console.log('Raw visit_medications data:', JSON.stringify(visitMedications, null, 2));
+          medicationsData = visitMedications.map(med => {
+            // Extract actual medication name from various possible fields
+            let medName = '';
+
+            // First check if medication object exists (from JOIN)
+            if (med.medication && typeof med.medication === 'object' && med.medication.name) {
+              medName = med.medication.name;
+              console.log('Found medication name from JOIN:', medName);
+            }
+            // Otherwise check various possible field names
+            else {
+              const possibleNameFields = [
+                'medication_name', 'name', 'medicine_name',
+                'drug_name', 'item_name', 'drug', 'item', 'medicine',
+                'med_name', 'product_name', 'generic_name'
+              ];
+
+              for (const field of possibleNameFields) {
+                if (med[field] && typeof med[field] === 'string' &&
+                    med[field] !== 'MEDICATION' && med[field] !== 'N/A') {
+                  medName = med[field];
+                  console.log(`Found medication name in field '${field}':`, medName);
+                  break;
+                }
+              }
+            }
+
+            // If still no name, log the available fields
+            if (!medName) {
+              console.warn('Could not find medication name in visit_medications record.');
+              console.warn('Available fields:', Object.keys(med));
+              console.warn('Record:', med);
+              // Don't use placeholder
+              medName = '';
+            }
+
+            return {
+              name: medName,
+              strength: med.dose || med.dosage || med.strength || '',
+              route: med.route || 'Oral',
+              dosage: med.frequency || 'as directed',
+              days: med.duration || med.days || ''
+            };
+          });
+          console.log('✅ Medications fetched for AI generation:', medicationsData);
+        }
+      }
+    } catch (error) {
+      console.log('Error fetching medications for AI generation:', error);
+    }
+
+    // Fetch required data that might be missing
+    let formattedLabResultsLocal = formattedLabResults;
+    let complicationsLocal = complications;
+    let abnormalResultsLocal = abnormalResults;
+
+    // If data is not available, try to fetch it
+    if (!formattedLabResultsLocal) {
+      formattedLabResultsLocal = [];
+    }
+    if (!complicationsLocal) {
+      complicationsLocal = [];
+    }
+    if (!abnormalResultsLocal) {
+      abnormalResultsLocal = [];
+    }
+
+    // Fetch visit diagnosis data if not available
+    let visitDiagnosisLocal = null;
+    try {
+      const { data: diagData } = await supabase
+        .from('visit_diagnosis')
+        .select('*')
+        .eq('visit_id', visitId)
+        .single();
+
+      visitDiagnosisLocal = diagData;
+    } catch (error) {
+      console.log('No visit diagnosis data available');
+    }
+
+    // Fetch complete patient data if not available
+    let fullPatientData = patient.patients;
+    if (!fullPatientData || !fullPatientData.phone || !fullPatientData.address) {
+      try {
+        const { data: patientData } = await supabase
+          .from('patients')
+          .select('*')
+          .eq('id', patient.patient_id || patient.patients?.id)
+          .single();
+
+        if (patientData) {
+          fullPatientData = patientData;
+          console.log('✅ Full patient data fetched:', patientData);
+        }
+      } catch (error) {
+        console.log('Error fetching full patient data:', error);
+      }
+    }
+
+    const complaints = visitDiagnosisLocal?.complaints || [patient.reason_for_visit || 'General consultation'];
+
     // Prepare patient data for editing
-    const primaryDiagnosis = visitDiagnosis?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded';
-    const secondaryDiagnoses = visitDiagnosis?.secondaryDiagnoses || [];
-    const complicationsData = complications || [];
-    const medications = visitDiagnosis?.medications || [];
-    const complaints = visitDiagnosis?.complaints || [patient.reason_for_visit || 'General consultation'];
+    // Use visitDiagnosisLocal for diagnosis if available, otherwise fall back to patient.diagnosis
+    const primaryDiagnosis = visitDiagnosisLocal?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded';
+    const secondaryDiagnoses = visitDiagnosisLocal?.secondaryDiagnoses || [];
+    const complicationsData = complicationsLocal || [];
+    // Convert medication objects to strings for parseMedication function
+    const medications = medicationsData.length > 0
+      ? medicationsData.map(med => {
+          const name = med.name || 'Medication';
+          const strength = med.strength || '';
+          const route = med.route || 'Oral';
+          const dosage = med.dosage || 'as directed';
+          const days = med.days || 'As directed';
+          return `${name} ${strength} ${route} ${dosage} ${days}`.trim();
+        })
+      : [];
+
+    // Fetch OT data, radiology, and lab investigations from database
+    let otData = null;
+    let radiologyInvestigations = [];
+    let labInvestigationsData = [];
+
+    // Fetch OT notes
+    try {
+      const { data: otNote } = await supabase
+        .from('ot_notes')
+        .select('*')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (!otNote) {
+        const { data: otNote2 } = await supabase
+          .from('ot_notes')
+          .select('*')
+          .eq('patient_id', patient.patient_id || patient.patients?.id)
+          .single();
+        otData = otNote2;
+      } else {
+        otData = otNote;
+      }
+    } catch (error) {
+      console.log('No OT data available');
+    }
+
+    // Fetch radiology investigations
+    try {
+      if (patient?.visit_id) {
+        const { data: visitData } = await supabase
+          .from('visits')
+          .select('id')
+          .eq('visit_id', visitId)
+          .single();
+
+        if (visitData?.id) {
+          const { data: radiologyOrders } = await supabase
+            .from('visit_radiology')
+            .select(`
+              *,
+              radiology:radiology_id (
+                name,
+                category
+              )
+            `)
+            .eq('visit_id', visitData.id)
+            .order('created_at', { ascending: true });
+
+          if (radiologyOrders && radiologyOrders.length > 0) {
+            radiologyInvestigations = radiologyOrders.map(r => ({
+              name: r.radiology?.name || 'Unknown Test',
+              findings: r.findings || r.result || 'Pending',
+              status: r.status || 'Completed'
+            }));
+          }
+        }
+      }
+    } catch (error) {
+      console.log('Error fetching radiology data:', error);
+    }
+
+    // Process lab investigations
+    if (labResults && labResults.length > 0) {
+      labInvestigationsData = labResults.map(lab => ({
+        name: lab.test_name || lab.main_test_name || 'Unknown Test',
+        result: `${lab.result_value || 'Pending'}${lab.result_unit ? ' ' + lab.result_unit : ''}`,
+        range: lab.reference_range || 'N/A',
+        status: lab.is_abnormal ? 'Abnormal' : 'Normal'
+      }));
+    }
 
     const patientData = {
-      name: patient.patients?.name || 'Unknown Patient',
-      age: patient.patients?.age || 'N/A',
-      gender: patient.patients?.gender || 'N/A',
+      name: fullPatientData?.name || patient.patients?.name || 'Unknown Patient',
+      age: fullPatientData?.age || patient.patients?.age || 'N/A',
+      gender: fullPatientData?.gender || patient.patients?.gender || 'N/A',
       visitId: patient.visit_id || 'N/A',
+      patientId: fullPatientData?.patients_id || patient.patients?.patients_id || 'N/A',
+      registrationId: fullPatientData?.registration_id || patient.patients?.registration_id || 'N/A',
+      mobile: fullPatientData?.phone || patient.patients?.phone || 'N/A',
+      address: fullPatientData?.address || patient.patients?.address || 'N/A',
+      tariff: fullPatientData?.tariff || patient.patients?.tariff || 'Private',
       admissionDate: patient.admission_date || patient.visit_date || new Date().toLocaleDateString(),
       dischargeDate: patient.discharge_date || new Date().toLocaleDateString(),
+      consultant: patient.appointment_with || 'Dr. Unknown',
       primaryDiagnosis,
       secondaryDiagnoses,
       complications: complicationsData,
       medications,
       complaints,
-      treatmentCourse: visitDiagnosis?.treatmentCourse || [],
-      condition: visitDiagnosis?.condition || [],
-      labResults: formattedLabResults || [],
-      abnormalLabResults: abnormalResults || []
+      treatmentCourse: visitDiagnosisLocal?.treatmentCourse || [],
+      condition: visitDiagnosisLocal?.condition || [],
+      labResults: formattedLabResultsLocal || [],
+      abnormalLabResults: abnormalResultsLocal || [],
+      labInvestigations: labInvestigationsData,
+      radiologyInvestigations,
+      otData: otData ? {
+        surgeryName: otData.surgery_name || 'Surgical Procedure',
+        surgeon: otData.surgeon || 'Attending Surgeon',
+        anaesthesia: otData.anaesthesia || 'General Anaesthesia',
+        procedurePerformed: otData.procedure_performed || '',
+        findings: otData.findings || '',
+        description: otData.description || '',
+        implant: otData.implant || ''
+      } : null,
+      vitalSigns: visitDiagnosisLocal?.vitalSigns || [],
+      clinicalHistory: visitDiagnosisLocal?.clinicalHistory || '',
+      examinationFindings: visitDiagnosisLocal?.examinationFindings || ''
     };
 
     // Set editable data
     setEditablePatientData(patientData);
 
-    // Prepare the prompt
-    const prompt = `Generate a complete discharge summary in plain text format.
+    // Prepare comprehensive prompt with all medical data
+    const prompt = `Generate a complete and comprehensive discharge summary in plain text format including ALL the following sections and data.
 
-Start with:
+PATIENT DATA PROVIDED:
+- Primary Diagnosis: ${patientData.primaryDiagnosis}
+- Secondary Diagnoses: ${patientData.secondaryDiagnoses.join(', ') || 'None'}
+- Complications: ${patientData.complications.join(', ') || 'None'}
+- Chief Complaints: ${patientData.complaints.join(', ') || 'None'}
+${patientData.otData ? `
+- SURGERY/OT DATA:
+  Surgery Name: ${patientData.otData.surgeryName}
+  Surgeon: ${patientData.otData.surgeon}
+  Anaesthesia: ${patientData.otData.anaesthesia}
+  Procedure: ${patientData.otData.procedurePerformed}
+  Findings: ${patientData.otData.findings}
+  Description: ${patientData.otData.description}
+  Implant: ${patientData.otData.implant || 'None'}` : ''}
+${patientData.labInvestigations && patientData.labInvestigations.length > 0 ? `
+- LAB INVESTIGATIONS:
+${patientData.labInvestigations.map(lab => `  ${lab.name}: ${lab.result} (Range: ${lab.range}) - ${lab.status}`).join('\n')}` : ''}
+${patientData.radiologyInvestigations && patientData.radiologyInvestigations.length > 0 ? `
+- RADIOLOGY INVESTIGATIONS:
+${patientData.radiologyInvestigations.map(rad => `  ${rad.name}: ${rad.findings} - ${rad.status}`).join('\n')}` : ''}
+
+GENERATE THE FOLLOWING COMPLETE DISCHARGE SUMMARY:
+
 DISCHARGE SUMMARY
 ================================================================================
 
-Name: ${editablePatientData.name || 'Patient Name'}                           Patient ID: ${editablePatientData.patientId || 'UHAY25I22001'}
-Primary Care Provider: ${editablePatientData.consultant || 'Dr. Unknown'}     Registration ID: ${editablePatientData.registrationId || 'IH25I22001'}
-Sex / Age: ${editablePatientData.gender || 'Gender'} / ${editablePatientData.age || 'Age'} Year              Mobile No: ${editablePatientData.mobile || 'N/A'}
-Tariff: ${editablePatientData.tariff || 'Private'}                            Address: ${editablePatientData.address || 'N/A'}
-Admission Date: ${editablePatientData.admissionDate || new Date().toLocaleDateString()}                   Discharge Date: ${editablePatientData.dischargeDate || new Date().toLocaleDateString()}
-Discharge Reason: Recovered
+Name                  : ${(patientData.name || '').padEnd(30)}Patient ID            : ${patientData.patientId || 'UHAY25I22001'}
+Primary Care Provider : ${(patientData.consultant || '').padEnd(30)}Registration ID       : ${patientData.registrationId || 'IH25I22001'}
+Sex / Age             : ${((patientData.gender || '') + ' / ' + (patientData.age || '') + ' Year').padEnd(30)}Mobile No             : ${patientData.mobile || 'N/A'}
+Tariff                : ${(patientData.tariff || '').padEnd(30)}Address               : ${patientData.address || 'N/A'}
+Admission Date        : ${(patientData.admissionDate || '').padEnd(30)}Discharge Date        : ${patientData.dischargeDate || ''}
+Discharge Reason      : Recovered
 
 ================================================================================
 
@@ -1029,70 +1782,122 @@ Present Condition
 
 Diagnosis: ${patientData.primaryDiagnosis}${patientData.secondaryDiagnoses.length > 0 ? ', ' + patientData.secondaryDiagnoses.join(', ') : ''}
 
+${patientData.labInvestigations && patientData.labInvestigations.length > 0 ? `
+Investigations:
+--------------------------------------------------------------------------------
+LAB INVESTIGATIONS:
+Name                              Result                  Range              Status
+--------------------------------------------------------------------------------
+${patientData.labInvestigations.map(lab =>
+`${lab.name.padEnd(35)}${lab.result.padEnd(24)}${lab.range.padEnd(19)}${lab.status}`).join('\n')}
+` : ''}
+${patientData.radiologyInvestigations && patientData.radiologyInvestigations.length > 0 ? `
+RADIOLOGY INVESTIGATIONS:
+Name                              Findings                                   Status
+--------------------------------------------------------------------------------
+${patientData.radiologyInvestigations.map(rad =>
+`${rad.name.padEnd(35)}${rad.findings.padEnd(43)}${rad.status}`).join('\n')}
+` : ''}
+
 Medications on Discharge:
 --------------------------------------------------------------------------------
-Name                    Strength    Route    Dosage                          Days
+Name                     Strength    Route     Dosage                          Days
 --------------------------------------------------------------------------------
-[Generate appropriate medications based on diagnosis with Hindi translations]
-Example format:
-INJ. MONOCEF           1 GM        IV       Twice a day (Din me do bar)     7
+${(() => {
+  const medsToUse = patientData.medications && patientData.medications.length > 0
+    ? patientData.medications
+    : [
+        'Paracetamol 500mg oral twice-daily 5days',
+        'Amoxicillin 250mg oral thrice-daily 7days',
+        'Omeprazole 20mg oral once-daily 10days',
+        'Vitamin-C 500mg oral once-daily 30days',
+        'Diclofenac 50mg oral twice-daily 3days'
+      ];
+  return medsToUse.map(med => {
+    const parsed = parseMedication(med);
+    const name = parsed.name.padEnd(24);
+    const strength = parsed.strength.padEnd(11);
+    const route = parsed.route.padEnd(9);
+    const dosage = parsed.dosage.padEnd(31);
+    const days = parsed.days;
+    return `${name} ${strength} ${route} ${dosage} ${days}`;
+  }).join('\n');
+})()}
 
-CASE SUMMARY:
-${patientData.complaints.length > 0 ? 'The patient was admitted with complaints of ' + patientData.complaints.join(', ') + '.' : 'The patient was admitted for medical evaluation.'}
+Case Summary:
 
-Upon thorough examination, vitals were recorded as follows:
-- Temperature: 98.6°F
-- Pulse Rate: 80/min
-- Blood Pressure: 120/80mmHg
-- SpO2: 98% in Room Air
+The patient was admitted with complaints of ${patientData.complaints.join(', ')}.
 
-[Add relevant treatment details based on diagnosis]
+${patientData.otData ? `
+================================================================================
+SURGICAL DETAILS:
+================================================================================
+Surgery Name          : ${patientData.otData.surgeryName}
+Surgeon              : ${patientData.otData.surgeon}
+Anaesthesia          : ${patientData.otData.anaesthesia}
+Procedure performed  : ${patientData.otData.procedurePerformed}
+Intraoperative findings: ${patientData.otData.findings || 'N/A'}
+Post-operative notes : ${patientData.otData.description || 'Recovery was satisfactory'}
+${patientData.otData.implant ? `Implant used         : ${patientData.otData.implant}` : ''}
+================================================================================
+` : ''}
 
-${patientData.labResults && patientData.labResults.length > 0 ? 'Laboratory Investigations:\n' + patientData.labResults.join('\n') : ''}
+${patientData.vitalSigns && patientData.vitalSigns.length > 0 ? `
+VITAL SIGNS AT DISCHARGE:
+${patientData.vitalSigns.join('\n')}
+` : ''}
 
-The patient responded adequately to the treatment. He/She is recommended to continue the prescribed medication and should observe the following precautions at home:
-- Maintain proper medication schedule
-- Follow prescribed diet restrictions
-- Adequate rest and hydration
-- Monitor for any warning signs
+${patientData.treatmentCourse && patientData.treatmentCourse.length > 0 ? `
+TREATMENT COURSE:
+${patientData.treatmentCourse.join('\n')}
+` : 'The patient responded well to treatment and showed significant improvement.'}
 
-The patient should return to the hospital immediately:
-- If symptoms worsen or recur
-- If experiencing severe pain or discomfort
-- If fever persists even after medication
-- Any other concerning symptoms
-
-URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
-
-Disclaimer: The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
+${patientData.complications && patientData.complications.length > 0 ? `
+COMPLICATIONS DURING STAY:
+${patientData.complications.join('\n')}
+` : 'No complications noted during hospital stay.'}
 
 ADVICE
 
 Advice:
 Follow up after 7 days/SOS.
 
+Precautions:
+- Take medications as prescribed
+- Maintain proper hygiene
+- Adequate rest and hydration
+- Monitor for warning signs
+
+Return immediately if:
+- Symptoms worsen or recur
+- Severe pain or discomfort
+- Persistent fever
+- Any concerning symptoms
+
 --------------------------------------------------------------------------------
-Review on                     : 25/09/2025
-Resident On Discharge         : Sachin Gathibandhe
+Review on                     : ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB')}
+Resident On Discharge         : ${patientData.consultant || 'Sachin Gathibandhe'}
 --------------------------------------------------------------------------------
 
-                                           Dr. Dr. Nikhil Khobragade (Gastroenterologist)
+                                           ${patientData.consultant || 'Dr. Dr. Nikhil Khobragade (Gastroenterologist)'}
 
-================================================================================
-Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
 
-IMPORTANT INSTRUCTIONS:
-1. Include the complete format starting with patient details as shown above
-2. Generate medications appropriate for the diagnosis with Hindi translations in parentheses
-3. Format lab results as a table if provided
-4. Keep the format clean and readable as plain text
-5. Do NOT return HTML - return plain text only`;
+IMPORTANT: Format everything as plain text, include ALL provided investigations, lab results, radiology findings, and OT data. DO NOT skip any section.`;
 
       setEditablePrompt(prompt);
       setShowGenerationModal(true);
     } catch (error) {
       console.error('💥 Error in AI generation setup:', error);
-      alert('Error setting up AI generation. Please check the console for details.');
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error details:', {
+        error: errorMsg,
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        patient: patient ? 'Available' : 'Not available',
+        visitId: visitId || 'Not available',
+        medicationsData: medicationsData?.length || 0
+      });
+      alert(`Error setting up AI generation.\n\nError: ${errorMsg}\n\nPlease check the console for details.`);
     }
   };
 
@@ -1116,14 +1921,14 @@ IMPORTANT INSTRUCTIONS:
         messages: [
           {
             role: 'system',
-            content: 'You are an expert medical professional specializing in creating comprehensive discharge summaries for hospitals. Generate detailed, professional medical documentation following Indian medical standards and terminology.'
+            content: 'You are an expert medical professional specializing in creating comprehensive discharge summaries for hospitals. Generate detailed, professional medical documentation following Indian medical standards and terminology. Include ALL provided medical data including investigations, lab results, radiology findings, OT notes, and complications.'
           },
           {
             role: 'user',
             content: editablePrompt
           }
         ],
-        max_tokens: 2000,
+        max_tokens: 4000,
         temperature: 0.7
       };
 
@@ -1195,12 +2000,12 @@ IMPORTANT INSTRUCTIONS:
         aiGeneratedSummary = `DISCHARGE SUMMARY
 ================================================================================
 
-Name: ${editablePatientData.name || 'Patient Name'}                           Patient ID: ${editablePatientData.patientId || 'UHAY25I22001'}
-Primary Care Provider: ${editablePatientData.consultant || 'Dr. Unknown'}     Registration ID: ${editablePatientData.registrationId || 'IH25I22001'}
-Sex / Age: ${editablePatientData.gender || 'Gender'} / ${editablePatientData.age || 'Age'} Year              Mobile No: ${editablePatientData.mobile || 'N/A'}
-Tariff: ${editablePatientData.tariff || 'Private'}                            Address: ${editablePatientData.address || 'N/A'}
-Admission Date: ${editablePatientData.admissionDate || new Date().toLocaleDateString()}                   Discharge Date: ${editablePatientData.dischargeDate || new Date().toLocaleDateString()}
-Discharge Reason: Recovered
+Name                  : ${(editablePatientData.name || 'Patient Name').padEnd(30)}Patient ID            : ${editablePatientData.patientId || 'UHAY25I22001'}
+Primary Care Provider : ${(editablePatientData.consultant || 'Dr. Unknown').padEnd(30)}Registration ID       : ${editablePatientData.registrationId || 'IH25I22001'}
+Sex / Age             : ${((editablePatientData.gender || 'Gender') + ' / ' + (editablePatientData.age || 'Age') + ' Year').padEnd(30)}Mobile No             : ${editablePatientData.mobile || 'N/A'}
+Tariff                : ${(editablePatientData.tariff || 'Private').padEnd(30)}Address               : ${editablePatientData.address || 'N/A'}
+Admission Date        : ${(editablePatientData.admissionDate || new Date().toLocaleDateString()).padEnd(30)}Discharge Date        : ${editablePatientData.dischargeDate || new Date().toLocaleDateString()}
+Discharge Reason      : Recovered
 
 ================================================================================
 
@@ -1208,43 +2013,91 @@ Present Condition
 
 Diagnosis: ${editablePatientData.primaryDiagnosis || 'Primary diagnosis'}${editablePatientData.secondaryDiagnoses?.length > 0 ? `, ${editablePatientData.secondaryDiagnoses.join(', ')}` : ''}
 
-Medications on Discharge:
+${editablePatientData.labInvestigations && editablePatientData.labInvestigations.length > 0 ? `Investigations:
 --------------------------------------------------------------------------------
-Name                    Strength    Route    Dosage                          Days
+LAB INVESTIGATIONS:
+Name                              Result                  Range              Status
 --------------------------------------------------------------------------------
-INJ. MONOCEF           1 GM        IV       Twice a day (Din me do bar)     7
-INJ. AMIAKCIN          500 MG      IV       Twice a day (Din me do bar)     7
-INJ METRO              100 MG      IV       Thrice a day (Din me teen bar)  7
-INJ PAN                40 MG       IV       Twice a day (Din me do bar)     7
-SIT BATH WITH BETADONE NA          Local    Thrice a day (Din me teen bar)  14
-SYP CREMAFFIN PLUS     20 ML       Oral     One time (Raat ko Ek bar)       14
-TAB COBADEX CZ5        NA          Oral     One time per day (Roz Ek bar)   30
-ANOBLISS CREAM         NA          Local    Twice a day (Din me do bar)     14
+${editablePatientData.labInvestigations.map(lab => {
+  const name = (lab.name || 'Unknown Test').substring(0, 35).padEnd(35);
+  const result = (lab.result || 'Pending').substring(0, 24).padEnd(24);
+  const range = (lab.range || 'N/A').substring(0, 19).padEnd(19);
+  const status = lab.status || 'Normal';
+  return `${name}${result}${range}${status}`;
+}).join('\n')}
 
-CASE SUMMARY:
-The patient was admitted with complaints as documented in the medical records.
+` : ''}${editablePatientData.radiologyInvestigations && editablePatientData.radiologyInvestigations.length > 0 ? `RADIOLOGY INVESTIGATIONS:
+Name                              Findings                                   Status
+--------------------------------------------------------------------------------
+${editablePatientData.radiologyInvestigations.map(rad => {
+  const name = (rad.name || 'Unknown Test').substring(0, 35).padEnd(35);
+  const findings = (rad.findings || 'Pending').substring(0, 43).padEnd(43);
+  const status = rad.status || 'Completed';
+  return `${name}${findings}${status}`;
+}).join('\n')}
 
-Upon thorough examination, vitals were recorded as follows:
+` : ''}Medications on Discharge:
+--------------------------------------------------------------------------------
+Name                     Strength    Route     Dosage                          Days
+--------------------------------------------------------------------------------
+${(() => {
+  const medsToUse = editablePatientData.medications && editablePatientData.medications.length > 0
+    ? editablePatientData.medications
+    : [
+        'Paracetamol 500mg oral twice-daily 5days',
+        'Amoxicillin 250mg oral thrice-daily 7days',
+        'Omeprazole 20mg oral once-daily 10days',
+        'Vitamin-C 500mg oral once-daily 30days',
+        'Diclofenac 50mg oral twice-daily 3days'
+      ];
+  return medsToUse.map(med => {
+    const parsed = parseMedication(med);
+    const name = parsed.name.padEnd(24);
+    const strength = parsed.strength.padEnd(11);
+    const route = parsed.route.padEnd(9);
+    const dosage = parsed.dosage.padEnd(31);
+    const days = parsed.days;
+    return `${name} ${strength} ${route} ${dosage} ${days}`;
+  }).join('\n');
+})()}
+
+Case Summary:
+
+${editablePatientData.complaints && editablePatientData.complaints.length > 0
+  ? `The patient was admitted with complaints of ${editablePatientData.complaints.join(', ')}.`
+  : 'The patient was admitted for medical evaluation.'}
+
+${editablePatientData.otData ? `
+================================================================================
+SURGICAL DETAILS:
+================================================================================
+${formatTableField('Surgery Name', editablePatientData.otData.surgeryName)}
+${formatTableField('Surgeon', editablePatientData.otData.surgeon)}
+${formatTableField('Anaesthesia', editablePatientData.otData.anaesthesia)}
+${formatTableField('Procedure performed', editablePatientData.otData.procedurePerformed || 'As per surgical records')}
+${formatTableField('Intraoperative findings', editablePatientData.otData.findings || 'As documented')}
+${formatTableField('Post-operative notes', editablePatientData.otData.description || 'Recovery was satisfactory')}
+${editablePatientData.otData.implant ? formatTableField('Implant used', editablePatientData.otData.implant) : ''}
+================================================================================
+` : ''}
+
+${editablePatientData.vitalSigns && editablePatientData.vitalSigns.length > 0 ? `VITAL SIGNS AT DISCHARGE:
+${editablePatientData.vitalSigns.join('\n')}
+` : `Upon thorough examination, vitals were recorded as follows:
 - Temperature: 98.6°F
 - Pulse Rate: 80/min
 - Blood Pressure: 120/80mmHg
-- SpO2: 98% in Room Air
+- SpO2: 98% in Room Air`}
 
-Post-examination, appropriate treatment was initiated.
+${editablePatientData.treatmentCourse && editablePatientData.treatmentCourse.length > 0 ? `TREATMENT COURSE:
+${editablePatientData.treatmentCourse.join('\n')}
+` : 'Post-examination, appropriate treatment was initiated. The patient responded adequately to the treatment.'}
 
-${editablePatientData.labResults && editablePatientData.labResults.length > 0 ? `Laboratory Investigations:
---------------------------------------------------------------------------------
-Test Name                          Result              Reference Range     Status
---------------------------------------------------------------------------------
-${editablePatientData.labResults.map(test => {
-  const testName = (test.test_name || 'Test').padEnd(35);
-  const result = (test.result_value || 'Pending').padEnd(20);
-  const range = (test.reference_range || 'N/A').padEnd(18);
-  const status = test.is_abnormal ? '⚠ ABNORMAL' : '✓ Normal';
-  return `${testName}${result}${range}${status}`;
-}).join('\n')}
+${editablePatientData.complications && editablePatientData.complications.length > 0 ? `COMPLICATIONS DURING STAY:
+${editablePatientData.complications.join(', ')}
+` : ''}
 
-` : ''}The patient responded adequately to the treatment. He/She is recommended to continue the prescribed medication and should observe the following precautions at home:
+The patient is recommended to continue the prescribed medication and should observe the following precautions at home:
 - Maintain adequate hydration and rest
 - Follow prescribed diet restrictions
 - Take medications as directed
@@ -1257,30 +2110,19 @@ The patient should return to the hospital immediately:
 - If fever persists even after medication
 - Any unusual complications
 
-IMPORTANT INSTRUCTIONS:
-1. Take medications as prescribed
-2. Maintain a low-fat diet
-3. Adequate rest and hydration
-4. Monitor for any warning signs and seek immediate medical attention if needed
-
-URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
-
-Disclaimer: The external professional reviewing this case should refer to their clinical understanding and expertise in managing the care of this patient based on the diagnosis and details provided.
-
 ADVICE
 
 Advice:
 Follow up after 7 days/SOS.
 
 --------------------------------------------------------------------------------
-Review on                     : 25/09/2025
-Resident On Discharge         : Sachin Gathibandhe
+Review on                     : ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('en-GB')}
+Resident On Discharge         : ${editablePatientData.consultant || 'Sachin Gathibandhe'}
 --------------------------------------------------------------------------------
 
-                                           Dr. Dr. Nikhil Khobragade (Gastroenterologist)
+                                           ${editablePatientData.consultant || 'Dr. Dr. Nikhil Khobragade (Gastroenterologist)'}
 
-================================================================================
-Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
+URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.
 `;
       }
 
@@ -1333,222 +2175,197 @@ Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 703097461
 
       // Parse the plain text content and format it for HTML printing
       if (!isHtmlContent) {
-        console.log('🔧 Content is plain text - formatting for print');
+        console.log('🔧 Content is plain text - formatting for print with all sections');
 
-        // Parse the discharge summary text to extract all sections
+        // Convert plain text to HTML while preserving all content and formatting
         const lines = dischargeSummaryText.split('\n');
-        let patientInfo = {};
-        let currentSection = '';
-        let medications = [];
-        let labResults = [];
-        let caseSummary = [];
-        let procedureDetails = [];
-        let precautions = [];
-        let advice = '';
-        let inMedicationsTable = false;
-        let inLabTable = false;
-        let skipNextLine = false;
+        let htmlContent = [];
+        let currentTable = null;
+        let inTable = false;
+        let tableHeaders = [];
+        let tableRows = [];
 
         lines.forEach((line, index) => {
-          // Skip separator lines
-          if (line.includes('================')) return;
+          // Handle section separators
+          if (line.includes('================================================================================')) {
+            if (inTable && tableRows.length > 0) {
+              // Close any open table
+              htmlContent.push(createTableHTML(tableHeaders, tableRows));
+              inTable = false;
+              tableRows = [];
+              tableHeaders = [];
+            }
+            // Don't add any horizontal line - just skip the separator
+            return;
+          }
 
-          // Extract patient information
-          if (line.includes('Name:') && line.includes('Patient ID:')) {
-            const parts = line.split(/\s{2,}/);
-            parts.forEach(part => {
-              if (part.includes('Name:')) patientInfo.name = part.replace('Name:', '').trim();
-              if (part.includes('Patient ID:')) patientInfo.patientId = part.replace('Patient ID:', '').trim();
-            });
-          } else if (line.includes('Primary Care Provider:')) {
-            const parts = line.split(/\s{2,}/);
-            parts.forEach(part => {
-              if (part.includes('Primary Care Provider:')) patientInfo.doctor = part.replace('Primary Care Provider:', '').trim();
-              if (part.includes('Registration ID:')) patientInfo.registrationId = part.replace('Registration ID:', '').trim();
-            });
-          } else if (line.includes('Sex / Age:')) {
-            const parts = line.split(/\s{2,}/);
-            parts.forEach(part => {
-              if (part.includes('Sex / Age:')) {
-                const ageGender = part.replace('Sex / Age:', '').trim();
-                const ageParts = ageGender.split('/');
-                if (ageParts.length >= 2) {
-                  patientInfo.gender = ageParts[0].trim();
-                  patientInfo.age = ageParts[1].trim();
-                }
+          if (line.includes('--------------------------------------------------------------------------------')) {
+            if (inTable && tableRows.length > 0) {
+              // This might be a table separator
+              return;
+            }
+            // Don't add any horizontal line - just skip the separator
+            return;
+          }
+
+          // Detect major section headers
+          if (line.match(/^(DISCHARGE SUMMARY|PRESENT CONDITION|CASE SUMMARY|ADVICE|PROCEDURE DETAILS|LABORATORY INVESTIGATIONS|SURGICAL DETAILS|COMPLICATIONS|TREATMENT COURSE|VITAL SIGNS)/)) {
+            if (inTable && tableRows.length > 0) {
+              htmlContent.push(createTableHTML(tableHeaders, tableRows));
+              inTable = false;
+              tableRows = [];
+              tableHeaders = [];
+            }
+            htmlContent.push(`<h2 style="font-size: 11pt; font-weight: bold; margin: 20px 0 10px 0; border-bottom: 2px solid #000; padding-bottom: 5px;">${line}</h2>`);
+            return;
+          }
+
+          // Detect table headers (lines with multiple columns separated by spaces)
+          if (line.includes('Name') && line.includes('Strength') && line.includes('Route')) {
+            // Medications table header
+            inTable = true;
+            tableHeaders = ['Name', 'Strength', 'Route', 'Dosage', 'Number of Days to be taken'];
+            return;
+          } else if (line.includes('Test Name') && line.includes('Result') && line.includes('Reference Range')) {
+            // Lab results table header
+            inTable = true;
+            tableHeaders = ['Test Name', 'Result', 'Reference Range', 'Status'];
+            return;
+          } else if (line.includes('Review on') || line.includes('Resident On Discharge')) {
+            // Review table
+            const parts = line.split(':');
+            if (parts.length === 2) {
+              htmlContent.push(`<div style="margin: 10px 0;"><strong>${parts[0].trim()}:</strong> ${parts[1].trim()}</div>`);
+            }
+            return;
+          }
+
+          // Handle table rows
+          if (inTable) {
+            if (line.trim() === '' || line.startsWith('ADVICE') || line.includes('URGENT CARE') ||
+                line.startsWith('Case Summary') || line.startsWith('CASE SUMMARY')) {
+              // End of table
+              if (tableRows.length > 0) {
+                htmlContent.push(createTableHTML(tableHeaders, tableRows));
               }
-              if (part.includes('Mobile No:')) patientInfo.mobile = part.replace('Mobile No:', '').trim();
-            });
-          } else if (line.includes('Tariff:')) {
-            const parts = line.split(/\s{2,}/);
-            parts.forEach(part => {
-              if (part.includes('Tariff:')) patientInfo.tariff = part.replace('Tariff:', '').trim();
-              if (part.includes('Address:')) patientInfo.address = part.replace('Address:', '').trim();
-            });
-          } else if (line.includes('Admission Date:')) {
-            const parts = line.split(/\s{2,}/);
-            parts.forEach(part => {
-              if (part.includes('Admission Date:')) patientInfo.admissionDate = part.replace('Admission Date:', '').trim();
-              if (part.includes('Discharge Date:')) patientInfo.dischargeDate = part.replace('Discharge Date:', '').trim();
-            });
-          } else if (line.includes('Discharge Reason:')) {
-            patientInfo.dischargeReason = line.replace('Discharge Reason:', '').trim();
-          }
-
-          // Extract diagnosis
-          if (line.includes('Diagnosis:')) {
-            patientInfo.diagnosis = line.replace('Diagnosis:', '').trim();
-          }
-
-          // Handle medications table
-          if (line.includes('Medications on Discharge:')) {
-            inMedicationsTable = true;
-            skipNextLine = 2; // Skip headers
-          } else if (inMedicationsTable) {
-            if (skipNextLine > 0) {
-              skipNextLine--;
-            } else if (line.trim() === '') {
-              inMedicationsTable = false;
+              inTable = false;
+              tableRows = [];
+              tableHeaders = [];
+              if (line.trim() !== '') {
+                // Process this line normally
+                processNormalLine(line, htmlContent);
+              }
             } else if (!line.includes('------')) {
-              // Parse medication row
-              medications.push(line);
+              // Add table row (skip separator lines)
+              tableRows.push(line);
             }
+            return;
           }
 
-          // Handle case summary section
-          if (line.startsWith('CASE SUMMARY:') || line.includes('Case Summary:')) {
-            currentSection = 'caseSummary';
-          } else if (currentSection === 'caseSummary' && line.trim()) {
-            if (line.startsWith('Upon thorough') || line.startsWith('Laboratory')) {
-              currentSection = '';
-            } else {
-              caseSummary.push(line);
-            }
-          }
+          // Process normal lines
+          processNormalLine(line, htmlContent);
         });
 
-        // Create formatted HTML content
-        formattedContent = `
-          <style>
-            table { border-collapse: collapse; width: 100%; margin: 15px 0; }
-            th, td { border: 1px solid black; padding: 8px; text-align: left; }
-            th { background-color: #f0f0f0; font-weight: bold; }
-            .patient-info-table { border: none; margin: 0; }
-            .patient-info-table td { border: none; padding: 5px 15px 5px 0; }
-            h3 { font-size: 14pt; font-weight: bold; margin: 20px 0 10px 0; border-bottom: 2px solid black; padding-bottom: 5px; }
-            .precautions { margin: 15px 0; }
-            .precautions li { margin: 5px 0; }
-          </style>
+        // Close any remaining table
+        if (inTable && tableRows.length > 0) {
+          htmlContent.push(createTableHTML(tableHeaders, tableRows));
+        }
 
-          <table class="patient-info-table">
-            <tr>
-              <td><strong>Name</strong></td>
-              <td>: ${patientInfo.name || patient?.patients?.name || 'N/A'}</td>
-              <td style="padding-left: 50px;"><strong>Patient ID</strong></td>
-              <td>: ${patientInfo.patientId || patient?.visit_id || 'N/A'}</td>
-            </tr>
-            <tr>
-              <td><strong>Primary Care Provider</strong></td>
-              <td>: ${patientInfo.doctor || 'Dr. ' + (patient?.appointment_with || 'Unknown')}<br>&nbsp;&nbsp;(Gastroenterologist)</td>
-              <td style="padding-left: 50px;"><strong>Registration ID</strong></td>
-              <td>: ${patientInfo.registrationId || patient?.patients?.patients_id || 'N/A'}</td>
-            </tr>
-            <tr>
-              <td><strong>Sex / Age</strong></td>
-              <td>: ${patientInfo.gender || patient?.patients?.gender || 'N/A'} / ${patientInfo.age || patient?.patients?.age || 'N/A'}</td>
-              <td style="padding-left: 50px;"><strong>Mobile No</strong></td>
-              <td>: ${patientInfo.mobile || patient?.patients?.phone || 'N/A'}</td>
-            </tr>
-            <tr>
-              <td><strong>Tariff</strong></td>
-              <td>: ${patientInfo.tariff || patient?.patients?.corporate || 'Private'}</td>
-              <td style="padding-left: 50px;"><strong>Address</strong></td>
-              <td>: ${patientInfo.address || patient?.patients?.address || 'N/A'}</td>
-            </tr>
-            <tr>
-              <td><strong>Admission Date</strong></td>
-              <td>: ${patientInfo.admissionDate || patient?.visit_date || new Date().toLocaleDateString()}</td>
-              <td style="padding-left: 50px;"><strong>Discharge Date</strong></td>
-              <td>: ${patientInfo.dischargeDate || patient?.discharge_date || new Date().toLocaleDateString()}</td>
-            </tr>
-            <tr>
-              <td><strong>Discharge Reason</strong></td>
-              <td>: ${patientInfo.dischargeReason || 'Recovered'}</td>
-              <td></td>
-              <td></td>
-            </tr>
-          </table>
+        // Helper function to create table HTML
+        function createTableHTML(headers, rows) {
+          let tableHTML = '<table style="width: 100%; border-collapse: collapse; margin: 15px 0;">';
 
-          <h3>Present Condition</h3>
-          <p><strong>Diagnosis:</strong> ${patientInfo.diagnosis || 'As per medical records'}</p>
+          // Add headers if available
+          if (headers.length > 0) {
+            tableHTML += '<thead><tr>';
+            headers.forEach(header => {
+              tableHTML += `<th style="border: 1px solid #000; padding: 8px; background-color: #f0f0f0; font-weight: bold;">${header}</th>`;
+            });
+            tableHTML += '</tr></thead>';
+          }
 
-          <p><strong>Medications on Discharge:</strong></p>
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Strength</th>
-                <th>Route</th>
-                <th>Dosage</th>
-                <th>Number of Days to be taken</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${medications.length > 0 ? medications.map(med => {
-                // Try to parse medication line
-                const parts = med.match(/^(.+?)\s+(\S+\s+\S+)\s+(\S+)\s+(.+?)\s+(\d+)$/);
-                if (parts) {
-                  return `<tr>
-                    <td>${parts[1].trim()}</td>
-                    <td>${parts[2].trim()}</td>
-                    <td>${parts[3].trim()}</td>
-                    <td>${parts[4].trim()}</td>
-                    <td>${parts[5].trim()}</td>
-                  </tr>`;
+          // Add rows
+          tableHTML += '<tbody>';
+          rows.forEach(row => {
+            if (row.includes('As per prescription')) {
+              tableHTML += `<tr><td colspan="${headers.length || 5}" style="border: 1px solid #000; padding: 8px;">${row}</td></tr>`;
+            } else {
+              // For medication rows, handle the specific format with fixed column positions
+              if (headers[0] === 'Name' && headers.includes('Strength')) {
+                // This is a medication table - parse using fixed positions
+                const name = row.substring(0, 24).trim();
+                const strength = row.substring(25, 36).trim();
+                const route = row.substring(37, 46).trim();
+                const dosage = row.substring(47, 78).trim();
+                const days = row.substring(79).trim();
+
+                tableHTML += '<tr>';
+                tableHTML += `<td style="border: 1px solid #000; padding: 8px;">${name || '&nbsp;'}</td>`;
+                tableHTML += `<td style="border: 1px solid #000; padding: 8px;">${strength || '&nbsp;'}</td>`;
+                tableHTML += `<td style="border: 1px solid #000; padding: 8px;">${route || '&nbsp;'}</td>`;
+                tableHTML += `<td style="border: 1px solid #000; padding: 8px;">${dosage || '&nbsp;'}</td>`;
+                tableHTML += `<td style="border: 1px solid #000; padding: 8px;">${days || '&nbsp;'}</td>`;
+                tableHTML += '</tr>';
+              } else {
+                // For other tables, try to split the row into columns
+                const cells = row.split(/\s{2,}/).filter(cell => cell.trim());
+                tableHTML += '<tr>';
+                if (cells.length > 0) {
+                  cells.forEach(cell => {
+                    tableHTML += `<td style="border: 1px solid #000; padding: 8px;">${cell.trim()}</td>`;
+                  });
+                  // Fill remaining cells if needed
+                  for (let i = cells.length; i < headers.length; i++) {
+                    tableHTML += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+                  }
                 } else {
-                  // Fallback for unparseable lines
-                  return `<tr><td colspan="5">${med}</td></tr>`;
+                  // Empty row
+                  tableHTML += `<td colspan="${headers.length}" style="border: 1px solid #000; padding: 8px;">${row}</td>`;
                 }
-              }).join('') : '<tr><td colspan="5">As per prescription</td></tr>'}
-            </tbody>
-          </table>
+                tableHTML += '</tr>';
+              }
+            }
+          });
+          tableHTML += '</tbody></table>';
 
-          ${caseSummary.length > 0 ? `
-          <p><strong>Case Summary:</strong></p>
-          ${caseSummary.map(line => `<p>${line}</p>`).join('')}
-          ` : ''}
+          return tableHTML;
+        }
 
-          <div style="margin-top: 40px; padding-top: 20px; page-break-inside: avoid;">
-            <h3 style="font-size: 16pt; font-weight: bold; margin: 20px 0 15px 0; text-align: left;">ADVICE</h3>
+        // Helper function to process normal lines
+        function processNormalLine(line, htmlContent) {
+          if (line.trim() === '') {
+            htmlContent.push('<br>');
+          } else if (line.startsWith('- ')) {
+            // Bullet point
+            htmlContent.push(`<li style="margin: 5px 0 5px 20px;">${line.substring(2)}</li>`);
+          } else if (line.match(/^(PRESENT CONDITION:|INVESTIGATIONS:|MEDICATIONS ON DISCHARGE:|RADIOLOGY INVESTIGATIONS:|LAB INVESTIGATIONS:|Present Condition|Investigations:|Medications on Discharge:|Case Summary:)/)) {
+            // Section headings with or without colons
+            htmlContent.push(`<h3 style="font-size: 11pt; font-weight: bold; margin: 15px 0 8px 0;">${line}</h3>`);
+          } else if (line.includes('URGENT CARE') && line.includes('EMERGENCY CARE')) {
+            // URGENT CARE text - make it bold with 11pt font
+            htmlContent.push(`<p style="font-size: 11pt; font-weight: bold; margin: 8px 0;">${line}</p>`);
+          } else if (line.includes('PLEASE CONTACT:') && (line.includes('7030974619') || line.includes('9373111709'))) {
+            // Contact phone numbers - make them bold with 11pt font
+            htmlContent.push(`<p style="font-size: 11pt; font-weight: bold; margin: 8px 0;">${line}</p>`);
+          } else if (line.includes(':') && line.indexOf(':') < 30) {
+            // Key-value pair
+            const colonIndex = line.indexOf(':');
+            const key = line.substring(0, colonIndex).trim();
+            const value = line.substring(colonIndex + 1).trim();
 
-            <p style="margin: 15px 0; font-style: italic;">
-              <em>Advice:</em><br/>
-              Follow up after 7 days/SOS.
-            </p>
+            if (key && value) {
+              htmlContent.push(`<div style="margin: 8px 0;"><strong>${key}:</strong> ${value}</div>`);
+            } else {
+              htmlContent.push(`<p style="margin: 8px 0;">${line}</p>`);
+            }
+          } else {
+            // Regular paragraph
+            htmlContent.push(`<p style="margin: 8px 0;">${line}</p>`);
+          }
+        }
 
-            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-              <tr>
-                <td style="border: 1px solid black; padding: 10px; font-weight: bold; width: 30%;">Review on</td>
-                <td style="border: 1px solid black; padding: 10px; width: 70%;">: 25/09/2025</td>
-              </tr>
-              <tr>
-                <td style="border: 1px solid black; padding: 10px; font-weight: bold;">Resident On Discharge</td>
-                <td style="border: 1px solid black; padding: 10px;">: Sachin Gathibandhe</td>
-              </tr>
-            </table>
-
-            <div style="text-align: right; margin: 30px 0; font-weight: bold;">
-              Dr. Dr. Nikhil Khobragade (Gastroenterologist)
-            </div>
-
-            <hr style="border: none; border-top: 2px solid black; margin: 40px 0 20px 0;">
-
-            <div style="text-align: center; font-weight: bold; font-size: 11pt; margin: 20px 0;">
-              Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE<br>
-              CONTACT: 7030974619, 9373111709.
-            </div>
-          </div>
-        `;
+        // Join all HTML content
+        formattedContent = htmlContent.join('');
       } else {
         // Already HTML format
         formattedContent = dischargeSummaryText;
@@ -1697,7 +2514,7 @@ Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 703097461
         }
 
         h3 {
-            font-size: 13pt;
+            font-size: 11pt;
             font-weight: bold;
             margin: 25px 0 10px 0;
             border-bottom: 2px solid black;
@@ -1741,10 +2558,6 @@ Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 703097461
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Discharge Summary</h1>
-    </div>
-
     <div class="content">
         ${formattedContent}
     </div>

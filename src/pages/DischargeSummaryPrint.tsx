@@ -191,7 +191,7 @@ Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : '
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div id="print-root" className="discharge-summary-print min-h-screen bg-white">
       {/* Print Button - Hidden in print */}
       <div className="no-print mb-4 text-center p-4 bg-gray-50 border-b">
         <div className="flex justify-center gap-4">
@@ -251,6 +251,18 @@ Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : '
             display: none !important;
           }
 
+          /* Ensure discharge summary content is fully visible */
+          #print-root,
+          .discharge-summary-print,
+          .discharge-summary-print * {
+            visibility: visible !important;
+            display: block !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+          }
+
           /* Reset body styles for print */
           body {
             margin: 0 !important;
@@ -260,6 +272,8 @@ Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : '
             font-size: 12px !important;
             line-height: 1.4 !important;
             color: #000 !important;
+            height: auto !important;
+            overflow: visible !important;
           }
 
           /* Ensure colors print correctly */
@@ -279,6 +293,8 @@ Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : '
           .min-h-screen {
             min-height: auto !important;
             background: white !important;
+            height: auto !important;
+            overflow: visible !important;
           }
 
           /* Ensure proper text rendering */
@@ -289,6 +305,15 @@ Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : '
 
           p, div, span {
             color: #000 !important;
+          }
+
+          /* Sections should be visible */
+          section, .section {
+            display: block !important;
+            visibility: visible !important;
+            height: auto !important;
+            overflow: visible !important;
+            page-break-inside: avoid !important;
           }
 
           /* Table styles for better print output */
@@ -306,7 +331,8 @@ Discharge Condition: ${data.condition.length > 0 ? data.condition.join(', ') : '
           }
 
           /* Avoid page breaks in important sections */
-          .page-break-inside-avoid {
+          .page-break-inside-avoid,
+          .break-inside-avoid {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }

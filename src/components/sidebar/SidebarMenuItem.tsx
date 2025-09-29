@@ -11,8 +11,17 @@ export const SidebarMenuItem = ({ item }: SidebarMenuItemProps) => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleItemClick = (route: string) => {
-    navigate(route);
+  const handleItemClick = (route: string, event: React.MouseEvent) => {
+    // Check if Ctrl (Windows/Linux) or Cmd (Mac) is held
+    if (event.ctrlKey || event.metaKey) {
+      // Open in new tab with keyboard modifier
+      window.open(route, '_blank');
+    } else {
+      // Default: Open in new tab
+      window.open(route, '_blank');
+      // If you want to navigate in the same tab instead, use:
+      // navigate(route);
+    }
   };
 
   return (
@@ -22,7 +31,7 @@ export const SidebarMenuItem = ({ item }: SidebarMenuItemProps) => {
           className={`flex items-center justify-between w-full p-2 cursor-pointer hover:bg-accent rounded-md transition-colors gap-2 ${
             location.pathname === item.route ? 'bg-accent' : ''
           }`}
-          onClick={() => handleItemClick(item.route)}
+          onClick={(e) => handleItemClick(item.route, e)}
         >
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <item.icon className="h-4 w-4 flex-shrink-0" />

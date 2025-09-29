@@ -326,10 +326,10 @@ export default function DischargeSummary({
   }
 
   return (
-    <div className="w-full min-h-screen bg-neutral-200 print:bg-white py-6 print:py-0">
+    <div className="discharge-summary w-full min-h-screen bg-neutral-200 print:bg-white py-6 print:py-0">
       {/* Page */}
       <div
-        className="mx-auto bg-white shadow-sm print:shadow-none border border-gray-300 max-w-[830px] print:max-w-none print:border-0"
+        className="discharge-summary-content mx-auto bg-white shadow-sm print:shadow-none border border-gray-300 max-w-[830px] print:max-w-none print:border-0"
         style={{ width: "210mm" }}
       >
         {/* Top Bar */}
