@@ -2085,7 +2085,7 @@ const FinalBill = () => {
       clearTimeout(initialVerificationTimer);
       clearInterval(periodicVerificationInterval);
     };
-  }, [visitId, clinicalServicesInitialized, mandatoryServicesInitialized, savedClinicalServicesData.length, savedMandatoryServicesData.length]);
+  }, [visitId, clinicalServicesInitialized, mandatoryServicesInitialized]); // Removed circular dependencies
 
   // Function to refresh saved data
   const refreshSavedData = async () => {
@@ -5771,9 +5771,33 @@ INSTRUCTIONS:
         }));
       }
 
-      // Handle mandatory service from foreign key join
-      if (visitData?.mandatory_service) {
-        dbMandatoryServices = [visitData.mandatory_service];
+      // Handle mandatory services from junction table (correct approach)
+      const { data: mandatoryServicesData, error: mandatoryError } = await supabase
+        .from('visit_mandatory_services')
+        .select('*, mandatory_services!visit_mandatory_services_mandatory_service_id_fkey(*)')
+        .eq('visit_id', visitData.id);
+
+      if (mandatoryError) {
+        console.error('❌ [STATE VERIFICATION] Error fetching mandatory services:', mandatoryError);
+      } else if (mandatoryServicesData && mandatoryServicesData.length > 0) {
+        dbMandatoryServices = mandatoryServicesData.map(item => ({
+          id: item.mandatory_services?.id,
+          service_name: item.mandatory_services?.service_name,
+          tpa_rate: item.mandatory_services?.tpa_rate,
+          private_rate: item.mandatory_services?.private_rate,
+          nabh_rate: item.mandatory_services?.nabh_rate,
+          non_nabh_rate: item.mandatory_services?.non_nabh_rate,
+          quantity: item.quantity,
+          rate_used: item.rate_used,
+          rate_type: item.rate_type,
+          amount: item.amount,
+          external_requisition: item.external_requisition,
+          selected_at: item.selected_at,
+          junction_id: item.id,
+          patientCategory: item.patient_category || 'Private', // Include patient category from database
+          selectedRate: item.rate_used || item.amount || 0, // Include selected rate for consistency
+          cost: item.amount || 0 // Include cost for consistency
+        }));
       }
 
       console.log('🔍 [STATE VERIFICATION] Database vs State comparison:', {
@@ -5793,7 +5817,7 @@ INSTRUCTIONS:
         
         // Data sources
         clinicalSource: 'JUNCTION_TABLE',
-        mandatorySource: 'FOREIGN_KEY',
+        mandatorySource: 'JUNCTION_TABLE',
         
         visitInfo: {
           uuid: visitData.id,
@@ -5801,15 +5825,21 @@ INSTRUCTIONS:
         }
       });
 
-      // If state doesn't match database, update state
+      // If state doesn't match database, update state (with safety checks)
       if (dbClinicalServices.length !== savedClinicalServicesData.length) {
         console.log('🔧 [STATE VERIFICATION] Updating clinical services state to match database');
         setSavedClinicalServicesData(dbClinicalServices);
       }
 
       if (dbMandatoryServices.length !== savedMandatoryServicesData.length) {
-        console.log('🔧 [STATE VERIFICATION] Updating mandatory services state to match database');
-        setSavedMandatoryServicesData(dbMandatoryServices);
+        // SAFETY CHECK: Don't clear state if we have data but database query returned empty
+        if (dbMandatoryServices.length === 0 && savedMandatoryServicesData.length > 0) {
+          console.warn('⚠️ [STATE VERIFICATION] Database returned empty but state has data - skipping state clear to prevent data loss');
+          console.warn('⚠️ [STATE VERIFICATION] This might indicate a database query issue');
+        } else {
+          console.log('🔧 [STATE VERIFICATION] Updating mandatory services state to match database');
+          setSavedMandatoryServicesData(dbMandatoryServices);
+        }
       }
 
     } catch (error) {
@@ -6857,7 +6887,7 @@ INSTRUCTIONS:
             // For compatibility with existing UI - PRIORITIZE SAVED VALUES
             selectedRate: finalAmount,
             rateType: rateType,
-            patientCategory: patientCategory, // Properly set patient category
+            patientCategory: item.patient_category || patientCategory, // Use stored value first, then calculated fallback
             // ADD COST FIELD LIKE LABORATORY SERVICES FOR CONSISTENCY
             cost: finalAmount // This matches how Laboratory services handle amounts
           };
@@ -7365,125 +7395,19 @@ INSTRUCTIONS:
           return;
         }
 
-        // DUPLICATE DETECTION: Check if this lab service already exists for this visit
-        console.log('🔍 [LAB DUPLICATE CHECK] Checking for existing lab service...');
-        const { data: existingLabs, error: checkError } = await supabase
-          .from('visit_labs')
-          .select('*')
-          .eq('visit_id', visitData.id)
-          .eq('lab_id', labService.id);
+        // CREATE NEW INDIVIDUAL ENTRY: Always create a new record for each lab test with current timestamp
+        console.log('✅ [LAB NEW ENTRY] Creating new individual lab entry with timestamp...');
 
-        if (checkError) {
-          console.error('❌ [LAB DUPLICATE CHECK] Error checking for duplicates:', checkError);
-          // Continue with normal save if check fails
-        } else if (existingLabs && existingLabs.length > 0) {
-          // DUPLICATE FOUND: Handle quantity-based update
-          const existingLab = existingLabs[0];
-          const currentQuantity = existingLab.quantity || 1;
-          // Get unit rate from the new service being added, not from existing total cost
-          const unitRate = labService.amount || labService.cost || 0;
-          const currentTotalCost = unitRate * currentQuantity;
-          const newQuantity = currentQuantity + 1;
-          const newTotalAmount = unitRate * newQuantity;
-
-          console.log('⚠️ [LAB DUPLICATE] Lab service already exists:', {
-            existingLab,
-            currentQuantity,
-            unitRate,
-            currentTotalCost,
-            newQuantity,
-            newTotalAmount
-          });
-
-          // Show quantity-based duplicate confirmation dialog
-          const userChoice = confirm(
-            `"${labService.name}" is already added to this visit.\n\n` +
-            `Current: Quantity ${currentQuantity} × ₹${unitRate} = ₹${currentTotalCost}\n` +
-            `New: Quantity ${newQuantity} × ₹${unitRate} = ₹${newTotalAmount}\n\n` +
-            `Click OK to increase quantity to ${newQuantity}, or Cancel to keep current quantity.`
-          );
-
-          if (!userChoice) {
-            toast.info(`"${labService.name}" quantity unchanged (${currentQuantity}).`);
-            return; // User chose to keep existing quantity
-          }
-
-          // UPDATE EXISTING RECORD: Increase quantity and recalculate total
-          console.log('🔢 [LAB QUANTITY UPDATE] Updating existing lab quantity...');
-
-          // First try to update with quantity column
-          let updateResult, updateError;
-          try {
-            const result = await supabase
-              .from('visit_labs')
-              .update({
-                quantity: newQuantity,
-                cost: newTotalAmount,
-                unit_rate: unitRate, // Store unit rate separately for consistent display
-                ordered_date: new Date().toISOString() // Update date to reflect latest addition
-              })
-              .eq('id', existingLab.id)
-              .select('*');
-
-            updateResult = result.data;
-            updateError = result.error;
-          } catch (error) {
-            updateError = error;
-          }
-
-          // Check if the error is due to missing quantity column
-          if (updateError && updateError.message && updateError.message.includes('quantity')) {
-            console.log('⚠️ [LAB QUANTITY UPDATE] Quantity column not found, using fallback approach...');
-            toast.warning('Quantity tracking not available - please run database migration. Creating duplicate entry instead.');
-
-            // Fallback: Just update the cost and proceed with normal save for the new entry
-            try {
-              const { data: fallbackResult, error: fallbackError } = await supabase
-                .from('visit_labs')
-                .update({
-                  cost: newTotalAmount,
-                  ordered_date: new Date().toISOString()
-                })
-                .eq('id', existingLab.id)
-                .select('*');
-
-              if (fallbackError) {
-                console.error('❌ [LAB QUANTITY UPDATE] Fallback also failed:', fallbackError);
-                toast.error('Failed to update lab service');
-                return;
-              }
-
-              console.log('✅ [LAB QUANTITY UPDATE] Used fallback approach:', fallbackResult);
-              toast.info(`Updated "${labService.name}" cost to ₹${newTotalAmount} (quantity tracking unavailable)`);
-            } catch (fallbackError2) {
-              console.error('❌ [LAB QUANTITY UPDATE] Complete fallback failure:', fallbackError2);
-              toast.error('Database update failed - please contact administrator');
-              return;
-            }
-          } else if (updateError) {
-            console.error('❌ [LAB QUANTITY UPDATE] Failed to update lab quantity:', updateError);
-            toast.error(`Failed to update lab service quantity: ${updateError.message}`);
-            return;
-          } else {
-            console.log('✅ [LAB QUANTITY UPDATE] Successfully updated lab quantity:', updateResult);
-            toast.success(`"${labService.name}" quantity updated to ${newQuantity} (₹${newTotalAmount})`);
-          }
-
-          // Refresh saved labs data after successful update
-          await fetchSavedLabs(visitId);
-          return; // Exit early - don't proceed with normal save
-        }
-
-        // NEW SERVICE: Prepare lab data for visit_labs table (including cost and quantity)
-        const unitRate = labService.amount || labService.cost || 0;
+        // INDIVIDUAL ENTRY: Prepare lab data for visit_labs table (each test as separate entry)
+        const individualCost = labService.amount || labService.cost || 0;
         const labToSave = {
           visit_id: visitData.id,
           lab_id: labService.id,
           status: 'ordered',
-          ordered_date: new Date().toISOString(),
-          cost: unitRate,  // Total cost (for quantity 1, this equals unit rate)
-          unit_rate: unitRate,  // Store unit rate separately for consistent display
-          quantity: 1  // Default quantity for new lab services
+          ordered_date: new Date().toISOString(), // Current timestamp for this individual test
+          cost: individualCost,  // Individual test cost
+          unit_rate: individualCost,  // Same as cost for individual entries
+          quantity: 1  // Always 1 for individual entries
         };
 
         console.log('💾 Lab data to save:', labToSave);
@@ -7606,12 +7530,19 @@ INSTRUCTIONS:
 
       console.log('✅ Found visit UUID for radiology:', visitData.id, 'for visit_id:', visitId);
 
-      // Prepare radiology data for visit_radiology table (only required columns)
+      // CREATE NEW INDIVIDUAL ENTRY: Always create a new record for each radiology test with current timestamp
+      console.log('✅ [RADIOLOGY NEW ENTRY] Creating new individual radiology entry with timestamp...');
+
+      // INDIVIDUAL ENTRY: Prepare radiology data for visit_radiology table (each test as separate entry)
+      const individualCost = radiologyService.amount || radiologyService.cost || 0;
       const radiologyToSave = {
         visit_id: visitData.id,
         radiology_id: radiologyService.id,
         status: 'ordered',
-        ordered_date: new Date().toISOString()
+        ordered_date: new Date().toISOString(), // Current timestamp for this individual test
+        cost: individualCost,  // Individual test cost
+        unit_rate: individualCost,  // Same as cost for individual entries
+        quantity: 1  // Always 1 for individual entries
       };
 
       console.log('📋 Radiology data to save:', radiologyToSave);
@@ -7624,7 +7555,32 @@ INSTRUCTIONS:
 
       if (error) {
         console.error('❌ Error saving radiology to visit_radiology:', error);
-        if (error.code === '23505') {
+        // Check if error is due to missing quantity/cost columns
+        if (error.message && (error.message.includes('quantity') || error.message.includes('cost') || error.message.includes('unit_rate'))) {
+          console.log('⚠️ [RADIOLOGY SAVE] Missing quantity columns, using basic save...');
+          toast.warning('Quantity tracking not available - please run database migration.');
+
+          // Fallback to basic save without quantity columns
+          const basicRadiologyData = {
+            visit_id: visitData.id,
+            radiology_id: radiologyService.id,
+            status: 'ordered',
+            ordered_date: new Date().toISOString()
+          };
+
+          const { data: basicData, error: basicError } = await supabase
+            .from('visit_radiology' as any)
+            .insert([basicRadiologyData])
+            .select();
+
+          if (basicError) {
+            console.error('❌ Basic radiology save also failed:', basicError);
+            toast.error('Error saving radiology to visit');
+          } else {
+            console.log('✅ Basic radiology save successful:', basicData);
+            toast.success(`${radiologyService.name} saved to visit (basic mode)`);
+          }
+        } else if (error.code === '23505') {
           toast.error('This radiology test is already added to this visit');
         } else {
           toast.error('Error saving radiology to visit');
@@ -7632,12 +7588,13 @@ INSTRUCTIONS:
       } else {
         console.log('✅ Radiology saved to visit_radiology successfully:', data);
         toast.success(`${radiologyService.name} saved to visit`);
-
-        // Refresh saved radiology data
-        console.log('🔄 Calling fetchSavedRadiology to refresh data...');
-        await fetchSavedRadiology(visitId);
-        console.log('🔄 fetchSavedRadiology completed');
       }
+
+      // Refresh saved radiology data
+      console.log('🔄 Calling fetchSavedRadiology to refresh data...');
+      await fetchSavedRadiology(visitId);
+      console.log('🔄 fetchSavedRadiology completed');
+
     } catch (error) {
       console.error('❌ Error in saveRadiologyToVisit:', error);
       toast.error('Error saving radiology to visit');
@@ -7674,11 +7631,12 @@ INSTRUCTIONS:
 
       console.log('Found visit UUID for radiology:', visitData.id, 'for visit_id:', visitId);
 
-      // Then get visit_radiology data using the UUID
+      // Then get visit_radiology data using the UUID, ordered by date (newest first)
       const { data: visitRadiologyData, error: visitRadiologyError } = await supabase
         .from('visit_radiology' as any)
         .select('*')
-        .eq('visit_id', visitData.id);
+        .eq('visit_id', visitData.id)
+        .order('ordered_date', { ascending: false }); // Sort by date, newest first
 
       if (visitRadiologyError) {
         console.error('Error fetching visit_radiology:', visitRadiologyError);
@@ -7718,15 +7676,33 @@ INSTRUCTIONS:
 
       console.log('Radiology details data:', radiologyData);
 
-      // Combine the data
+      // Combine the data preserving database values when available
       const formattedRadiology = visitRadiologyData.map((visitRadiology: any) => {
         const radiologyDetail = radiologyData?.find((r: any) => r.id === visitRadiology.radiology_id);
+
+        // Use stored database values first, fallback to calculated values only if missing
+        const storedCost = visitRadiology.cost;
+        const storedUnitRate = visitRadiology.unit_rate;
+        const quantity = visitRadiology.quantity || 1;
+
+        // Only calculate if database values are missing/invalid
+        let finalCost = storedCost;
+        let finalUnitRate = storedUnitRate;
+
+        if (!storedCost || storedCost <= 0 || !storedUnitRate || storedUnitRate <= 0) {
+          // Fallback calculation for older data without proper cost/unit_rate
+          const fallbackUnitRate = (radiologyDetail?.cost && radiologyDetail.cost > 0) ? radiologyDetail.cost : 100;
+          finalUnitRate = storedUnitRate || fallbackUnitRate;
+          finalCost = storedCost || (fallbackUnitRate * quantity);
+        }
+
         return {
           ...visitRadiology,
           radiology_name: radiologyDetail?.name || `Unknown Radiology (${visitRadiology.radiology_id})`,
           description: radiologyDetail?.description || 'No description available',
           category: radiologyDetail?.category || '',
-          cost: radiologyDetail?.cost || 0,
+          cost: finalCost, // Use database cost or calculated fallback
+          unit_rate: finalUnitRate, // Ensure unit_rate is preserved/calculated
           status: visitRadiology.status || 'ordered',
           ordered_date: visitRadiology.ordered_date
         };
@@ -7741,7 +7717,21 @@ INSTRUCTIONS:
   };
 
   // Function to add radiology service to invoice
-  const addRadiologyServiceToInvoice = (radiologyService: any) => {
+  const addRadiologyServiceToInvoice = async (radiologyService: any) => {
+    console.log('🩻 Adding radiology service to invoice:', radiologyService);
+
+    // Save to visit_radiology table if visitId is available (with duplicate detection)
+    if (visitId) {
+      try {
+        console.log('💾 Saving radiology to visit_radiology table:', { visitId, radiologyService });
+        await saveSingleRadiologyToVisit(radiologyService);
+      } catch (error) {
+        console.error('❌ Error saving radiology to visit_radiology:', error);
+        toast.error('Error saving radiology to visit record');
+        return; // Don't add to invoice if save failed
+      }
+    }
+
     // Add radiology service as sub-item
     const newRadiologyItem: StandardSubItem = {
       id: `radiology-${radiologyService.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -7785,7 +7775,7 @@ INSTRUCTIONS:
       return updated;
     });
 
-    toast.success(`${radiologyService.name} added to invoice`);
+    console.log('✅ Radiology service added to invoice:', newRadiologyItem);
   };
 
   // Search queries for service selection based on search term and active tab
@@ -9133,11 +9123,12 @@ INSTRUCTIONS:
 
       console.log('Found visit UUID for labs:', visitData.id, 'for visit_id:', visitId);
 
-      // Then get visit_labs data using the UUID
+      // Then get visit_labs data using the UUID, ordered by date (newest first)
       const { data: visitLabsData, error: visitLabsError } = await supabase
         .from('visit_labs' as any)
         .select('*')
-        .eq('visit_id', visitData.id);
+        .eq('visit_id', visitData.id)
+        .order('ordered_date', { ascending: false }); // Sort by date, newest first
 
       if (visitLabsError) {
         console.error('Error fetching visit_labs:', visitLabsError);
@@ -14744,15 +14735,17 @@ Dr. Murali B K
                                       });
 
                                       const currentQuantity = existingService.quantity || 1;
-                                      const currentRate = existingService.selectedRate || existingService.cost || existingService.amount || 0;
+                                      // Get unit rate from the new service being added, not from existing total
+                                      const unitRate = service.selectedRate || service.amount || service.cost || 0;
+                                      const currentTotalCost = unitRate * currentQuantity;
                                       const newQuantity = currentQuantity + 1;
-                                      const newTotalAmount = currentRate * newQuantity;
+                                      const newTotalAmount = unitRate * newQuantity;
 
                                       // Show quantity-based duplicate message
                                       const userChoice = confirm(
                                         `"${service.service_name}" is already added to this visit.\n\n` +
-                                        `Current: Quantity ${currentQuantity} × ₹${currentRate} = ₹${currentRate * currentQuantity}\n` +
-                                        `New: Quantity ${newQuantity} × ₹${currentRate} = ₹${newTotalAmount}\n\n` +
+                                        `Current: Quantity ${currentQuantity} × ₹${unitRate} = ₹${currentTotalCost}\n` +
+                                        `New: Quantity ${newQuantity} × ₹${unitRate} = ₹${newTotalAmount}\n\n` +
                                         `Click OK to increase quantity to ${newQuantity}, or Cancel to keep current quantity.`
                                       );
 
@@ -14786,7 +14779,7 @@ Dr. Murali B K
                                           .from('visit_mandatory_services')
                                           .update({
                                             quantity: newQuantity,
-                                            rate_used: currentRate,
+                                            rate_used: unitRate,
                                             amount: newTotalAmount
                                           })
                                           .eq('visit_id', visitData.id)
@@ -14811,7 +14804,7 @@ Dr. Murali B K
                                             ...s,
                                             quantity: newQuantity,
                                             amount: newTotalAmount,
-                                            selectedRate: currentRate,
+                                            selectedRate: unitRate,
                                             cost: newTotalAmount
                                           } : s)
                                         );
@@ -14967,7 +14960,8 @@ Dr. Murali B K
                                         quantity: 1,
                                         rate_used: numericRate,
                                         rate_type: service.rateType,
-                                        amount: numericAmount
+                                        amount: numericAmount,
+                                        patient_category: service.patientCategory
                                       };
 
                                       // CRITICAL DEBUG: Check if save operation uses same visit UUID as fetch
@@ -15940,115 +15934,6 @@ Dr. Murali B K
                     </p>
                   </div>
 
-                  {/* Debug Verification (Development Only) */}
-                  {process.env.NODE_ENV === 'development' && (
-                    <div className="p-4">
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm text-yellow-800">
-                            Debug Tools (Development Only)
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={performDatabaseVerification}
-                              className="px-3 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
-                            >
-                              Verify DB
-                            </button>
-                            <button
-                              onClick={verifyServicesStateConsistency}
-                              className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                            >
-                              Verify State
-                            </button>
-                            <button
-                              onClick={testDataPersistence}
-                              className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                            >
-                              Test Persistence
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (visitId) {
-                                  await validateVisitAndGetDebugInfo(visitId);
-                                } else {
-                                  console.warn('No visitId available for validation');
-                                }
-                              }}
-                              className="px-3 py-1 bg-purple-600 text-white text-xs rounded hover:bg-purple-700"
-                            >
-                              Check Visit
-                            </button>
-                            <button
-                              onClick={verifyDatabaseSchema}
-                              className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                            >
-                              Check Schema
-                            </button>
-                            <button
-                              onClick={async () => {
-                                alert('🔄 REFRESH LABS BUTTON CLICKED! Check console for logs...');
-                                console.log('🔄 DIRECT fetchSavedLabs call starting...');
-                                console.log('🔍 Current visitId:', visitId);
-                                console.log('🔍 Current savedLabData BEFORE:', savedLabData);
-                                
-                                if (visitId) {
-                                  try {
-                                    console.log('🔥 Calling fetchSavedLabs directly...');
-                                    
-                                    // Force clear the state first
-                                    console.log('🔥 Clearing savedLabData state first...');
-                                    setSavedLabData([]);
-                                    
-                                    // Wait a moment for state to clear
-                                    await new Promise(resolve => setTimeout(resolve, 100));
-                                    
-                                    // Now fetch new data
-                                    await fetchSavedLabs(visitId);
-                                    console.log('✅ DIRECT fetchSavedLabs completed');
-                                    
-                                    // Wait for state to update
-                                    setTimeout(() => {
-                                      console.log('🔍 savedLabData AFTER fetchSavedLabs (delayed check):', savedLabData);
-                                    }, 500);
-                                    
-                                    alert('✅ fetchSavedLabs function completed - check saved lab data now!');
-                                  } catch (error) {
-                                    console.error('❌ Error in direct fetchSavedLabs call:', error);
-                                    alert('❌ Error: ' + error.message);
-                                  }
-                                } else {
-                                  console.warn('❌ No visitId available');
-                                  alert('❌ No visitId available');
-                                }
-                                console.log('🔄 Also triggering counter refresh...');
-                                setLabDataRefreshCounter(prev => prev + 1);
-                              }}
-                              className="px-3 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700"
-                            >
-                              Refresh Labs
-                            </button>
-                            <button
-                              onClick={() => {
-                                console.log('🐛 [DEBUG MANUAL] Manual mandatory services debug triggered');
-                                console.log('🐛 [DEBUG MANUAL] Current saved data:', savedMandatoryServicesData);
-                                fetchSavedMandatoryServicesData().then(result => {
-                                  console.log('🐛 [DEBUG MANUAL] Fresh fetch result:', result);
-                                }).catch(console.error);
-                              }}
-                              className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                            >
-                              Debug Mandatory
-                            </button>
-                          </div>
-                        </div>
-                        <div className="text-xs text-yellow-700 mt-1">
-                          Clinical: {savedClinicalServicesData.length} | Mandatory: {savedMandatoryServicesData.length} |
-                          Init: {clinicalServicesInitialized ? 'C✓' : 'C✗'} {mandatoryServicesInitialized ? 'M✓' : 'M✗'}
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   {/* Saved Data Tabs */}
                   <div className="p-4">
@@ -16154,7 +16039,11 @@ Dr. Murali B K
                                   </>
                                 )}
                                 <div className="text-lg font-bold text-green-600">
-                                  Total: ₹{savedLabData.reduce((total, lab) => total + (parseFloat(lab.cost) || 0), 0)}
+                                  Total: ₹{savedLabData.reduce((total, lab) => {
+                                    // Each lab entry represents an individual test with its own cost
+                                    const individualCost = parseFloat(lab.cost) || 0;
+                                    return total + individualCost;
+                                  }, 0)}
                                 </div>
                               </div>
                             </div>
@@ -16171,17 +16060,15 @@ Dr. Murali B K
                                           className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                                         />
                                       </th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Date/Time</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Test Name</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Qty</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Total</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Ordered Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Amount</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Action</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {savedLabData.map((lab, index) => (
-                                      <tr key={index} className="hover:bg-gray-50">
+                                      <tr key={lab.id || `lab-${lab.lab_id}-${lab.ordered_date}-${index}`} className="hover:bg-gray-50">
                                         <td className="border border-gray-300 px-2 py-2 text-center">
                                           <input
                                             type="checkbox"
@@ -16190,53 +16077,21 @@ Dr. Murali B K
                                             className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                                           />
                                         </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          {lab.ordered_date ? new Date(lab.ordered_date).toLocaleString('en-IN', {
+                                            year: 'numeric',
+                                            month: '2-digit',
+                                            day: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                          }) : 'No date'}
+                                        </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
                                           {lab.lab_name}
                                         </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-purple-600">
-                                          {lab.quantity || 1}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-700">
-                                          ₹{(() => {
-                                            // Use unit_rate if available, otherwise calculate from cost/quantity
-                                            if (lab.unit_rate && lab.unit_rate > 0) {
-                                              return parseFloat(lab.unit_rate).toLocaleString('en-IN');
-                                            }
-                                            // Fallback calculation for older data without unit_rate
-                                            const quantity = lab.quantity || 1;
-                                            const totalCost = parseFloat(lab.cost) || 0;
-                                            const ratePerUnit = quantity > 0 ? totalCost / quantity : totalCost;
-                                            return isNaN(ratePerUnit) ? '0' : ratePerUnit.toLocaleString('en-IN');
-                                          })()}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
-                                          <input
-                                            type="number"
-                                            value={(() => {
-                                              console.log('🔍 Rendering saved lab cost:', {
-                                                labId: lab.id,
-                                                labName: lab.lab_name,
-                                                rawCost: lab.cost,
-                                                quantity: lab.quantity,
-                                                displayValue: lab.cost ? String(lab.cost).replace('₹', '') : '',
-                                                fullLabObject: lab
-                                              });
-                                              return lab.cost ? String(lab.cost).replace('₹', '') : '';
-                                            })()}
-                                            onChange={(e) => updateLabField(lab.id, 'cost', e.target.value)}
-                                            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
-                                            placeholder="Total Cost"
-                                            min="0"
-                                            step="0.01"
-                                          />
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                          <input
-                                            type="date"
-                                            value={lab.ordered_date ? new Date(lab.ordered_date).toISOString().split('T')[0] : ''}
-                                            onChange={(e) => updateLabField(lab.id, 'ordered_date', e.target.value)}
-                                            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
-                                          />
+                                        <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-green-600">
+                                          ₹{lab.cost || 0}
                                         </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-center">
                                           <button
@@ -16296,7 +16151,11 @@ Dr. Murali B K
                                   </>
                                 )}
                                 <div className="text-lg font-bold text-green-600">
-                                  Total: ₹{savedRadiologyData.reduce((total, radiology) => total + (parseFloat(radiology.cost) || 0), 0)}
+                                  Total: ₹{savedRadiologyData.reduce((total, radiology) => {
+                                    // Each radiology entry represents an individual test with its own cost
+                                    const individualCost = parseFloat(radiology.cost) || 0;
+                                    return total + individualCost;
+                                  }, 0)}
                                 </div>
                               </div>
                             </div>
@@ -16313,15 +16172,15 @@ Dr. Murali B K
                                           className="rounded"
                                         />
                                       </th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Date/Time</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Test Name</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Ordered Date</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Cost</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Amount</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Action</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {savedRadiologyData.map((radiology, index) => (
-                                      <tr key={index} className="hover:bg-gray-50">
+                                      <tr key={radiology.id || `radiology-${radiology.radiology_id}-${radiology.ordered_date}-${index}`} className="hover:bg-gray-50">
                                         <td className="border border-gray-300 px-2 py-2 text-center">
                                           <input
                                             type="checkbox"
@@ -16330,27 +16189,21 @@ Dr. Murali B K
                                             className="rounded"
                                           />
                                         </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
+                                          {radiology.ordered_date ? new Date(radiology.ordered_date).toLocaleString('en-IN', {
+                                            year: 'numeric',
+                                            month: '2-digit',
+                                            day: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                          }) : 'No date'}
+                                        </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
                                           {radiology.radiology_name}
                                         </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                          <input
-                                            type="date"
-                                            value={radiology.ordered_date ? new Date(radiology.ordered_date).toISOString().split('T')[0] : ''}
-                                            onChange={(e) => updateRadiologyField(radiology.id, 'ordered_date', e.target.value)}
-                                            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
-                                          />
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
-                                          <input
-                                            type="number"
-                                            value={radiology.cost ? String(radiology.cost).replace('₹', '') : ''}
-                                            onChange={(e) => updateRadiologyField(radiology.id, 'cost', e.target.value)}
-                                            className="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-500"
-                                            placeholder="Cost"
-                                            min="0"
-                                            step="0.01"
-                                          />
+                                        <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-green-600">
+                                          ₹{radiology.cost || 0}
                                         </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-center">
                                           <button
@@ -16528,106 +16381,13 @@ Dr. Murali B K
                             <div className="flex justify-between items-center mb-3">
                               <div className="flex items-center gap-3">
                                 <h5 className="font-medium text-gray-900">
-                                  Saved Mandatory Services ({savedMandatoryServicesData.length}) [refresh: {mandatoryServicesRefreshKey}]
+                                  Saved Mandatory Services ({savedMandatoryServicesData.length})
                                 </h5>
-                                <button
-                                  onClick={async () => {
-                                    console.log('🔄 [MANUAL REFRESH] User triggered manual mandatory services refresh');
-
-                                    // Direct database query to see raw data
-                                    console.log('🔍 [RAW DB CHECK] Checking raw database content...');
-                                    try {
-                                      const { data: rawData, error: rawError } = await supabase
-                                        .from('visit_mandatory_services')
-                                        .select('*')
-                                        .eq('visit_id', visitData?.id || visitId)
-                                        .abortSignal(new AbortController().signal); // Force fresh query
-
-                                      console.log('🔍 [RAW DB CHECK] Raw database results:', {
-                                        rawData,
-                                        rawError,
-                                        visitId: visitData?.id || visitId
-                                      });
-                                    } catch (dbError) {
-                                      console.error('❌ [RAW DB CHECK] Failed:', dbError);
-                                    }
-
-                                    // Enhanced manual refresh with comprehensive fallback
-                                    try {
-                                      console.log('🔄 [MANUAL REFRESH] Attempting comprehensive fetch...');
-                                      const refreshedData = await fetchSavedMandatoryServicesData();
-
-                                      console.log('🔄 [MANUAL REFRESH] Fetch completed:', {
-                                        refreshedData,
-                                        length: refreshedData?.length || 0
-                                      });
-
-                                      if (refreshedData && refreshedData.length > 0) {
-                                        toast.success(`✅ Manual refresh successful! Found ${refreshedData.length} services.`);
-
-                                        // Force UI update
-                                        setMandatoryServicesRefreshKey(prev => prev + 1);
-
-                                      } else {
-                                        console.log('⚠️ [MANUAL REFRESH] No data found, checking for alternative recovery...');
-
-                                        // Enhanced fallback: Try alternative visit UUID approach
-                                        try {
-                                          const { data: allVisits } = await supabase
-                                            .from('visits')
-                                            .select('id, visit_id')
-                                            .eq('visit_id', visitId);
-
-                                          console.log('🔄 [MANUAL FALLBACK] Alternative visit UUIDs:', allVisits);
-
-                                          if (allVisits && allVisits.length > 1) {
-                                            let foundAlternative = false;
-
-                                            for (const altVisit of allVisits) {
-                                              const { data: altData } = await supabase
-                                                .from('visit_mandatory_services')
-                                                .select('*')
-                                                .eq('visit_id', altVisit.id);
-
-                                              if (altData && altData.length > 0) {
-                                                console.log(`✅ [MANUAL FALLBACK] Found data with alternative UUID: ${altVisit.id}`);
-                                                toast.success(`Found ${altData.length} services using alternative method!`);
-                                                foundAlternative = true;
-
-                                                // Trigger a fresh fetch with corrected understanding
-                                                await fetchSavedMandatoryServicesData();
-                                                setMandatoryServicesRefreshKey(prev => prev + 1);
-                                                break;
-                                              }
-                                            }
-
-                                            if (!foundAlternative) {
-                                              toast.info('No mandatory services found in database for this visit.');
-                                            }
-                                          } else {
-                                            toast.info('No mandatory services found for this visit.');
-                                          }
-                                        } catch (fallbackError) {
-                                          console.error('❌ [MANUAL FALLBACK] Fallback failed:', fallbackError);
-                                          toast.info('No mandatory services found for this visit.');
-                                        }
-                                      }
-                                    } catch (error) {
-                                      console.error('❌ [MANUAL REFRESH] Manual refresh failed:', error);
-                                      toast.error('Manual refresh failed. Check console for details.');
-                                    }
-                                  }}
-                                  className="px-2 py-1 bg-orange-600 text-white text-xs rounded hover:bg-orange-700 transition-colors"
-                                  title="Manually refresh mandatory services"
-                                >
-                                  ⟳
-                                </button>
                               </div>
                               <div className="text-lg font-bold text-orange-600">
                                 Total: ₹{(() => {
                                   console.log(`🔍 [TOTAL CALC] Starting calculation for ${savedMandatoryServicesData.length} services`);
                                   console.log(`🔍 [TOTAL CALC] Services data:`, savedMandatoryServicesData);
-                                  console.log(`🔍 [TOTAL CALC] Force re-render check - timestamp: ${Date.now()}, refresh key: ${mandatoryServicesRefreshKey}`);
 
                                   const total = savedMandatoryServicesData.reduce((total, service, index) => {
                                     // Get quantity and rate for proper calculation

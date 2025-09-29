@@ -421,12 +421,26 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         return 0;
       }
 
-      // Calculate total using radiology costs
+      // Calculate total using quantity-based calculation from visit_radiology
       let total = 0;
       visitRadiologyData.forEach((visitRadiology: any) => {
-        const radiologyDetail = radiologyDetails.find((r: any) => r.id === visitRadiology.radiology_id);
-        const cost = parseFloat(radiologyDetail?.cost?.toString() || '0') || 0;
-        total += cost;
+        // Use quantity-based calculation from visit_radiology table
+        const quantity = visitRadiology.quantity || 1;
+        const unitRate = visitRadiology.unit_rate || 0;
+        const totalCost = visitRadiology.cost || 0;
+
+        // If we have proper quantity data, use the stored total cost
+        if (totalCost > 0) {
+          total += parseFloat(totalCost.toString()) || 0;
+        } else if (unitRate > 0) {
+          // Fallback: calculate from unit_rate * quantity
+          total += (parseFloat(unitRate.toString()) || 0) * quantity;
+        } else {
+          // Legacy fallback: use radiology table cost
+          const radiologyDetail = radiologyDetails.find((r: any) => r.id === visitRadiology.radiology_id);
+          const legacyCost = parseFloat(radiologyDetail?.cost?.toString() || '0') || 0;
+          total += legacyCost * quantity;
+        }
       });
       
       console.log('💰 Radiology total calculated:', total);
