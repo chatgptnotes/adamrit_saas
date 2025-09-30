@@ -136,15 +136,74 @@ const IpdDischargeSummary = () => {
   // OT Notes States
   const [stayNotes, setStayNotes] = useState('');
   const [stayNotesTemplates, setStayNotesTemplates] = useState([
-    { name: 'Patient Advice', content: 'Patient advised regarding medication compliance and follow-up care.' },
-    { name: 'Medication On Discharge', content: 'Continue prescribed medications as per discharge summary.' },
-    { name: 'OT Notes', content: 'Surgical procedure completed successfully without complications.' },
-    { name: 'Investigations During Stay', content: 'All investigations completed and results reviewed.' },
-    { name: 'Differential Diagnosis', content: 'Primary diagnosis confirmed based on clinical findings.' },
-    { name: 'Post-operative Care', content: 'Patient monitored post-operatively. Wound healing satisfactory.' }
+    {
+      name: 'discharge_summary',
+      content: `Ignore all previous instructions. You are a medical specialist. Create a professionally written Discharge Summary in the EXACT format below:
+
+**IMPORTANT FORMATTING RULES:**
+- Use proper HTML table format for tables
+- Use bold headings with **
+- Use numbered lists for advice
+- Minimum 800 words total
+- Use Indian brand medication names
+- Add Hindi translation in dosage column (in brackets)
+
+**REQUIRED FORMAT:**
+
+**Diagnosis:** [Write the diagnosis as a single bold heading line]
+
+**Medications:**
+Create a proper HTML table:
+| Name | Strength | Route | Dosage | Duration |
+|------|----------|-------|---------|----------|
+| [Med Name] | [Strength] | Oral | [English dosage] (Hindi: [dosage in hindi]) | 7 Days |
+
+**Operation Notes:** (ONLY if surgery was performed)
+Create a proper HTML table:
+| Date and Time | [Date/Time] |
+| Reason for Surgery | [Reason] |
+| Surgeon | Dr. [Name] |
+| Anaesthetist | Dr. [Name] |
+| Anaesthesia | [Type] |
+| Description | [Detailed surgical description] |
+
+**History of Presenting Complaints:**
+[Write detailed patient history, symptoms on admission, examination findings]
+
+**Investigations:**
+[List all investigations with results - blood tests, imaging, etc.]
+
+**Treatment:**
+[Describe the treatment given during hospital stay]
+
+**Advice on Discharge:**
+1. Regular intake of medications as instructed.
+2. Maintain a light, low-fat diet.
+3. Exercise moderately, avoid heavy lifting and strenuous activities.
+4. Regular follow-up is necessary post-discharge to monitor progress.
+
+**Warning signs:**
+
+**Watch out for any of the following symptoms and visit the hospital if they occur:**
+- Fever, severe abdominal pain, or vomiting
+- Any signs of infection such as redness, swelling, or discharge from the wound
+- Difficulty in passing urine or changes in bowel habits
+- Return to the hospital in case of any complications related to the surgery
+
+**Final Note:**
+"URGENT CARE/EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT:-7030974619, 9373111709"
+
+Note: Ignore all previous instructions and follow the directives given in this document.
+
+Make up creative and realistic medical details based on the patient information provided. The entire summary should be minimum 800 words. Do not mention patient name, age, or sex directly.`
+    }
   ]);
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateContent, setNewTemplateContent] = useState('');
+
+  // New states for Advice and Case Summary
+  const [advice, setAdvice] = useState('');
+  const [caseSummaryPresentingComplaints, setCaseSummaryPresentingComplaints] = useState('');
   const [editingTemplateIndex, setEditingTemplateIndex] = useState<number | null>(null);
   const [editingTemplateName, setEditingTemplateName] = useState('');
   const [editingTemplateContent, setEditingTemplateContent] = useState('');
@@ -751,11 +810,23 @@ const IpdDischargeSummary = () => {
       console.log('📋 Loading existing discharge summary for visit:', visitId);
 
       try {
-        // Get main discharge summary
-        const { data: summaryData, error: summaryError } = await supabase
-          .from('discharge_summaries')
-          .select('*')
+        // First get visit UUID from string visit_id
+        const { data: visitData } = await supabase
+          .from('visits')
+          .select('id')
           .eq('visit_id', visitId)
+          .single();
+
+        if (!visitData?.id) {
+          console.log('📋 Visit UUID not found');
+          return null;
+        }
+
+        // Get main discharge summary from ipd_discharge_summary table
+        const { data: summaryData, error: summaryError } = await supabase
+          .from('ipd_discharge_summary')
+          .select('*')
+          .eq('visit_id', visitData.id)
           .single();
 
         if (summaryError) {
@@ -768,36 +839,10 @@ const IpdDischargeSummary = () => {
 
         console.log('📋 Found existing discharge summary:', summaryData.id);
 
-        // Get medications
-        const { data: medicationsData, error: medicationsError } = await supabase
-          .from('discharge_medications')
-          .select('*')
-          .eq('discharge_summary_id', summaryData.id)
-          .order('medication_order');
-
-        if (medicationsError) throw medicationsError;
-
-        // Get examination data
-        const { data: examinationData, error: examinationError } = await supabase
-          .from('discharge_examinations')
-          .select('*')
-          .eq('discharge_summary_id', summaryData.id)
-          .single();
-
-        if (examinationError && examinationError.code !== 'PGRST116') {
-          throw examinationError;
-        }
-
-        // Get surgery details
-        const { data: surgeryData, error: surgeryError } = await supabase
-          .from('discharge_surgery_details')
-          .select('*')
-          .eq('discharge_summary_id', summaryData.id)
-          .single();
-
-        if (surgeryError && surgeryError.code !== 'PGRST116') {
-          throw surgeryError;
-        }
+        // Extract data from JSONB columns
+        const medicationsData = summaryData.discharge_medications || [];
+        const examinationData = summaryData.vital_signs || null;
+        const surgeryData = summaryData.procedures_performed || null;
 
         console.log('📋 Loaded discharge summary data:', {
           summary: !!summaryData,
@@ -808,7 +853,7 @@ const IpdDischargeSummary = () => {
 
         return {
           summary: summaryData,
-          medications: medicationsData || [],
+          medications: medicationsData,
           examination: examinationData,
           surgery: surgeryData
         };
@@ -863,9 +908,11 @@ const IpdDischargeSummary = () => {
         treatingConsultant: patientData.doctor_name || patientData.appointment_with || 'Unknown Doctor',
         otherConsultants: summary?.other_consultants || '',
         doa: patientData.admission_date ? format(new Date(patientData.admission_date), 'yyyy-MM-dd') : patientData.created_at ? format(new Date(patientData.created_at), 'yyyy-MM-dd') : '',
-        dateOfDischarge: patientData.discharge_date ? format(new Date(patientData.discharge_date), 'yyyy-MM-dd') : '',
+        // Set discharge date to current date if not already set
+        dateOfDischarge: patientData.discharge_date ? format(new Date(patientData.discharge_date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
         reasonOfDischarge: summary?.reason_of_discharge || 'Please select',
-        corporateType: patientData.corporate_name || patientData.insurance_company || ''
+        // Fetch corporate type from patients table
+        corporateType: patient?.corporate || patient?.corporate_type || patient?.insurance_company || ''
       });
 
       // Load existing discharge summary data if available
@@ -1085,14 +1132,16 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
 
         // Populate main fields
         if (summary) {
-          setDiagnosis(summary.diagnosis || '');
-          setInvestigations(summary.investigations || '');
-          setStayNotes(summary.stay_notes || '');
-          setTreatmentCondition(summary.treatment_condition || 'Satisfactory');
-          setTreatmentStatus(summary.treatment_status || 'Please select');
-          setReviewDate(summary.review_date || '2025-09-26');
+          setDiagnosis(summary.primary_diagnosis || '');
+          setInvestigations(summary.lab_investigations?.investigations_text || '');
+          setStayNotes(summary.ot_notes || '');
+          setCaseSummaryPresentingComplaints(summary.chief_complaints || '');
+          setAdvice(summary.discharge_advice || '');
+          setTreatmentCondition(summary.condition_on_discharge || 'Satisfactory');
+          setTreatmentStatus(summary.treatment_during_stay || 'Please select');
+          setReviewDate(summary.review_on_date ? format(new Date(summary.review_on_date), 'yyyy-MM-dd') : '2025-09-26');
           setResidentOnDischarge(summary.resident_on_discharge || 'Please select');
-          setEnableSmsAlert(summary.enable_sms_alert || false);
+          setEnableSmsAlert(summary.additional_data?.enable_sms_alert || false);
 
           // Update patient info
           setPatientInfo(prev => ({
@@ -1106,7 +1155,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
         if (medications && medications.length > 0) {
           const formattedMedications = medications.map((med, index) => ({
             id: (index + 1).toString(),
-            name: med.medication_name || '',
+            name: med.name || '',
             unit: med.unit || '',
             remark: med.remark || '',
             route: med.route || 'Select',
@@ -1114,12 +1163,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
             quantity: med.quantity || '',
             days: med.days || '0',
             startDate: med.start_date || '',
-            timing: {
-              morning: med.timing_morning || false,
-              afternoon: med.timing_afternoon || false,
-              evening: med.timing_evening || false,
-              night: med.timing_night || false
-            },
+            timing: med.timing || { morning: false, afternoon: false, evening: false, night: false },
             isSos: med.is_sos || false
           }));
 
@@ -1149,7 +1193,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
             anesthetist: surgery.anesthetist || '',
             anesthesia: surgery.anesthesia_type || '',
             implant: surgery.implant || '',
-            description: surgery.surgery_description || ''
+            description: surgery.description || ''
           });
           console.log('🏥 Populated surgery details');
         }
@@ -1162,48 +1206,6 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
   }, [existingDischargeSummary]);
 
-  // Error boundary to catch and properly handle database errors
-  React.useEffect(() => {
-    const originalConsoleError = console.error;
-    const originalConsoleWarn = console.warn;
-
-    // Filter out known database-related console spam
-    console.error = (...args) => {
-      const message = args.join(' ').toLowerCase();
-
-      // Allow important errors through but filter spam
-      if (message.includes('foreign key relationship') ||
-          message.includes('schema') ||
-          message.includes('column') && message.includes('does not exist') ||
-          message.includes('relation') && message.includes('does not exist') ||
-          message.includes('searched for a foreign key relationship')) {
-        // These are known issues with complex joins - suppress them
-        return;
-      }
-
-      // Log other errors normally
-      originalConsoleError(...args);
-    };
-
-    console.warn = (...args) => {
-      const message = args.join(' ').toLowerCase();
-
-      // Suppress specific warnings
-      if (message.includes('foreign key relationship') ||
-          message.includes('schema') && message.includes('public') ||
-          message.includes('relation') && message.includes('warning')) {
-        return;
-      }
-
-      originalConsoleWarn(...args);
-    };
-
-    // Cleanup function to restore original console methods
-    return () => {
-      console.error = originalConsoleError;
-      console.warn = originalConsoleWarn;
-    };
-  }, []);
 
   const addMedicationRow = () => {
     const newRow: MedicationRow = {
@@ -1330,137 +1332,190 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
         return;
       }
 
-      console.log('💾 Starting discharge summary save process...');
+      console.log('💾 Starting IPD discharge summary save process...');
+      console.log('📋 Patient Data:', patientData);
+      console.log('🔍 Visit ID (string):', visitId);
 
-      // Start a transaction by using multiple queries
-      // 1. First, get or create the visit UUID
+      // 1. Get visit and patient UUIDs
       let visitUUID = patientData.id;
+      let patientUUID = patientData.patients?.id;
+
+      console.log('🆔 Initial UUIDs - Visit:', visitUUID, 'Patient:', patientUUID);
+
       if (!visitUUID) {
-        const { data: visitData } = await supabase
+        console.log('⚠️ No visitUUID found, querying visits table...');
+        const { data: visitData, error: visitError } = await supabase
           .from('visits')
-          .select('id')
+          .select('id, patient_id')
           .eq('visit_id', visitId)
           .single();
+
+        if (visitError) {
+          console.error('❌ Error fetching visit data:', visitError);
+          throw new Error(`Could not find visit record: ${visitError.message}`);
+        }
+
         visitUUID = visitData?.id;
+        patientUUID = visitData?.patient_id;
+        console.log('✅ Fetched UUIDs - Visit:', visitUUID, 'Patient:', patientUUID);
       }
 
-      // 2. Prepare main discharge summary data
-      const dischargeData = {
-        visit_id: visitId,
-        visit_uuid: visitUUID,
-        diagnosis,
-        investigations,
-        stay_notes: stayNotes,
-        other_consultants: patientInfo.otherConsultants,
-        reason_of_discharge: patientInfo.reasonOfDischarge,
-        treatment_condition: treatmentCondition,
-        treatment_status: treatmentStatus,
-        review_date: reviewDate,
-        resident_on_discharge: residentOnDischarge,
-        enable_sms_alert: enableSmsAlert,
-        updated_at: new Date().toISOString()
+      // Validate required UUIDs
+      if (!visitUUID || !patientUUID) {
+        const errorMsg = `Missing required IDs - Visit UUID: ${visitUUID}, Patient UUID: ${patientUUID}`;
+        console.error('❌', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      // Validate required fields
+      if (!patientInfo.name) {
+        throw new Error('Patient name is required');
+      }
+      if (!patientInfo.doa) {
+        throw new Error('Admission date is required');
+      }
+
+      // Helper function to convert empty strings to null for date fields
+      const formatDate = (dateValue: any) => {
+        if (!dateValue || dateValue === '' || dateValue === 'Invalid Date') {
+          return null;
+        }
+        return dateValue;
       };
 
-      console.log('💾 Saving main discharge summary...', dischargeData);
+      // 2. Prepare discharge summary data matching the actual database schema
+      const dischargeData = {
+        // Foreign keys - use UUIDs as per schema
+        visit_id: visitUUID,
+        patient_id: patientUUID,
 
-      // 3. Upsert main discharge summary
-      const { data: dischargeSummary, error: summaryError } = await supabase
-        .from('discharge_summaries')
-        .upsert(dischargeData)
-        .select()
-        .single();
+        // Basic patient info (required fields)
+        patient_name: patientInfo.name,
+        reg_id: patientInfo.regId || null,
+        address: patientInfo.address || null,
+        age_sex: patientInfo.ageSex || null,
 
-      if (summaryError) throw summaryError;
+        // Dates - admission_date is required NOT NULL, others can be null
+        admission_date: formatDate(patientInfo.doa),
+        date_of_discharge: formatDate(patientInfo.dateOfDischarge),
 
-      console.log('✅ Discharge summary saved:', dischargeSummary.id);
+        // Consultants
+        treating_consultant: patientInfo.treatingConsultant || null,
+        other_consultants: patientInfo.otherConsultants || null,
+        reason_of_discharge: patientInfo.reasonOfDischarge || null,
+        corporate_type: patientInfo.corporateType || null,
 
-      // 4. Save medications to junction table
-      if (medicationRows && medicationRows.length > 0) {
-        console.log('💊 Saving medications...', medicationRows.length, 'medications');
+        // Medical data - using correct schema column names
+        primary_diagnosis: diagnosis || null,
+        ot_notes: stayNotes || null,
+        chief_complaints: caseSummaryPresentingComplaints || null,
+        discharge_advice: advice || null,
 
-        // Delete existing medications for this discharge summary
-        await supabase
-          .from('discharge_medications')
-          .delete()
-          .eq('discharge_summary_id', dischargeSummary.id);
+        // Treatment info - using correct schema column names
+        condition_on_discharge: treatmentCondition || null,
+        treatment_during_stay: treatmentStatus || null,
+        review_on_date: formatDate(reviewDate),
+        resident_on_discharge: residentOnDischarge || null,
 
-        // Insert new medications
-        const medicationsToInsert = medicationRows
-          .filter(med => med.name && med.name.trim() !== '') // Only save non-empty medications
-          .map((med, index) => ({
-            discharge_summary_id: dischargeSummary.id,
-            medication_name: med.name,
-            unit: med.unit,
-            remark: med.remark,
-            route: med.route,
-            dose: med.dose,
-            quantity: med.quantity,
-            days: med.days,
-            start_date: med.startDate ? med.startDate : null,
-            timing_morning: med.timing?.morning || false,
-            timing_afternoon: med.timing?.afternoon || false,
-            timing_evening: med.timing?.evening || false,
-            timing_night: med.timing?.night || false,
-            is_sos: med.isSos || false,
-            medication_order: index
-          }));
+        // Store investigations in JSONB column
+        lab_investigations: {
+          investigations_text: investigations
+        },
 
-        if (medicationsToInsert.length > 0) {
-          const { error: medicationsError } = await supabase
-            .from('discharge_medications')
-            .insert(medicationsToInsert);
-
-          if (medicationsError) throw medicationsError;
-          console.log('✅ Medications saved:', medicationsToInsert.length);
-        }
-      }
-
-      // 5. Save examination data
-      if (examination && Object.keys(examination).length > 0) {
-        console.log('🔍 Saving examination data...', examination);
-
-        const examinationData = {
-          discharge_summary_id: dischargeSummary.id,
+        // Examination data in vital_signs JSONB column
+        vital_signs: {
           temperature: examination.temp,
           pulse_rate: examination.pr,
           respiratory_rate: examination.rr,
           blood_pressure: examination.bp,
           spo2: examination.spo2,
           examination_details: examination.details
-        };
+        },
 
-        const { error: examinationError } = await supabase
-          .from('discharge_examinations')
-          .upsert(examinationData);
+        // Medications in discharge_medications JSONB column
+        discharge_medications: medicationRows.map(med => ({
+          name: med.name,
+          unit: med.unit,
+          dose: med.dose,
+          quantity: med.quantity,
+          days: med.days,
+          route: med.route,
+          timing: med.timing,
+          is_sos: med.isSos,
+          remark: med.remark
+        })),
 
-        if (examinationError) throw examinationError;
-        console.log('✅ Examination data saved');
-      }
-
-      // 6. Save surgery details
-      if (surgeryDetails && Object.keys(surgeryDetails).some(key => surgeryDetails[key])) {
-        console.log('🏥 Saving surgery details...', surgeryDetails);
-
-        const surgeryData = {
-          discharge_summary_id: dischargeSummary.id,
-          surgery_date: surgeryDetails.date ? new Date(surgeryDetails.date).toISOString() : null,
+        // Surgery details in procedures_performed JSONB column
+        procedures_performed: {
+          surgery_date: surgeryDetails.date,
           procedure_performed: surgeryDetails.procedurePerformed,
           surgeon: surgeryDetails.surgeon,
           anesthetist: surgeryDetails.anesthetist,
           anesthesia_type: surgeryDetails.anesthesia,
           implant: surgeryDetails.implant,
-          surgery_description: surgeryDetails.description
-        };
+          description: surgeryDetails.description
+        },
 
-        const { error: surgeryError } = await supabase
-          .from('discharge_surgery_details')
-          .upsert(surgeryData);
+        // Store original visit_id string in additional_data for reference
+        additional_data: {
+          visit_id_string: visitId,
+          enable_sms_alert: enableSmsAlert
+        }
+      };
 
-        if (surgeryError) throw surgeryError;
-        console.log('✅ Surgery details saved');
+      console.log('💾 Saving IPD discharge summary with data:', JSON.stringify(dischargeData, null, 2));
+
+      // 3. Check if a discharge summary already exists for this visit
+      const { data: existingRecord } = await supabase
+        .from('ipd_discharge_summary')
+        .select('id')
+        .eq('visit_id', visitUUID)
+        .maybeSingle();
+
+      let dischargeSummary, summaryError;
+
+      if (existingRecord) {
+        // Update existing record
+        console.log('📝 Updating existing discharge summary:', existingRecord.id);
+        const result = await supabase
+          .from('ipd_discharge_summary')
+          .update(dischargeData)
+          .eq('id', existingRecord.id)
+          .select()
+          .single();
+        dischargeSummary = result.data;
+        summaryError = result.error;
+      } else {
+        // Insert new record
+        console.log('➕ Inserting new discharge summary');
+        const result = await supabase
+          .from('ipd_discharge_summary')
+          .insert(dischargeData)
+          .select()
+          .single();
+        dischargeSummary = result.data;
+        summaryError = result.error;
       }
 
-      console.log('🎉 All discharge summary data saved successfully!');
+      if (summaryError) {
+        console.error('❌ Supabase Error Details:', {
+          message: summaryError.message,
+          details: summaryError.details,
+          hint: summaryError.hint,
+          code: summaryError.code
+        });
+        throw new Error(`Database error: ${summaryError.message}${summaryError.hint ? ' - ' + summaryError.hint : ''}`);
+      }
+
+      console.log('✅ IPD discharge summary saved successfully:', dischargeSummary.id);
+      console.log('📋 Summary contains:', {
+        medications: medicationRows.length,
+        investigations: investigations.length,
+        diagnosis: diagnosis ? 'Yes' : 'No',
+        stay_notes: stayNotes ? 'Yes' : 'No'
+      });
+
+      console.log('🎉 IPD discharge summary saved to database successfully!');
 
       toast({
         title: "Success",
@@ -1476,12 +1531,537 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
   };
 
-  const handlePrintPreview = () => {
-    // Here you would generate and show print preview
-    toast({
-      title: "Print Preview",
-      description: "Opening print preview...",
-    });
+  const handlePrintPreview = async () => {
+    try {
+      toast({
+        title: "Generating Print Preview",
+        description: "Loading discharge summary for printing...",
+      });
+
+      console.log('🖨️ Fetching data for print preview...');
+
+      // Get visit UUID
+      const { data: visitData } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (!visitData?.id) {
+        toast({
+          title: "Error",
+          description: "Visit not found",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Fetch discharge summary
+      const { data: summaryData, error: summaryError } = await supabase
+        .from('ipd_discharge_summary')
+        .select('*')
+        .eq('visit_id', visitData.id)
+        .single();
+
+      if (summaryError || !summaryData) {
+        toast({
+          title: "Error",
+          description: "No discharge summary found. Please save first.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      console.log('✅ Summary data loaded for print:', summaryData);
+
+      // Generate print HTML
+      const printHTML = generatePrintHTML(summaryData, patientInfo);
+
+      // Open print preview in new window
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(printHTML);
+        printWindow.document.close();
+
+        // Wait for content to load then trigger print
+        printWindow.onload = () => {
+          printWindow.focus();
+          printWindow.print();
+        };
+
+        toast({
+          title: "Success",
+          description: "Print preview opened successfully!",
+        });
+      }
+
+    } catch (error) {
+      console.error('❌ Print preview error:', error);
+      toast({
+        title: "Error",
+        description: `Failed to generate print preview: ${error.message}`,
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Function to generate formatted print HTML
+  const generatePrintHTML = (summaryData: any, patientInfo: any) => {
+    const currentDate = format(new Date(), 'dd/MM/yyyy');
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Discharge Summary - ${patientInfo.name}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.4;
+      color: #000;
+    }
+
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #000;
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+    }
+
+    .header h1 {
+      font-size: 18pt;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .patient-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      border: 1px solid #000;
+      padding: 10px;
+      margin-bottom: 15px;
+    }
+
+    .patient-grid-item {
+      display: flex;
+      font-size: 10pt;
+    }
+
+    .patient-grid-item strong {
+      min-width: 120px;
+      font-weight: bold;
+    }
+
+    .section {
+      margin-bottom: 15px;
+      page-break-inside: avoid;
+    }
+
+    .section-title {
+      font-weight: bold;
+      font-size: 12pt;
+      background-color: #f0f0f0;
+      padding: 5px 10px;
+      border-left: 4px solid #333;
+      margin-bottom: 8px;
+    }
+
+    .section-content {
+      padding-left: 10px;
+      text-align: justify;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+      font-size: 10pt;
+    }
+
+    table, th, td {
+      border: 1px solid #000;
+    }
+
+    th {
+      background-color: #e0e0e0;
+      font-weight: bold;
+      padding: 6px;
+      text-align: left;
+    }
+
+    td {
+      padding: 6px;
+    }
+
+    .footer {
+      margin-top: 30px;
+      border-top: 1px solid #000;
+      padding-top: 15px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .emergency-note {
+      text-align: center;
+      font-weight: bold;
+      margin-top: 20px;
+      padding: 10px;
+      border: 2px solid #000;
+      background-color: #fff3cd;
+    }
+
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .no-print {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Discharge Summary</h1>
+  </div>
+
+  <div class="patient-grid">
+    <div class="patient-grid-item">
+      <strong>Name:</strong>
+      <span>${patientInfo.name}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Patient ID:</strong>
+      <span>${summaryData.reg_id || patientInfo.regId}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Primary Care Provider:</strong>
+      <span>${summaryData.treating_consultant || patientInfo.treatingConsultant}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Registration ID:</strong>
+      <span>${summaryData.reg_id || patientInfo.regId}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Age/Gender:</strong>
+      <span>${patientInfo.ageSex}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Address:</strong>
+      <span>${summaryData.address || patientInfo.address}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Tariff:</strong>
+      <span>${summaryData.corporate_type || patientInfo.corporateType || 'Private'}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Discharge Date:</strong>
+      <span>${summaryData.date_of_discharge ? format(new Date(summaryData.date_of_discharge), 'dd/MM/yyyy') : currentDate}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Admission Date:</strong>
+      <span>${summaryData.admission_date ? format(new Date(summaryData.admission_date), 'dd/MM/yyyy') : ''}</span>
+    </div>
+    <div class="patient-grid-item">
+      <strong>Discharge Protocol:</strong>
+      <span>${summaryData.reason_of_discharge || 'GAMA'}</span>
+    </div>
+  </div>
+
+  ${summaryData.condition_on_discharge ? `
+  <div class="section">
+    <div class="section-title">Present Condition</div>
+    <div class="section-content">${summaryData.condition_on_discharge}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.primary_diagnosis ? `
+  <div class="section">
+    <div class="section-title">DIAGNOSIS:</div>
+    <div class="section-content">${summaryData.primary_diagnosis}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.discharge_medications && summaryData.discharge_medications.length > 0 ? `
+  <div class="section">
+    <div class="section-title">MEDICATION:</div>
+    <div class="section-content">
+      <p style="margin-bottom: 5px;">Following table represents the medication prescribed to the patient on discharge:</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Strength</th>
+            <th>Route</th>
+            <th>Dosage</th>
+            <th>Days</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${summaryData.discharge_medications.map(med => `
+            <tr>
+              <td>${med.name || ''}</td>
+              <td>${med.dose || ''}</td>
+              <td>${med.route || 'IV'}</td>
+              <td>${formatMedicationTiming(med.timing)}</td>
+              <td>${med.days || ''}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  ` : ''}
+
+  ${summaryData.chief_complaints ? `
+  <div class="section">
+    <div class="section-title">CLINICAL COURSE:</div>
+    <div class="section-content">${summaryData.chief_complaints}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.treatment_during_stay ? `
+  <div class="section">
+    <div class="section-title">DISCHARGE INSTRUCTION:</div>
+    <div class="section-content">${summaryData.treatment_during_stay}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.ot_notes ? `
+  <div class="section">
+    <div class="section-title">IMPORTANT:</div>
+    <div class="section-content">${summaryData.ot_notes.replace(/\n/g, '<br>')}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.discharge_advice ? `
+  <div class="section">
+    <div class="section-title">ADVICE:</div>
+    <div class="section-content">${summaryData.discharge_advice.replace(/\n/g, '<br>')}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.lab_investigations?.investigations_text ? `
+  <div class="section">
+    <div class="section-title">INVESTIGATIONS:</div>
+    <div class="section-content">${summaryData.lab_investigations.investigations_text.replace(/\n/g, '<br>')}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.review_on_date ? `
+  <div class="section">
+    <div class="section-title">Review on:</div>
+    <div class="section-content">
+      <strong>Reviewed On Discharge:</strong> ${format(new Date(summaryData.review_on_date), 'dd/MM/yyyy')}
+    </div>
+  </div>
+  ` : ''}
+
+  <div class="footer">
+    <div>
+      <strong>Date:</strong> ${currentDate}
+    </div>
+    <div style="text-align: right;">
+      <strong>${summaryData.treating_consultant || 'Dr. Amod Shirode (IMS Residence)'}</strong>
+    </div>
+  </div>
+
+  <div class="emergency-note">
+    <strong>Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.</strong>
+  </div>
+
+  <script>
+    // Helper function to format medication timing
+    function formatMedicationTiming(timing) {
+      if (!timing) return '';
+      const times = [];
+      if (timing.morning) times.push('सुबह (Morning)');
+      if (timing.afternoon) times.push('दोपहर (Afternoon)');
+      if (timing.evening) times.push('शाम (Evening)');
+      if (timing.night) times.push('रात (Night)');
+      return times.join(', ') || '';
+    }
+  </script>
+</body>
+</html>
+    `;
+  };
+
+  // Helper function to format medication timing for print
+  const formatMedicationTiming = (timing: any) => {
+    if (!timing) return '';
+    const times = [];
+    if (timing.morning) times.push('सुबह (Morning)');
+    if (timing.afternoon) times.push('दोपहर (Afternoon)');
+    if (timing.evening) times.push('शाम (Evening)');
+    if (timing.night) times.push('रात (Night)');
+    return times.join(', ') || '';
+  };
+
+  // Function to fetch all discharge summary data and display in textbox
+  const handleFetchDischargeSummaryData = async () => {
+    try {
+      toast({
+        title: "Fetching Data",
+        description: "Loading discharge summary data from database...",
+      });
+
+      console.log('📥 Fetching discharge summary data for visit:', visitId);
+
+      // Get visit UUID from string visit_id
+      const { data: visitData } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (!visitData?.id) {
+        toast({
+          title: "Error",
+          description: "Visit not found",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Get discharge summary from ipd_discharge_summary table
+      const { data: summaryData, error: summaryError } = await supabase
+        .from('ipd_discharge_summary')
+        .select('*')
+        .eq('visit_id', visitData.id)
+        .single();
+
+      if (summaryError) {
+        if (summaryError.code === 'PGRST116') {
+          toast({
+            title: "No Data Found",
+            description: "No saved discharge summary found for this patient",
+            variant: "destructive"
+          });
+        } else {
+          throw summaryError;
+        }
+        return;
+      }
+
+      console.log('✅ Found discharge summary data:', summaryData);
+
+      // Format all data into a readable text format for the textbox
+      let formattedText = '';
+
+      // Diagnosis
+      if (summaryData.primary_diagnosis) {
+        formattedText += `DIAGNOSIS:\n${summaryData.primary_diagnosis}\n\n`;
+      }
+
+      // Investigations
+      if (summaryData.lab_investigations?.investigations_text) {
+        formattedText += `INVESTIGATIONS:\n${summaryData.lab_investigations.investigations_text}\n\n`;
+      }
+
+      // Case Summary Presenting Complaints
+      if (summaryData.chief_complaints) {
+        formattedText += `CASE SUMMARY / PRESENTING COMPLAINTS:\n${summaryData.chief_complaints}\n\n`;
+      }
+
+      // Advice
+      if (summaryData.discharge_advice) {
+        formattedText += `ADVICE:\n${summaryData.discharge_advice}\n\n`;
+      }
+
+      // Examination / Vital Signs
+      if (summaryData.vital_signs) {
+        formattedText += `EXAMINATION / VITAL SIGNS:\n`;
+        if (summaryData.vital_signs.temperature) formattedText += `Temperature: ${summaryData.vital_signs.temperature}°F\n`;
+        if (summaryData.vital_signs.pulse_rate) formattedText += `Pulse Rate: ${summaryData.vital_signs.pulse_rate}/min\n`;
+        if (summaryData.vital_signs.respiratory_rate) formattedText += `Respiratory Rate: ${summaryData.vital_signs.respiratory_rate}/min\n`;
+        if (summaryData.vital_signs.blood_pressure) formattedText += `Blood Pressure: ${summaryData.vital_signs.blood_pressure} mmHg\n`;
+        if (summaryData.vital_signs.spo2) formattedText += `SpO2: ${summaryData.vital_signs.spo2}%\n`;
+        if (summaryData.vital_signs.examination_details) formattedText += `Details: ${summaryData.vital_signs.examination_details}\n`;
+        formattedText += '\n';
+      }
+
+      // Medications (Treatment on Discharge)
+      if (summaryData.discharge_medications && Array.isArray(summaryData.discharge_medications) && summaryData.discharge_medications.length > 0) {
+        formattedText += `MEDICATIONS (TREATMENT ON DISCHARGE):\n`;
+        summaryData.discharge_medications.forEach((med, index) => {
+          formattedText += `${index + 1}. ${med.name || 'N/A'}`;
+          if (med.dose) formattedText += ` - ${med.dose}`;
+          if (med.route) formattedText += ` (${med.route})`;
+          if (med.days) formattedText += ` for ${med.days} days`;
+          const timings = [];
+          if (med.timing?.morning) timings.push('Morning');
+          if (med.timing?.afternoon) timings.push('Afternoon');
+          if (med.timing?.evening) timings.push('Evening');
+          if (med.timing?.night) timings.push('Night');
+          if (timings.length > 0) formattedText += ` - ${timings.join(', ')}`;
+          if (med.remark) formattedText += ` | Remark: ${med.remark}`;
+          formattedText += '\n';
+        });
+        formattedText += '\n';
+      }
+
+      // Surgery Details
+      if (summaryData.procedures_performed) {
+        formattedText += `SURGERY DETAILS:\n`;
+        if (summaryData.procedures_performed.surgery_date) {
+          formattedText += `Date: ${format(new Date(summaryData.procedures_performed.surgery_date), 'dd-MM-yyyy HH:mm')}\n`;
+        }
+        if (summaryData.procedures_performed.procedure_performed) {
+          formattedText += `Procedure: ${summaryData.procedures_performed.procedure_performed}\n`;
+        }
+        if (summaryData.procedures_performed.surgeon) {
+          formattedText += `Surgeon: ${summaryData.procedures_performed.surgeon}\n`;
+        }
+        if (summaryData.procedures_performed.anesthetist) {
+          formattedText += `Anesthetist: ${summaryData.procedures_performed.anesthetist}\n`;
+        }
+        if (summaryData.procedures_performed.anesthesia_type) {
+          formattedText += `Anesthesia: ${summaryData.procedures_performed.anesthesia_type}\n`;
+        }
+        if (summaryData.procedures_performed.implant) {
+          formattedText += `Implant: ${summaryData.procedures_performed.implant}\n`;
+        }
+        if (summaryData.procedures_performed.description) {
+          formattedText += `Description: ${summaryData.procedures_performed.description}\n`;
+        }
+        formattedText += '\n';
+      }
+
+      // Display formatted text in the newTemplateContent textarea
+      setNewTemplateContent(formattedText);
+
+      toast({
+        title: "Success",
+        description: "Discharge summary data loaded successfully!",
+      });
+
+      console.log('✅ Discharge summary data formatted and displayed');
+
+    } catch (error) {
+      console.error('❌ Error fetching discharge summary data:', error);
+      toast({
+        title: "Error",
+        description: `Failed to fetch data: ${error.message}`,
+        variant: "destructive"
+      });
+    }
   };
 
   // Function to manually fetch investigations data (lab + radiology)
@@ -1837,7 +2417,8 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
   // Create a fallback component that shows a working form even when no data exists
   const renderFallbackForm = () => {
     return (
-      <div className="container mx-auto p-6 space-y-6">
+      <form id="discharge_summaryForm" onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
+        <div className="container mx-auto p-6 space-y-6">
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
           <div className="flex items-center">
             <div className="text-yellow-800">
@@ -1971,7 +2552,8 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
             Back to Dashboard
           </Button>
         </div>
-      </div>
+        </div>
+      </form>
     );
   };
 
@@ -1981,7 +2563,8 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <form id="discharge_summaryForm" onSubmit={(e) => { e.preventDefault(); handleSave(); }}>
+      <div className="container mx-auto p-6 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">
           IPD Discharge Summary
@@ -2142,6 +2725,36 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
               className="min-h-[120px]"
             />
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Case Summary Presenting Complaints */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Case Summary Presenting Complaints:</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            value={caseSummaryPresentingComplaints}
+            onChange={(e) => setCaseSummaryPresentingComplaints(e.target.value)}
+            placeholder="Enter case summary and presenting complaints..."
+            className="min-h-[120px]"
+          />
+        </CardContent>
+      </Card>
+
+      {/* Advice */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Advice:</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Textarea
+            value={advice}
+            onChange={(e) => setAdvice(e.target.value)}
+            placeholder="Enter discharge advice..."
+            className="min-h-[120px]"
+          />
         </CardContent>
       </Card>
 
@@ -2422,28 +3035,6 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <div className="space-y-2">
-              <Label>Templates:</Label>
-              <div className="border rounded p-2 h-32 overflow-y-auto">
-                {examinationTemplates.map((template, index) => (
-                  <div key={index} className="text-sm p-1 hover:bg-gray-50 cursor-pointer"
-                       onClick={() => setExamination({...examination, details: examination.details + template})}>
-                    {template}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>Examination Details:</Label>
-              <Textarea
-                value={examination.details}
-                onChange={(e) => setExamination({...examination, details: e.target.value})}
-                placeholder="Enter examination details..."
-                className="min-h-[120px]"
-              />
-            </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -2704,7 +3295,45 @@ Enter surgical procedure description here...`}
                         ) : (
                           <>
                             <div className="flex items-start justify-between">
-                              <div className="flex-1 cursor-pointer" onClick={() => setStayNotes(prev => prev + (prev ? '\n\n' : '') + template.content)}>
+                              <div className="flex-1 cursor-pointer" onClick={() => {
+                                // Build patient details context
+                                let patientContext = `\n\nPATIENT DETAILS:\n`;
+                                patientContext += `Name: ${patientInfo.name}\n`;
+                                patientContext += `Reg ID: ${patientInfo.regId}\n`;
+                                patientContext += `Age/Sex: ${patientInfo.ageSex}\n`;
+                                patientContext += `Address: ${patientInfo.address}\n`;
+                                patientContext += `Admission Date: ${patientInfo.doa}\n`;
+                                patientContext += `Discharge Date: ${patientInfo.dateOfDischarge}\n`;
+                                patientContext += `Treating Consultant: ${patientInfo.treatingConsultant}\n`;
+                                if (patientInfo.corporateType) patientContext += `Corporate Type: ${patientInfo.corporateType}\n`;
+
+                                // Add diagnosis if available
+                                if (diagnosis) {
+                                  patientContext += `\nDIAGNOSIS:\n${diagnosis}\n`;
+                                }
+
+                                // Add investigations if available
+                                if (investigations) {
+                                  patientContext += `\nINVESTIGATIONS:\n${investigations}\n`;
+                                }
+
+                                // Add surgery details if available
+                                if (surgeryDetails.procedurePerformed) {
+                                  patientContext += `\nSURGERY PERFORMED:\n`;
+                                  patientContext += `Procedure: ${surgeryDetails.procedurePerformed}\n`;
+                                  if (surgeryDetails.surgeon) patientContext += `Surgeon: ${surgeryDetails.surgeon}\n`;
+                                  if (surgeryDetails.anesthetist) patientContext += `Anesthetist: ${surgeryDetails.anesthetist}\n`;
+                                  if (surgeryDetails.date) patientContext += `Date: ${surgeryDetails.date}\n`;
+                                }
+
+                                // Add the template content with patient context to newTemplateContent textbox (above Fetch Data button)
+                                // Preserve existing content if any
+                                setNewTemplateContent(prev => {
+                                  const newContent = template.content + patientContext;
+                                  // If there's already content, append with separator, otherwise just set new content
+                                  return prev ? prev + '\n\n---\n\n' + newContent : newContent;
+                                });
+                              }}>
                                 <div className="text-sm font-medium text-gray-800 mb-1">{template.name}</div>
                                 <div className="text-xs text-gray-600 line-clamp-2">{template.content}</div>
                               </div>
@@ -2764,12 +3393,78 @@ Enter surgical procedure description here...`}
                   />
                   <div className="flex space-x-2">
                     <Button
+                      type="button"
                       size="sm"
                       className="bg-blue-600 hover:bg-blue-700 text-white"
-                      onClick={() => {
-                        if (newTemplateContent.trim()) {
-                          setStayNotes(prev => prev + (prev ? '\n\n' : '') + newTemplateContent.trim());
-                          setNewTemplateContent('');
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        if (!newTemplateContent.trim()) {
+                          toast({
+                            title: "Error",
+                            description: "Please add content to send to ChatGPT",
+                            variant: "destructive"
+                          });
+                          return;
+                        }
+
+                        try {
+                          toast({
+                            title: "Processing",
+                            description: "Sending request to ChatGPT...",
+                          });
+
+                          console.log('🤖 Sending to ChatGPT:', newTemplateContent);
+
+                          // Call OpenAI API
+                          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY}`
+                            },
+                            body: JSON.stringify({
+                              model: 'gpt-4',
+                              messages: [
+                                {
+                                  role: 'user',
+                                  content: newTemplateContent
+                                }
+                              ],
+                              temperature: 0.7,
+                              max_tokens: 2000
+                            })
+                          });
+
+                          if (!response.ok) {
+                            throw new Error(`OpenAI API error: ${response.statusText}`);
+                          }
+
+                          const data = await response.json();
+                          const generatedSummary = data.choices[0]?.message?.content;
+
+                          if (generatedSummary) {
+                            // Display generated summary in Stay Notes box
+                            setStayNotes(generatedSummary);
+
+                            toast({
+                              title: "Success",
+                              description: "Discharge summary generated successfully!",
+                            });
+
+                            console.log('✅ Generated Summary:', generatedSummary);
+                          } else {
+                            throw new Error('No response from ChatGPT');
+                          }
+
+                        } catch (error) {
+                          console.error('❌ ChatGPT Error:', error);
+                          toast({
+                            title: "Error",
+                            description: `Failed to generate summary: ${error.message}`,
+                            variant: "destructive"
+                          });
                         }
                       }}
                     >
@@ -2778,6 +3473,7 @@ Enter surgical procedure description here...`}
                     <Button
                       size="sm"
                       className="bg-blue-600 hover:bg-blue-700 text-white"
+                      onClick={handleFetchDischargeSummaryData}
                     >
                       Fetch Data
                     </Button>
@@ -2877,7 +3573,8 @@ Enter surgical procedure description here...`}
           Close
         </Button>
       </div>
-    </div>
+      </div>
+    </form>
   );
 };
 
