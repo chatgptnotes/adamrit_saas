@@ -53,6 +53,7 @@ const TodaysIpdDashboard = () => {
   const [billingStatusFilter, setBillingStatusFilter] = useState('');
   const [bunchNumberInputs, setBunchNumberInputs] = useState({});
   const [bunchFilter, setBunchFilter] = useState('');
+  const [corporateFilter, setCorporateFilter] = useState('');
   const [referralLetterStatus, setReferralLetterStatus] = useState<Record<string, boolean>>({});
   const [commentDialogs, setCommentDialogs] = useState<Record<string, boolean>>({});
   const [commentTexts, setCommentTexts] = useState<Record<string, string>>({});
@@ -1130,6 +1131,24 @@ const TodaysIpdDashboard = () => {
   };
 
 
+  // Fetch corporates from corporate table
+  const { data: corporates = [] } = useQuery({
+    queryKey: ['corporates'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('corporate')
+        .select('id, name')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching corporates:', error);
+        return [];
+      }
+
+      return data || [];
+    }
+  });
+
   const { data: todaysVisits = [], isLoading, refetch } = useQuery({
     queryKey: ['todays-visits', hospitalConfig?.name],
     queryFn: async () => {
@@ -1300,6 +1319,9 @@ const TodaysIpdDashboard = () => {
     const matchesBunch = !bunchFilter ||
       visit.bunch_no === bunchFilter;
 
+    const matchesCorporate = !corporateFilter ||
+      visit.patients?.corporate === corporateFilter;
+
     const includeBy = (selected: string[], value?: string | null) =>
       selected.length === 0 || (value ? selected.includes(value) : false);
 
@@ -1309,7 +1331,7 @@ const TodaysIpdDashboard = () => {
     const matchesExtStay = includeBy(extensionOfStayFilter, visit.extension_of_stay);
     const matchesAddAppr = includeBy(additionalApprovalsFilter, visit.additional_approvals);
 
-    return matchesSearch && matchesBillingExecutive && matchesBillingStatus && matchesBunch && matchesFile && matchesCondSub && matchesCondInt && matchesExtStay && matchesAddAppr;
+    return matchesSearch && matchesBillingExecutive && matchesBillingStatus && matchesBunch && matchesCorporate && matchesFile && matchesCondSub && matchesCondInt && matchesExtStay && matchesAddAppr;
   });
 
   const formatTime = (dateString: string) => {
@@ -1904,6 +1926,18 @@ const TodaysIpdDashboard = () => {
               ].map((opt) => (
                 <option key={opt} value={opt}>
                   {opt === 'Bill Completed' ? 'Bill PDF Completed' : (opt === 'Bill Submitted' ? 'Bill submitted - DSC done' : opt)}
+                </option>
+              ))}
+            </select>
+            <select
+              value={corporateFilter}
+              onChange={(e) => setCorporateFilter(e.target.value)}
+              className="w-48 h-10 text-sm border border-gray-300 rounded-md px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Corporates</option>
+              {corporates.map((corporate) => (
+                <option key={corporate.id} value={corporate.name}>
+                  {corporate.name}
                 </option>
               ))}
             </select>

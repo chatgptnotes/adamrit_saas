@@ -1469,13 +1469,36 @@ PLEASE CONTACT: 7030974619, 9373111709.
 
   // Open AI generation modal with prompt and data editing
   const handleAIGenerate = async () => {
-    // Declare medicationsData outside try block to fix scope issue
+    console.log('🚀 handleAIGenerate started');
+
+    // Declare ALL variables at the very beginning to ensure proper scope
+    let existingDiagnosis = ''; // Initialize with empty string first
     let medicationsData = [];
 
+    // Main try block
     try {
+      console.log('📝 Initializing AI generation...');
+
       if (!patient) {
         alert('Please fetch patient data first before generating AI summary.');
         return;
+      }
+
+      // Extract existing diagnosis from current discharge summary to preserve it
+      const existingContent = dischargeSummaryText || '';
+      console.log('📄 Existing content length:', existingContent.length);
+
+      if (existingContent) {
+        const diagnosisMatch = existingContent.match(/Diagnosis:\s*([^\n]+)/i);
+        if (diagnosisMatch && diagnosisMatch[1]) {
+          existingDiagnosis = diagnosisMatch[1].trim();
+          console.log('📋 Preserving existing diagnosis:', existingDiagnosis);
+        } else {
+          console.log('📋 No existing diagnosis found in content');
+          existingDiagnosis = ''; // Explicitly set to empty string
+        }
+      } else {
+        existingDiagnosis = ''; // Explicitly set to empty string if no content
       }
 
     // First ensure we have fetched all required data
@@ -1611,8 +1634,9 @@ PLEASE CONTACT: 7030974619, 9373111709.
     const complaints = visitDiagnosisLocal?.complaints || [patient.reason_for_visit || 'General consultation'];
 
     // Prepare patient data for editing
-    // Use visitDiagnosisLocal for diagnosis if available, otherwise fall back to patient.diagnosis
-    const primaryDiagnosis = visitDiagnosisLocal?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded';
+    // Use existing diagnosis from the summary if available (to preserve manual edits),
+    // otherwise use visitDiagnosisLocal or patient.diagnosis
+    const primaryDiagnosis = existingDiagnosis || visitDiagnosisLocal?.primaryDiagnosis || patient.diagnosis || 'No diagnosis recorded';
     const secondaryDiagnoses = visitDiagnosisLocal?.secondaryDiagnoses || [];
     const complicationsData = complicationsLocal || [];
     // Convert medication objects to strings for parseMedication function
@@ -2130,8 +2154,18 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
       const finalSummary = aiGeneratedSummary.includes('<') && aiGeneratedSummary.includes('>')
         ? htmlToPlainText(aiGeneratedSummary)
         : aiGeneratedSummary;
+
+      // Preserve existing diagnosis if it was manually edited
+      // The AI-generated content already includes the preserved diagnosis in primaryDiagnosis variable
+      // so the finalSummary should already have the correct diagnosis
       setDischargeSummaryText(finalSummary);
-      alert('✅ AI-powered discharge summary generated successfully using edited patient data!');
+
+      // Use safer check for existingDiagnosis with proper variable scope
+      const diagnosisWasPreserved = (typeof existingDiagnosis !== 'undefined' && existingDiagnosis && existingDiagnosis.length > 0);
+      const preservedMessage = diagnosisWasPreserved
+        ? '✅ AI-powered discharge summary generated successfully! Your existing diagnosis has been preserved.'
+        : '✅ AI-powered discharge summary generated successfully using edited patient data!';
+      alert(preservedMessage);
 
     } catch (error) {
       console.error('🚨 DETAILED ERROR ANALYSIS:');
@@ -2184,10 +2218,56 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
         let inTable = false;
         let tableHeaders = [];
         let tableRows = [];
+        let inPatientDetails = false;
+        let patientDetailsData = [];
+        let inDischargeMedications = false;
+        let dischargeMedicationsData = [];
 
         lines.forEach((line, index) => {
+          // Check if we're entering patient details section
+          if (line.includes('Patient Details') || line.includes('DISCHARGE SUMMARY')) {
+            if (line.includes('DISCHARGE SUMMARY')) {
+              // Add the discharge summary header
+              htmlContent.push(`<h1 style="text-align: center; font-size: 16pt; font-weight: bold; margin: 20px 0; border-bottom: 2px solid #000; padding-bottom: 10px;">DISCHARGE SUMMARY</h1>`);
+              inPatientDetails = true;
+              patientDetailsData = [];
+              return; // Skip processing this line further to avoid duplicate
+            }
+            inPatientDetails = true;
+            patientDetailsData = [];
+          }
+
+          // Collect patient details data if we're in that section
+          if (inPatientDetails && line.includes(':') && !line.includes('PRESENT CONDITION') && !line.includes('Present Condition')) {
+            // Parse patient details lines that contain colon-separated key-value pairs
+            if (line.includes('Name') || line.includes('Patient ID') || line.includes('Primary Care Provider') ||
+                line.includes('Registration ID') || line.includes('Sex / Age') || line.includes('Mobile No') ||
+                line.includes('Tariff') || line.includes('Address') || line.includes('Admission Date') ||
+                line.includes('Discharge Date') || line.includes('Discharge Reason')) {
+              patientDetailsData.push(line);
+              return; // Don't process this line further, it's being collected for the table
+            }
+          }
+
+          // Check if we're leaving patient details section (when we hit Present Condition or other sections)
+          if (inPatientDetails && (line.includes('PRESENT CONDITION') || line.includes('Present Condition') ||
+              line.includes('Investigations:') || line.includes('INVESTIGATIONS:'))) {
+            // Format and output collected patient details
+            if (patientDetailsData.length > 0) {
+              htmlContent.push(formatPatientDetailsTable(patientDetailsData));
+              patientDetailsData = [];
+            }
+            inPatientDetails = false;
+          }
+
           // Handle section separators
           if (line.includes('================================================================================')) {
+            // If we were collecting patient details, output them now
+            if (inPatientDetails && patientDetailsData.length > 0) {
+              htmlContent.push(formatPatientDetailsTable(patientDetailsData));
+              patientDetailsData = [];
+              inPatientDetails = false;
+            }
             if (inTable && tableRows.length > 0) {
               // Close any open table
               htmlContent.push(createTableHTML(tableHeaders, tableRows));
@@ -2209,7 +2289,7 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
           }
 
           // Detect major section headers
-          if (line.match(/^(DISCHARGE SUMMARY|PRESENT CONDITION|CASE SUMMARY|ADVICE|PROCEDURE DETAILS|LABORATORY INVESTIGATIONS|SURGICAL DETAILS|COMPLICATIONS|TREATMENT COURSE|VITAL SIGNS)/)) {
+          if (line.match(/^(PRESENT CONDITION|CASE SUMMARY|ADVICE|PROCEDURE DETAILS|LABORATORY INVESTIGATIONS|SURGICAL DETAILS|COMPLICATIONS|TREATMENT COURSE|VITAL SIGNS)/)) {
             if (inTable && tableRows.length > 0) {
               htmlContent.push(createTableHTML(tableHeaders, tableRows));
               inTable = false;
@@ -2221,7 +2301,9 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
           }
 
           // Detect table headers (lines with multiple columns separated by spaces)
-          if (line.includes('Name') && line.includes('Strength') && line.includes('Route')) {
+          // Make sure it's actually a medication table header, not just any line with "Name"
+          if (line.includes('Name') && line.includes('Strength') && line.includes('Route') &&
+              line.includes('Dosage') && !line.includes('Case Summary')) {
             // Medications table header
             inTable = true;
             tableHeaders = ['Name', 'Strength', 'Route', 'Dosage', 'Number of Days to be taken'];
@@ -2262,6 +2344,50 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
             return;
           }
 
+          // Check if we're entering discharge medications section
+          if (line.includes('DISCHARGE MEDICATIONS:') || (line.includes('DISCHARGE') && line.includes('MEDICATIONS')) ||
+              line.includes('MEDICATIONS ON DISCHARGE:') || (line.includes('Medications') && line.includes('Discharge'))) {
+            inDischargeMedications = true;
+            dischargeMedicationsData = [];
+            // Don't add the heading here - it will be included in the table
+            return;
+          }
+
+          // Collect discharge medications data if we're in that section
+          if (inDischargeMedications) {
+            // Check if we're leaving the medications section
+            if (line.includes('DISCHARGE ADVICE') || line.includes('REVIEW') || line.includes('Return immediately if') ||
+                line.includes('Case Summary') || line.includes('CASE SUMMARY') || line.includes('SURGICAL DETAILS') ||
+                line.includes('The patient was admitted') || line.includes('ADVICE') ||
+                (line.trim() === '' && dischargeMedicationsData.length > 0)) {
+              // Format and output collected medications only if we have valid data
+              if (dischargeMedicationsData.length > 0) {
+                htmlContent.push(formatMedicationsTable(dischargeMedicationsData));
+                dischargeMedicationsData = [];
+              }
+              inDischargeMedications = false;
+              // Process this line normally if it's not empty
+              if (line.trim() !== '') {
+                processNormalLine(line, htmlContent);
+              }
+              return;
+            }
+
+            // Collect medication lines (format: "• MedicationName: Dosage" or "- MedicationName: Dosage" or just "MedicationName: Dosage")
+            if (line.trim() && !line.includes('-----')) {
+              // Remove bullet points or dashes if present
+              let medLine = line.trim();
+              if (medLine.startsWith('•') || medLine.startsWith('-') || medLine.startsWith('*')) {
+                medLine = medLine.substring(1).trim();
+              }
+              // Only add if it contains medication info (has a colon) and is not a section header
+              if (medLine.includes(':') && !medLine.includes('Case Summary') && !medLine.includes('CASE SUMMARY')) {
+                dischargeMedicationsData.push(medLine);
+              }
+            }
+            return;
+          }
+
           // Process normal lines
           processNormalLine(line, htmlContent);
         });
@@ -2269,6 +2395,11 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
         // Close any remaining table
         if (inTable && tableRows.length > 0) {
           htmlContent.push(createTableHTML(tableHeaders, tableRows));
+        }
+
+        // If we ended with medications section still open, output the table
+        if (inDischargeMedications && dischargeMedicationsData.length > 0) {
+          htmlContent.push(formatMedicationsTable(dischargeMedicationsData));
         }
 
         // Helper function to create table HTML
@@ -2362,6 +2493,128 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
             // Regular paragraph
             htmlContent.push(`<p style="margin: 8px 0;">${line}</p>`);
           }
+        }
+
+        // Helper function to format patient details in a two-column layout
+        function formatPatientDetailsTable(detailsData) {
+          // Parse the patient details data
+          const details = {};
+
+          // Debug logging
+          console.log('Patient details data to parse:', detailsData);
+
+          detailsData.forEach(line => {
+            // Use regex to find all key-value pairs in the line
+            // Pattern matches: "Key : Value" where key can have spaces/slashes
+            const regex = /([A-Za-z\s\/]+?):\s*([^:]*?)(?=\s{2,}[A-Za-z]|$)/g;
+            let match;
+
+            while ((match = regex.exec(line)) !== null) {
+              const key = match[1].trim();
+              const value = match[2].trim();
+
+              // Store the key-value pair
+              if (key) {
+                details[key] = value || 'N/A';
+                console.log(`Parsed: "${key}" = "${value}"`);
+              }
+            }
+
+            // Fallback: If no matches found with regex, try simple split
+            if (Object.keys(details).length === 0 && line.includes(':')) {
+              const colonIndex = line.indexOf(':');
+              const key = line.substring(0, colonIndex).trim();
+              const remainingText = line.substring(colonIndex + 1);
+
+              // Check if there's another key-value pair in the same line
+              const nextKeyMatch = remainingText.match(/\s{2,}([A-Za-z\s\/]+?):/);
+              if (nextKeyMatch) {
+                const value = remainingText.substring(0, nextKeyMatch.index).trim();
+                details[key] = value || 'N/A';
+
+                // Parse the second key-value pair
+                const secondPart = remainingText.substring(nextKeyMatch.index);
+                const secondColonIndex = secondPart.indexOf(':');
+                if (secondColonIndex > -1) {
+                  const secondKey = secondPart.substring(0, secondColonIndex).trim();
+                  const secondValue = secondPart.substring(secondColonIndex + 1).trim();
+                  details[secondKey] = secondValue || 'N/A';
+                }
+              } else {
+                // Single key-value pair in the line
+                details[key] = remainingText.trim() || 'N/A';
+              }
+            }
+          });
+
+          console.log('Parsed patient details:', details);
+
+          // Create a two-column table layout for patient details
+          let html = '<table style="width: 100%; margin: 20px 0; border-collapse: collapse;">';
+          html += '<tr>';
+          html += '<td style="width: 50%; vertical-align: top; padding-right: 20px;">';
+
+          // Left column items
+          const leftColumnKeys = ['Name', 'Primary Care Provider', 'Sex / Age', 'Tariff', 'Admission Date', 'Discharge Reason'];
+          leftColumnKeys.forEach(key => {
+            const value = details[key] || 'N/A';
+            html += `<div style="margin: 8px 0;"><strong>${key}:</strong> ${value}</div>`;
+          });
+
+          html += '</td>';
+          html += '<td style="width: 50%; vertical-align: top;">';
+
+          // Right column items
+          const rightColumnKeys = ['Patient ID', 'Registration ID', 'Mobile No', 'Address', 'Discharge Date'];
+          rightColumnKeys.forEach(key => {
+            const value = details[key] || 'N/A';
+            html += `<div style="margin: 8px 0;"><strong>${key}:</strong> ${value}</div>`;
+          });
+
+          html += '</td>';
+          html += '</tr>';
+          html += '</table>';
+
+          return html;
+        }
+
+        // Helper function to format discharge medications in a table
+        function formatMedicationsTable(medicationsData) {
+          // Create a table for medications
+          let html = '<table style="width: 100%; border-collapse: collapse; margin: 15px 0;">';
+
+          // Add table headers
+          html += '<thead><tr>';
+          html += '<th style="border: 1px solid #000; padding: 8px; background-color: #f0f0f0; font-weight: bold; text-align: left;">Medicine Name</th>';
+          html += '<th style="border: 1px solid #000; padding: 8px; background-color: #f0f0f0; font-weight: bold; text-align: left;">Dosage/Instructions</th>';
+          html += '</tr></thead>';
+
+          // Add table body
+          html += '<tbody>';
+          medicationsData.forEach(medLine => {
+            // Parse medication line (format: "MedicationName: Dosage/Instructions")
+            const colonIndex = medLine.indexOf(':');
+            let medicationName = '';
+            let dosageInstructions = '';
+
+            if (colonIndex > -1) {
+              medicationName = medLine.substring(0, colonIndex).trim();
+              dosageInstructions = medLine.substring(colonIndex + 1).trim();
+            } else {
+              // If no colon, treat the whole line as medication name
+              medicationName = medLine;
+              dosageInstructions = 'As directed';
+            }
+
+            html += '<tr>';
+            html += `<td style="border: 1px solid #000; padding: 8px;">${medicationName}</td>`;
+            html += `<td style="border: 1px solid #000; padding: 8px;">${dosageInstructions}</td>`;
+            html += '</tr>';
+          });
+
+          html += '</tbody></table>';
+
+          return html;
         }
 
         // Join all HTML content
