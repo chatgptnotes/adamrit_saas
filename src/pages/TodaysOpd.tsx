@@ -12,6 +12,25 @@ import { OpdPatientTable } from '@/components/opd/OpdPatientTable';
 const TodaysOpd = () => {
   const { hospitalConfig } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
+  const [corporateFilter, setCorporateFilter] = useState('');
+
+  // Fetch corporates from corporate table
+  const { data: corporates = [] } = useQuery({
+    queryKey: ['corporates'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('corporate')
+        .select('id, name')
+        .order('name', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching corporates:', error);
+        return [];
+      }
+
+      return data || [];
+    }
+  });
 
   // Fetch OPD patients
   const { data: opdPatients = [], isLoading } = useQuery({
@@ -79,15 +98,20 @@ const TodaysOpd = () => {
     total: opdPatients.length
   };
 
-  // Filter patients based on search term
+  // Filter patients based on search term and corporate
   const filteredPatients = opdPatients.filter(patient => {
     const searchLower = searchTerm.toLowerCase();
-    return (
+    const matchesSearch = (
       patient.patients?.name?.toLowerCase().includes(searchLower) ||
       patient.patients?.patients_id?.toLowerCase().includes(searchLower) ||
       patient.visit_id?.toLowerCase().includes(searchLower) ||
       patient.token_number?.toString().includes(searchLower)
     );
+
+    const matchesCorporate = !corporateFilter ||
+      patient.patients?.corporate === corporateFilter;
+
+    return matchesSearch && matchesCorporate;
   });
 
   const handlePrintList = () => {
@@ -139,6 +163,18 @@ const TodaysOpd = () => {
                 <Printer className="h-4 w-4" />
                 Print List
               </Button>
+              <select
+                value={corporateFilter}
+                onChange={(e) => setCorporateFilter(e.target.value)}
+                className="h-10 text-sm border border-gray-300 rounded-md px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All Corporates</option>
+                {corporates.map((corporate) => (
+                  <option key={corporate.id} value={corporate.name}>
+                    {corporate.name}
+                  </option>
+                ))}
+              </select>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input

@@ -6619,7 +6619,7 @@ INSTRUCTIONS:
         expectedToFind: 'Multiple services if added'
       });
 
-      const { data: mandatoryServicesData, error: mandatoryError } = await supabase
+      let { data: mandatoryServicesData, error: mandatoryError } = await supabase
         .from('visit_mandatory_services')
         .select('*')
         .eq('visit_id', visitData.id)
