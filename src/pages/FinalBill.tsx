@@ -48,6 +48,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Checkbox } from "@/components/ui/checkbox"
+import { DiscountTab } from "@/components/DiscountTab"
 import { AdvancePaymentModal } from "@/components/AdvancePaymentModal"
 
 // This component needs to be created or installed. It is not a standard shadcn/ui component.
@@ -1640,10 +1641,16 @@ const FinalBill = () => {
     setPackageDates,
     isLoading: isFinancialSummaryLoading,
     isSaving: isFinancialSummarySaving,
+    isAutoSaving: isFinancialSummaryAutoSaving,
+    lastSaveTime,
+    userHasModifiedDiscounts,
+    isStateLocked,
+    isInitializing,
     saveFinancialSummary,
     handleFinancialSummaryChange,
     loadFinancialSummary,
-    autoPopulateFinancialData
+    autoPopulateFinancialData,
+    calculateBalanceWithDiscount
   } = useFinancialSummary(billData?.id, visitId, savedMedicationData);
 
   // Function to load saved requisitions from database
@@ -16001,6 +16008,15 @@ Dr. Murali B K
                         >
                           Mandatory Services
                         </button>
+                        <button
+                          className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'discount'
+                            ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
+                            : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                          onClick={() => setSavedDataTab('discount')}
+                        >
+                          Discount
+                        </button>
                       </div>
 
                       {/* Tab Content */}
@@ -16499,6 +16515,32 @@ Dr. Murali B K
                               </div>
                             )}
                           </div>
+                        )}
+                        {savedDataTab === 'discount' && (
+                          <DiscountTab
+                            visitId={visitId}
+                            onDiscountUpdate={(discountAmount) => {
+                              // Callback when discount is updated
+                              console.log('🔥 [FINALBILL CALLBACK] Discount updated:', discountAmount);
+                              console.log('🔥 [FINALBILL CALLBACK] Current visitId:', visitId);
+                              console.log('🔥 [FINALBILL CALLBACK] Current billData?.id:', billData?.id);
+                              console.log('🔥 [FINALBILL CALLBACK] autoPopulateFinancialData available:', !!autoPopulateFinancialData);
+
+                              // Add delay to ensure database transaction is committed
+                              console.log('⏱️ [FINALBILL CALLBACK] Adding 1000ms delay for database commit...');
+                              setTimeout(() => {
+                                console.log('⏱️ [FINALBILL CALLBACK] Delay complete, refreshing financial data...');
+
+                                // Trigger financial summary refresh to show discount in table
+                                if (autoPopulateFinancialData) {
+                                  console.log('🔥 [FINALBILL CALLBACK] Calling autoPopulateFinancialData after delay...');
+                                  autoPopulateFinancialData();
+                                } else {
+                                  console.error('❌ [FINALBILL CALLBACK] autoPopulateFinancialData not available!');
+                                }
+                              }, 1000); // 1 second delay to ensure database commit
+                            }}
+                          />
                         )}
                       </div>
                     </div>
@@ -17544,16 +17586,118 @@ Dr. Murali B K
                   <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm">
                     Start Package
                   </button>
-                  <button 
+                  <button
                     onClick={saveFinancialSummary}
                     disabled={isFinancialSummarySaving || !billData?.id}
                     className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors text-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
                   >
                     {isFinancialSummarySaving ? 'Saving...' : '💾 Save Financial Summary'}
                   </button>
-                  {isFinancialSummaryLoading && (
-                    <span className="text-sm text-gray-600">Loading financial data...</span>
-                  )}
+
+                  {/* Debug button to manually refresh financial summary */}
+                  <button
+                    onClick={async () => {
+                      console.log('🔥 [DEBUG BUTTON] Manual refresh triggered');
+                      console.log('🔥 [DEBUG BUTTON] visitId:', visitId);
+                      console.log('🔥 [DEBUG BUTTON] billData?.id:', billData?.id);
+
+                      // Direct database query to check discount
+                      try {
+                        console.log('🔍 [DEBUG] Checking discount in database...');
+
+                        // First, find the visit UUID
+                        const { data: visitData, error: visitError } = await supabase
+                          .from('visits')
+                          .select('id, visit_id')
+                          .eq('visit_id', visitId)
+                          .single();
+
+                        console.log('🔍 [DEBUG] Visit lookup result:', { visitData, visitError });
+
+                        if (visitData) {
+                          // Then check for discount
+                          const { data: discountData, error: discountError } = await supabase
+                            .from('visit_discounts')
+                            .select('*')
+                            .eq('visit_id', visitData.id)
+                            .single();
+
+                          console.log('🔍 [DEBUG] Discount lookup result:', { discountData, discountError });
+
+                          if (discountData) {
+                            console.log('✅ [DEBUG] Found discount in DB:', discountData.discount_amount);
+                          } else {
+                            console.log('❌ [DEBUG] No discount found in DB');
+                          }
+                        }
+                      } catch (error) {
+                        console.error('❌ [DEBUG] Database check failed:', error);
+                      }
+
+                      // Trigger financial summary refresh
+                      if (autoPopulateFinancialData) {
+                        console.log('🔄 [DEBUG] Calling autoPopulateFinancialData...');
+                        autoPopulateFinancialData();
+                      }
+                    }}
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm"
+                  >
+                    🔄 Debug Refresh
+                  </button>
+
+                  {/* Manual discount override button for testing */}
+                  <button
+                    onClick={() => {
+                      console.log('🔥 [DEBUG OVERRIDE] Manually setting discount to 6200');
+                      console.log('🔥 [DEBUG OVERRIDE] Current financialSummaryData:', financialSummaryData);
+
+                      // Manual state override
+                      if (handleFinancialSummaryChange) {
+                        handleFinancialSummaryChange('discount', 'total', '6200');
+                        console.log('🔥 [DEBUG OVERRIDE] Called handleFinancialSummaryChange');
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm"
+                  >
+                    🧪 Set 6200
+                  </button>
+
+                  {/* Visual indicators for save/load status */}
+                  <div className="flex items-center gap-2 text-sm">
+                    {isFinancialSummaryLoading && (
+                      <span className="text-blue-600 flex items-center gap-1">
+                        <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        Loading...
+                      </span>
+                    )}
+                    {isFinancialSummaryAutoSaving && (
+                      <span className="text-orange-600 flex items-center gap-1">
+                        <div className="w-3 h-3 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+                        Auto-saving...
+                      </span>
+                    )}
+                    {lastSaveTime && !isFinancialSummarySaving && !isFinancialSummaryAutoSaving && (
+                      <span className="text-green-600 flex items-center gap-1">
+                        ✅ Saved at {format(lastSaveTime, 'HH:mm:ss')}
+                      </span>
+                    )}
+                    {userHasModifiedDiscounts && (
+                      <span className="text-blue-600 flex items-center gap-1">
+                        🛡️ Discounts protected
+                      </span>
+                    )}
+                    {isStateLocked && (
+                      <span className="text-red-600 flex items-center gap-1">
+                        🔒 State locked
+                      </span>
+                    )}
+                    {isInitializing && (
+                      <span className="text-yellow-600 flex items-center gap-1">
+                        ⏳ Initializing...
+                      </span>
+                    )}
+                  </div>
+
                 </div>
 
                 {/* Advance Payment Sidebar */}
@@ -17565,33 +17709,51 @@ Dr. Murali B K
 
                 {/* Clean Financial Summary Table - Properly Aligned */}
                 <div className="no-print bg-white rounded-lg shadow-lg overflow-hidden">
-                  {/* Manual Refresh Button */}
+                  {/* Manual Refresh and Calculate Buttons */}
                   <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
                     <h3 className="text-lg font-semibold text-gray-900">Financial Summary</h3>
-                    <button
-                      onClick={() => {
-                        console.log('🔄 Manual refresh triggered for visit:', visitId);
-                        if (visitId && autoPopulateFinancialData) {
-                          autoPopulateFinancialData();
-                        } else {
-                          console.error('❌ Cannot refresh: missing visitId or autoPopulateFinancialData');
-                        }
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-                      disabled={isFinancialSummaryLoading}
-                    >
-                      {isFinancialSummaryLoading ? (
-                        <span className="flex items-center">
-                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Loading...
-                        </span>
-                      ) : (
-                        '🔄 Refresh Data'
-                      )}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          console.log('🧮 Manual calculate triggered for discount application');
+                          if (calculateBalanceWithDiscount) {
+                            calculateBalanceWithDiscount();
+                          } else {
+                            console.error('❌ Cannot calculate: calculateBalanceWithDiscount function not available');
+                          }
+                        }}
+                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
+                        title="Calculate balance with discount applied"
+                      >
+                        🧮 Calculate
+                      </button>
+                      <button
+                        onClick={() => {
+                          console.log('🔄 Manual refresh triggered for visit (TOTALS ONLY):', visitId);
+                          console.log('🛡️ [REFRESH] This will preserve all discount values and only update totals');
+                          if (visitId && autoPopulateFinancialData) {
+                            autoPopulateFinancialData();
+                          } else {
+                            console.error('❌ Cannot refresh: missing visitId or autoPopulateFinancialData');
+                          }
+                        }}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                        disabled={isFinancialSummaryLoading}
+                        title="Refresh totals from database - discount values will be preserved"
+                      >
+                        {isFinancialSummaryLoading ? (
+                          <span className="flex items-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Loading...
+                          </span>
+                        ) : (
+                          '🔄 Refresh Totals Only'
+                        )}
+                      </button>
+                    </div>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full border-collapse text-sm">
@@ -17625,148 +17787,84 @@ Dr. Murali B K
                             Total Amount
                           </td>
                           <td className="border border-gray-300 p-3 text-center">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.advancePayment}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'advancePayment', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.advancePayment || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.clinicalServices}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'clinicalServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.clinicalServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.laboratoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'laboratoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.laboratoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.radiology}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'radiology', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.radiology || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.pharmacy}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'pharmacy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.pharmacy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.implant}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'implant', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.implant || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.blood}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'blood', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.blood || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.surgery}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'surgery', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.surgery || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.mandatoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'mandatoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.mandatoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.physiotherapy}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'physiotherapy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.physiotherapy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.consultation}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'consultation', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.consultation || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.surgeryInternalReport}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'surgeryInternalReport', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.surgeryInternalReport || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.implantCost}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'implantCost', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.implantCost || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.private}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'private', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.private || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.accommodationCharges}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'accommodationCharges', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.totalAmount.accommodationCharges || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-2 font-bold">
-                            <input
-                              type="number"
-                              value={financialSummaryData.totalAmount.total}
-                              onChange={(e) => handleFinancialSummaryChange('totalAmount', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-2 py-1 text-sm text-center bg-blue-100 rounded border border-blue-300 min-h-[32px] flex items-center justify-center font-bold">
+                              {financialSummaryData.totalAmount.total || '0'}
+                            </div>
                           </td>
                         </tr>
                         {/* Row 2: Discount */}
@@ -17775,139 +17873,79 @@ Dr. Murali B K
                             Discount
                           </td>
                           <td className="border border-gray-300 p-3 text-center">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.advancePayment}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'advancePayment', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.advancePayment || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.clinicalServices}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'clinicalServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.clinicalServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.laboratoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'laboratoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.laboratoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.radiology}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'radiology', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.radiology || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.pharmacy}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'pharmacy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.pharmacy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.implant}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'implant', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.implant || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.blood}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'blood', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.blood || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.surgery}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'surgery', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.surgery || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.mandatoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'mandatoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.mandatoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.physiotherapy}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'physiotherapy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.physiotherapy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.consultation}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'consultation', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.consultation || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.surgeryInternalReport}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'surgeryInternalReport', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.surgeryInternalReport || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.implantCost}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'implantCost', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.implantCost || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.private}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'private', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.private || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.accommodationCharges}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'accommodationCharges', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.discount.accommodationCharges || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-2 font-bold">
                             <input
@@ -17925,148 +17963,84 @@ Dr. Murali B K
                             Amount Paid
                           </td>
                           <td className="border border-gray-300 p-3 text-center">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.advancePayment}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'advancePayment', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.advancePayment || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.clinicalServices}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'clinicalServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.clinicalServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.laboratoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'laboratoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.laboratoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.radiology}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'radiology', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.radiology || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.pharmacy}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'pharmacy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.pharmacy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.implant}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'implant', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.implant || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.blood}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'blood', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.blood || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.surgery}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'surgery', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.surgery || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.mandatoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'mandatoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.mandatoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.physiotherapy}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'physiotherapy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.physiotherapy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.consultation}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'consultation', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.consultation || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.surgeryInternalReport}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'surgeryInternalReport', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.surgeryInternalReport || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.implantCost}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'implantCost', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.implantCost || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.private}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'private', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.private || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.accommodationCharges}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'accommodationCharges', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.amountPaid.accommodationCharges || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-2 font-bold">
-                            <input
-                              type="number"
-                              value={financialSummaryData.amountPaid.total}
-                              onChange={(e) => handleFinancialSummaryChange('amountPaid', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-2 py-1 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[32px] flex items-center justify-center font-bold">
+                              {financialSummaryData.amountPaid.total || '0'}
+                            </div>
                           </td>
                         </tr>
                         {/* Row 4: Refunded Amount */}
@@ -18075,148 +18049,84 @@ Dr. Murali B K
                             Refunded Amount
                           </td>
                           <td className="border border-gray-300 p-3 text-center">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.advancePayment}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'advancePayment', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.advancePayment || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.clinicalServices}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'clinicalServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.clinicalServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.laboratoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'laboratoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.laboratoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.radiology}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'radiology', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.radiology || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.pharmacy}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'pharmacy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.pharmacy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.implant}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'implant', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.implant || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.blood}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'blood', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.blood || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.surgery}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'surgery', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.surgery || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.mandatoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'mandatoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.mandatoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.physiotherapy}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'physiotherapy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.physiotherapy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.consultation}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'consultation', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.consultation || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.surgeryInternalReport}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'surgeryInternalReport', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.surgeryInternalReport || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.implantCost}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'implantCost', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.implantCost || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.private}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'private', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.private || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.accommodationCharges}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'accommodationCharges', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.refundedAmount.accommodationCharges || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-2 font-bold">
-                            <input
-                              type="number"
-                              value={financialSummaryData.refundedAmount.total}
-                              onChange={(e) => handleFinancialSummaryChange('refundedAmount', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-2 py-1 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[32px] flex items-center justify-center font-bold">
+                              {financialSummaryData.refundedAmount.total || '0'}
+                            </div>
                           </td>
                         </tr>
                         {/* Row 5: Balance */}
@@ -18225,148 +18135,84 @@ Dr. Murali B K
                             Balance
                           </td>
                           <td className="border border-gray-300 p-3 text-center">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.advancePayment}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'advancePayment', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center font-bold"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center font-bold">
+                              {financialSummaryData.balance.advancePayment || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.clinicalServices}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'clinicalServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.clinicalServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.laboratoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'laboratoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.laboratoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.radiology}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'radiology', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.radiology || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.pharmacy}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'pharmacy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.pharmacy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.implant}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'implant', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.implant || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.blood}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'blood', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.blood || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.surgery}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'surgery', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.surgery || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.mandatoryServices}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'mandatoryServices', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.mandatoryServices || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.physiotherapy}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'physiotherapy', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.physiotherapy || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.consultation}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'consultation', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.consultation || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.surgeryInternalReport}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'surgeryInternalReport', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.surgeryInternalReport || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.implantCost}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'implantCost', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.implantCost || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.private}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'private', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.private || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-3 min-w-[120px]">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.accommodationCharges}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'accommodationCharges', e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-center"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.balance.accommodationCharges || '0'}
+                            </div>
                           </td>
                           <td className="border border-gray-300 p-2 font-bold">
-                            <input
-                              type="number"
-                              value={financialSummaryData.balance.total}
-                              onChange={(e) => handleFinancialSummaryChange('balance', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
-                              placeholder="0"
-                            />
+                            <div className="w-full px-2 py-1 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[32px] flex items-center justify-center font-bold">
+                              {financialSummaryData.balance.total || '0'}
+                            </div>
                           </td>
                         </tr>
                       </tbody>
@@ -20463,7 +20309,8 @@ Dr. Murali B K
             }
           })()}
           onPaymentAdded={() => {
-            // Refresh financial data after payment is added
+            // RE-ENABLED: Auto-populate now has enhanced discount preservation
+            console.log('💰 [PAYMENT ADDED] Refreshing financial calculations with discount preservation');
             if (autoPopulateFinancialData) {
               autoPopulateFinancialData();
             }
