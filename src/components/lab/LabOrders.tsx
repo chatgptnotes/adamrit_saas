@@ -95,6 +95,30 @@ interface PatientWithVisit {
   insurancePersonNo?: string;
 }
 
+// Utility function to parse JSON result_value and extract actual observed value
+const parseResultValue = (resultValue) => {
+  try {
+    if (resultValue && typeof resultValue === 'string' && resultValue.startsWith('{')) {
+      const parsed = JSON.parse(resultValue);
+      return {
+        value: parsed.value || '',
+        timestamp: parsed.timestamp || '',
+        entry_time: parsed.entry_time || '',
+        session_id: parsed.session_id || ''
+      };
+    }
+    return { value: resultValue || '', timestamp: '', entry_time: '', session_id: '' };
+  } catch (e) {
+    return { value: resultValue || '', timestamp: '', entry_time: '', session_id: '' };
+  }
+};
+
+// Utility function to check if result_value has actual data
+const hasValidResultValue = (resultValue) => {
+  const parsed = parseResultValue(resultValue);
+  return parsed.value && parsed.value.trim() !== '' && parsed.value.trim() !== '0';
+};
+
 const LabOrders = () => {
   const { hospitalConfig } = useAuth();
   const [selectedTests, setSelectedTests] = useState<string[]>([]);
@@ -621,70 +645,34 @@ const LabOrders = () => {
             test_name: firstTest.test_name
           });
 
-          // Load existing lab results for this visit
+          // Get current timestamp to differentiate new entries from existing ones
+          const currentTime = new Date();
+          const oneHourAgo = new Date(currentTime.getTime() - (60 * 60 * 1000)); // 1 hour threshold
+
+          // Load existing lab results for this visit - but only recent ones (within 1 hour)
+          // This prevents loading old results from previous test sessions
           let { data: existingResults, error } = await supabase
             .from('lab_results')
             .select('*')
-            .eq('visit_id', visitId);
+            .eq('visit_id', visitId)
+            .gte('created_at', oneHourAgo.toISOString());
 
-          console.log('🔍 DEBUGGING: Query by visit_id result:', {
+          console.log('🔍 DEBUGGING: Query by visit_id result (recent only):', {
             visitId,
             resultCount: existingResults?.length || 0,
             error: error?.message,
+            timeThreshold: oneHourAgo.toISOString(),
             firstResult: existingResults?.[0]
           });
 
-          // If no results found by visit_id, try searching by patient name as fallback
-          if ((!existingResults || existingResults.length === 0) && firstTest.patient_name) {
-            console.log('🔄 No results found by visit_id, trying patient name fallback...');
-            const { data: fallbackResults, error: fallbackError } = await supabase
-              .from('lab_results')
-              .select('*')
-              .eq('patient_name', firstTest.patient_name);
+          // Always start with fresh form for new test sessions to prevent mixing of timestamp data
+          console.log('🆕 Starting with fresh form to ensure unique timestamp-based entries');
+          console.log('🚫 Skipping auto-load of previous results to prevent value conflicts');
+          existingResults = [];
 
-            console.log('🔍 DEBUGGING: Query by patient_name result:', {
-              patient_name: firstTest.patient_name,
-              resultCount: fallbackResults?.length || 0,
-              error: fallbackError?.message,
-              firstResult: fallbackResults?.[0]
-            });
-
-            if (!fallbackError && fallbackResults) {
-              existingResults = fallbackResults;
-              console.log('📊 Found results using patient name fallback:', fallbackResults.length);
-            }
-          }
-
-          // Additional debugging: Try querying by lab_id or other fields
-          if ((!existingResults || existingResults.length === 0)) {
-            console.log('🔄 Trying additional fallback queries...');
-
-            // Try by test_name
-            const { data: testNameResults } = await supabase
-              .from('lab_results')
-              .select('*')
-              .eq('test_name', firstTest.test_name);
-
-            console.log('🔍 DEBUGGING: Query by test_name result:', {
-              test_name: firstTest.test_name,
-              resultCount: testNameResults?.length || 0,
-              firstResult: testNameResults?.[0]
-            });
-
-            // Try getting the latest 10 records to see what's in the database
-            const { data: latestResults } = await supabase
-              .from('lab_results')
-              .select('*')
-              .order('created_at', { ascending: false })
-              .limit(10);
-
-            console.log('🔍 DEBUGGING: Latest 10 lab results in database:', latestResults);
-
-            if (testNameResults && testNameResults.length > 0 && !existingResults) {
-              existingResults = testNameResults;
-              console.log('📊 Found results using test_name fallback');
-            }
-          }
+          // Skip fallback queries to prevent loading old results
+          // This ensures each new test session starts with fresh forms
+          console.log('📝 Skipping fallback queries to ensure fresh form for new timestamp entries');
 
           if (error) {
             console.error('Error loading existing lab results:', error);
@@ -729,8 +717,12 @@ const LabOrders = () => {
                 all_fields: result
               });
 
+              // Parse JSON result_value to get actual observed value
+              const parsedResult = parseResultValue(result.result_value);
+              const actualValue = parsedResult.value;
+
               const formData = {
-                result_value: result.result_value || '',
+                result_value: actualValue,
                 result_unit: result.result_unit || '',
                 reference_range: result.reference_range || '',
                 comments: result.comments || '',
@@ -812,68 +804,16 @@ const LabOrders = () => {
                     }
                   });
 
-                  // SPECIAL HANDLING FOR test1 - Same as Force Fetch
-                  if (result.test_name === 'test1' && result.result_value) {
-                    console.log('🚨 DEBUG test1: SPECIAL HANDLING - forcing all possible keys');
-                    const specialKeys = [
-                      'test1',
-                      testRow.id,
-                      `test1_main`,
-                      `${testRow.id}_test1`,
-                      `${testRow.id}_subtest_test1`
-                    ];
-
-                    specialKeys.forEach(specialKey => {
-                      loadedFormData[specialKey] = formData;
-                      loadedSavedResults[specialKey] = formData;
-                      console.log(`🚨 DEBUG test1: FORCE SET for key "${specialKey}":`, formData);
-                    });
-                  }
+                  // DISABLED: Special handling to prevent auto-loading old values
+                  console.log('🆕 SKIPPED: Special handling disabled for fresh forms on new timestamps');
                 } else if (result.test_name === 'test1') {
                   console.log(`🚨 DEBUG test1: NO MATCH found with testRow "${testRow.test_name}"`);
                 }
               });
             });
 
-            // BRUTE FORCE test1 SOLUTION - Find ANY record with test1 and force it into all possible keys
-            console.log('🚨 BRUTE FORCE test1: Starting emergency test1 loading...');
-            existingResults.forEach(result => {
-              if (result.test_name === 'test1' || result.result_value === '567' ||
-                  (result.result_value && result.result_value.toString().includes('567'))) {
-
-                console.log('🚨 BRUTE FORCE test1: Found potential test1 data:', result);
-
-                const test1Data = {
-                  result_value: result.result_value || '567',
-                  result_unit: result.result_unit || '',
-                  reference_range: result.reference_range || '',
-                  comments: result.comments || '',
-                  is_abnormal: result.is_abnormal || false,
-                  result_status: result.result_status || 'Preliminary'
-                };
-
-                // Force this data into EVERY POSSIBLE KEY for test1
-                const allPossibleKeys = [
-                  'test1',
-                  'yyy',
-                  ...selectedTestsForEntry.map(t => t.id),
-                  ...selectedTestsForEntry.map(t => `${t.id}_subtest_main`),
-                  ...selectedTestsForEntry.map(t => `${t.id}_subtest_test1`),
-                  ...selectedTestsForEntry.map(t => `test1_${t.id}`),
-                  ...selectedTestsForEntry.map(t => `${t.test_name}_test1`),
-                ];
-
-                console.log('🚨 BRUTE FORCE test1: Forcing data into ALL keys:', allPossibleKeys);
-
-                allPossibleKeys.forEach(key => {
-                  if (key) {
-                    loadedFormData[key] = test1Data;
-                    loadedSavedResults[key] = test1Data;
-                    console.log(`🚨 BRUTE FORCE test1: FORCED data into key "${key}"`);
-                  }
-                });
-              }
-            });
+            // DISABLED: Brute force loading to prevent old values from appearing in new test sessions
+            console.log('🆕 SKIPPED: Brute force auto-loading disabled to ensure fresh forms for new timestamps');
 
             // Update form data and saved results
             console.log('🔄 Setting form data:', loadedFormData);
@@ -979,8 +919,12 @@ const LabOrders = () => {
                 for (const result of existingResults) {
                   if (result.test_name === subTest.name ||
                       result.test_name.toLowerCase() === subTest.name.toLowerCase()) {
+                    // Parse JSON result_value to get actual observed value
+                    const parsedFoundResult = parseResultValue(result.result_value);
+                    const actualFoundValue = parsedFoundResult.value;
+
                     foundData = {
-                      result_value: result.result_value || '',
+                      result_value: actualFoundValue,
                       result_unit: result.result_unit || '',
                       reference_range: result.reference_range || '',
                       comments: result.comments || '',
@@ -1185,10 +1129,23 @@ const LabOrders = () => {
 
             // Test details
             test_category: result.test_category || 'GENERAL',
-            result_value: result.result_value || '',
+            result_value: JSON.stringify({
+              value: result.result_value || '',
+              timestamp: new Date().toISOString(),
+              entry_time: new Date().toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+              }),
+              session_id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            }),
             result_unit: result.result_unit || '',
             reference_range: result.reference_range || '',
-            comments: result.comments || '',
+            comments: result.comments ? `${result.comments} [Entry at: ${new Date().toLocaleString()}]` : `Entry at: ${new Date().toLocaleString()}`,
             is_abnormal: result.is_abnormal || false,
             result_status: authenticatedResult ? 'Final' : 'Preliminary',
 
@@ -1219,6 +1176,7 @@ const LabOrders = () => {
           console.log('🔍 DEBUG: Data to insert into lab_results:', labResultsData);
           console.log('🔍 DEBUG: Authentication status:', authenticatedResult);
           console.log('🔍 DEBUG: Visit ID:', visitId);
+          console.log('⏰ DEBUG: Creating new timestamp-based entry - each test session will have unique created_at time');
 
           // Try saving with error handling to see what's missing
           const { data: finalResult, error: labResultsError } = await supabase
@@ -1235,7 +1193,20 @@ const LabOrders = () => {
               main_test_name: originalTestRow.test_name || 'Test',
               test_name: result.test_name || 'Test Result',
               test_category: result.test_category || 'GENERAL',
-              result_value: result.result_value || 'No Value',
+              result_value: JSON.stringify({
+                value: result.result_value || 'No Value',
+                timestamp: new Date().toISOString(),
+                entry_time: new Date().toLocaleString('en-IN', {
+                  timeZone: 'Asia/Kolkata',
+                  year: 'numeric',
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit'
+                }),
+                session_id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+              }),
               result_unit: result.result_unit || '',
               reference_range: result.reference_range || '',
               comments: result.comments || '',
@@ -1647,9 +1618,7 @@ const LabOrders = () => {
               if (labResults.some(r => r.test_name === testRow.test_name)) {
                 hasActualData = labResults.some(result =>
                   result.test_name === testRow.test_name &&
-                  result.result_value &&
-                  result.result_value.toString().trim() !== '' &&
-                  result.result_value.toString().trim() !== '0'
+                  hasValidResultValue(result.result_value)
                 );
                 console.log(`🔍 EXACT TEST MATCH: Checking specific test "${testRow.test_name}"`);
               }
@@ -1657,9 +1626,7 @@ const LabOrders = () => {
               else if (labResults.some(r => r.test_category === testRow.test_category)) {
                 hasActualData = labResults.some(result =>
                   result.test_category === testRow.test_category &&
-                  result.result_value &&
-                  result.result_value.toString().trim() !== '' &&
-                  result.result_value.toString().trim() !== '0'
+                  hasValidResultValue(result.result_value)
                 );
                 console.log(`🔍 CATEGORY MATCH: Checking category "${testRow.test_category}"`);
               }
@@ -1673,11 +1640,7 @@ const LabOrders = () => {
                   result.main_test_name === testRow.test_category
                 );
 
-                hasActualData = relatedTests.some(result =>
-                  result.result_value &&
-                  result.result_value.toString().trim() !== '' &&
-                  result.result_value.toString().trim() !== '0'
-                );
+                hasActualData = relatedTests.some(result => hasValidResultValue(result.result_value));
 
                 console.log(`🔍 PATIENT-WIDE MATCH: Found ${relatedTests.length} related tests for "${testRow.test_name}"`);
                 console.log(`🔍 Related tests:`, relatedTests.map(r => ({ test_name: r.test_name, test_category: r.test_category, main_test_name: r.main_test_name })));
@@ -2234,9 +2197,9 @@ const LabOrders = () => {
       });
     });
 
-    // Filter out empty results (only check result_value, comments are optional)
+    // Filter out empty results (check if JSON result_value has actual value)
     const validResults = resultsData.filter(result => {
-      const isValid = result.result_value && result.result_value.trim() !== '';
+      const isValid = hasValidResultValue(result.result_value);
       console.log(`🔍 Result validation - value: "${result.result_value}", isValid: ${isValid}`);
       return isValid;
     });
