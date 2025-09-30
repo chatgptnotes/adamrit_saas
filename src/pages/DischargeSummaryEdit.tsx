@@ -1790,7 +1790,7 @@ ${patientData.radiologyInvestigations.map(rad => `  ${rad.name}: ${rad.findings}
 
 GENERATE THE FOLLOWING COMPLETE DISCHARGE SUMMARY:
 
-DISCHARGE SUMMARY
+OPD DISCHARGE SUMMARY
 ================================================================================
 
 Name                  : ${(patientData.name || '').padEnd(30)}Patient ID            : ${patientData.patientId || 'UHAY25I22001'}
@@ -2021,7 +2021,7 @@ IMPORTANT: Format everything as plain text, include ALL provided investigations,
       // Generate fallback template if needed
       if (!aiGeneratedSummary) {
         console.log('⚠️ Using fallback template with plain text formatting');
-        aiGeneratedSummary = `DISCHARGE SUMMARY
+        aiGeneratedSummary = `OPD DISCHARGE SUMMARY
 ================================================================================
 
 Name                  : ${(editablePatientData.name || 'Patient Name').padEnd(30)}Patient ID            : ${editablePatientData.patientId || 'UHAY25I22001'}
@@ -2228,7 +2228,7 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
           if (line.includes('Patient Details') || line.includes('DISCHARGE SUMMARY')) {
             if (line.includes('DISCHARGE SUMMARY')) {
               // Add the discharge summary header
-              htmlContent.push(`<h1 style="text-align: center; font-size: 16pt; font-weight: bold; margin: 20px 0; border-bottom: 2px solid #000; padding-bottom: 10px;">DISCHARGE SUMMARY</h1>`);
+              htmlContent.push(`<h1 style="text-align: center; font-size: 16pt; font-weight: bold; margin: 20px 0; border-bottom: 2px solid #000; padding-bottom: 10px;">OPD DISCHARGE SUMMARY</h1>`);
               inPatientDetails = true;
               patientDetailsData = [];
               return; // Skip processing this line further to avoid duplicate
@@ -2630,7 +2630,7 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Discharge Summary - ${patient?.patients?.name || 'Patient'}</title>
+    <title>OPD Discharge Summary - ${patient?.patients?.name || 'Patient'}</title>
     <style>
         @page {
             size: A4;
@@ -3021,7 +3021,7 @@ URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 937
                 <div className="border rounded-lg p-8 bg-white min-h-[500px] max-w-4xl mx-auto print:p-4 print:shadow-none">
                   {/* Hospital Header */}
                   <div className="text-center border-b-2 border-gray-800 pb-4 mb-6">
-                    <h1 className="text-2xl font-bold text-gray-800 mb-2">DISCHARGE SUMMARY</h1>
+                    <h1 className="text-2xl font-bold text-gray-800 mb-2">OPD DISCHARGE SUMMARY</h1>
                     <div className="text-sm text-gray-600">
                       <div className="grid grid-cols-2 gap-4 mt-4">
                         <div className="text-left">
