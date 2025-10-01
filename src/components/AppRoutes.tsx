@@ -13,6 +13,7 @@ import CurrentlyAdmittedPatients from "../pages/CurrentlyAdmittedPatients";
 
 // Lazy load discharged patients page
 const DischargedPatients = lazy(() => import("../pages/DischargedPatients"));
+const Accommodation = lazy(() => import("../pages/Accommodation"));
 
 // Import authentication pages
 import LoginPage from "./LoginPage";
@@ -102,6 +103,7 @@ export const AppRoutes = () => {
         <Route path="/advance-statement-report" element={<AdvanceStatementReport />} />
         <Route path="/advanced-statement-report" element={<Suspense fallback={<PageLoader />}><AdvancedStatementReport /></Suspense>} />
         <Route path="/currently-admitted" element={<CurrentlyAdmittedPatients />} />
+        <Route path="/accommodation" element={<Suspense fallback={<PageLoader />}><Accommodation /></Suspense>} />
         <Route path="/discharged-patients" element={<Suspense fallback={<PageLoader />}><DischargedPatients /></Suspense>} />
         <Route path="/security-verification" element={<Suspense fallback={<PageLoader />}><SecurityVerificationPage /></Suspense>} />
         <Route path="/mandatory-service" element={<Suspense fallback={<PageLoader />}><MandatoryService /></Suspense>} />

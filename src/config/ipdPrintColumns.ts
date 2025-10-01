@@ -62,6 +62,14 @@ export const IPD_PRINT_COLUMNS: ReportColumn[] = [
     align: 'left'
   },
   {
+    id: 'corporate',
+    label: 'Corporate',
+    accessorKey: 'patients.corporate',
+    printable: true,
+    widthPx: 150,
+    align: 'left'
+  },
+  {
     id: 'billing_status',
     label: 'Billing Status',
     accessorKey: 'billing_status',
@@ -285,6 +293,7 @@ export const IPD_PRINT_PRESETS: PrintPreset[] = [
       'claim_id',
       'esic_uhid',
       'billing_executive',
+      'corporate',
       'billing_status',
       'file_status',
       'visit_type',
@@ -303,6 +312,7 @@ export const IPD_PRINT_PRESETS: PrintPreset[] = [
       'patient_name',
       'claim_id',
       'billing_executive',
+      'corporate',
       'billing_status',
       'billing_sub_status',
       'package_amount',
@@ -360,6 +370,10 @@ export const generateIPDFilterSummary = (filters: Record<string, any>): Record<s
 
   if (filters.bunchFilter) {
     summary['Bunch'] = filters.bunchFilter;
+  }
+
+  if (filters.corporateFilter) {
+    summary['Corporate'] = filters.corporateFilter;
   }
 
   if (filters.daysAdmittedFilter) {

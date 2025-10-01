@@ -1703,6 +1703,7 @@ const TodaysIpdDashboard = () => {
       billingExecutiveFilter,
       billingStatusFilter,
       bunchFilter,
+      corporateFilter,
       fileStatusFilter,
       condonationSubmissionFilter,
       condonationIntimationFilter,
@@ -2453,25 +2454,23 @@ const TodaysIpdDashboard = () => {
 
         {/* Print Preview */}
         {showPrintPreview && (() => {
-          const selectedColumns = IPD_PRINT_COLUMNS.filter(col => printSelectedIds.includes(col.id));
-          
-          // Fallback to first 5 columns if none selected
-          const columnsToUse = selectedColumns.length > 0 
-            ? selectedColumns 
-            : IPD_PRINT_COLUMNS.filter(col => col.printable).slice(0, 5);
-          
-          console.log('Dashboard - Print selected IDs:', printSelectedIds);
-          console.log('Dashboard - Selected columns:', selectedColumns);
-          console.log('Dashboard - Columns to use:', columnsToUse);
-          console.log('Dashboard - Filtered visits:', filteredVisits);
-          console.log('Dashboard - Sample visit:', filteredVisits[0]);
-          
+          const finalSettings = { ...printSettings, selectedColumnIds: printSelectedIds };
+          console.log('=== IPD DASHBOARD PRINT DEBUG ===');
+          console.log('printSelectedIds:', printSelectedIds);
+          console.log('printSettings:', printSettings);
+          console.log('finalSettings:', finalSettings);
+          console.log('finalSettings.selectedColumnIds:', finalSettings.selectedColumnIds);
+          console.log('Number of columns to print:', finalSettings.selectedColumnIds.length);
+          console.log('Column IDs:', finalSettings.selectedColumnIds);
+          console.log('Total available columns:', IPD_PRINT_COLUMNS.length);
+          console.log('=================================');
+
           return (
             <PrintPreview
               reportTitle="Today's IPD Dashboard"
-              columns={columnsToUse}
+              columns={IPD_PRINT_COLUMNS}
               data={filteredVisits}
-              settings={printSettings}
+              settings={finalSettings}
               appliedFilters={getCurrentFilters()}
               onClose={() => setShowPrintPreview(false)}
             />

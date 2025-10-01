@@ -35,9 +35,10 @@ interface Patient {
 
 interface OpdPatientTableProps {
   patients: Patient[];
+  refetch?: () => void;
 }
 
-export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
+export const OpdPatientTable = ({ patients, refetch }: OpdPatientTableProps) => {
   const navigate = useNavigate();
   const [selectedPatientForVisit, setSelectedPatientForVisit] = useState<Patient | null>(null);
   const [isVisitFormOpen, setIsVisitFormOpen] = useState(false);
@@ -56,7 +57,17 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
 
   // Comment handlers
   const handleCommentClick = (patient: Patient) => {
+    console.log('🔔 Comment icon clicked for patient:', {
+      id: patient.id,
+      visit_id: patient.visit_id,
+      patient_name: patient.patients?.name,
+      comments: patient.comments,
+      has_comments: !!patient.comments,
+      comments_length: patient.comments?.length || 0
+    });
+
     const existingComment = patient.comments || '';
+    console.log('📄 Loading comment into textarea:', existingComment);
 
     // Load existing comment if any
     setCommentTexts(prev => ({
@@ -75,6 +86,8 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
       ...prev,
       [patient.id]: true
     }));
+
+    console.log('✅ Comment dialog opened with text:', existingComment);
   };
 
   const handleCommentChange = (visitId: string, text: string) => {
@@ -122,6 +135,10 @@ export const OpdPatientTable = ({ patients }: OpdPatientTableProps) => {
             // Show saved indicator
             setSavingComments(prev => ({ ...prev, [visitId]: false }));
             setSavedComments(prev => ({ ...prev, [visitId]: true }));
+            // Refetch parent data to update the patient list with new comments
+            if (refetch) {
+              refetch();
+            }
             // Hide saved indicator after 2 seconds
             setTimeout(() => {
               setSavedComments(prev => ({ ...prev, [visitId]: false }));

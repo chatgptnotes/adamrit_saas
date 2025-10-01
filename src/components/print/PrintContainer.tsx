@@ -11,21 +11,14 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
   appliedFilters,
   onPrintComplete
 }) => {
-  const selectedColumns = columns.filter(col => 
+  const selectedColumns = columns.filter(col =>
     settings.selectedColumnIds.includes(col.id)
   );
 
-  useEffect(() => {
-    // Auto-trigger print when component mounts
-    const timeoutId = setTimeout(() => {
-      window.print();
-      if (onPrintComplete) {
-        onPrintComplete();
-      }
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [onPrintComplete]);
+  // Fallback to first 5 printable columns if none selected
+  const columnsToDisplay = selectedColumns.length > 0
+    ? selectedColumns
+    : columns.filter(col => col.printable).slice(0, 5);
 
   const generateFilterSummary = () => {
     if (!appliedFilters || Object.keys(appliedFilters).length === 0) {
@@ -53,9 +46,10 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
   console.log('PrintContainer - Columns:', columns);
   console.log('PrintContainer - Settings:', settings);
   console.log('PrintContainer - Selected columns:', selectedColumns);
+  console.log('PrintContainer - Columns to display:', columnsToDisplay);
 
   return (
-    <div id="print-root" className="print-container">
+    <div id="print-root" className="print-container" data-print-content="true">
       {/* Print Header */}
       <div className="print-header">
         <div className="report-title">
@@ -76,22 +70,36 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
 
         <div className="report-stats">
           <p>
-            Showing {data.length} record{data.length !== 1 ? 's' : ''} 
-            {selectedColumns.length > 0 && ` across ${selectedColumns.length} column${selectedColumns.length !== 1 ? 's' : ''}`}
+            Showing {data.length} record{data.length !== 1 ? 's' : ''}
+            {columnsToDisplay.length > 0 && ` across ${columnsToDisplay.length} column${columnsToDisplay.length !== 1 ? 's' : ''}`}
           </p>
         </div>
       </div>
 
       {/* Print Table */}
       <div className="print-table-container">
-        <table className="print-table">
-          <thead>
-            <tr>
-              {selectedColumns.map((column) => (
+        <table
+          className="print-table"
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            display: 'table',
+            tableLayout: 'fixed'
+          }}
+        >
+          <thead style={{ display: 'table-header-group' }}>
+            <tr style={{ display: 'table-row' }}>
+              {columnsToDisplay.map((column) => (
                 <th
                   key={column.id}
                   className={`print-th ${column.align || 'left'}`}
-                  style={{ width: column.widthPx ? `${column.widthPx}px` : 'auto' }}
+                  style={{
+                    width: column.widthPx ? `${column.widthPx}px` : 'auto',
+                    display: 'table-cell',
+                    border: '1px solid #000',
+                    padding: '8px 6px',
+                    backgroundColor: '#f5f5f5'
+                  }}
                 >
                   <div className="print-header-content">
                     {column.label}
@@ -100,7 +108,7 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody style={{ display: 'table-row-group' }}>
             {data.map((row, rowIndex) => {
               // Debug first row
               if (rowIndex === 0) {
@@ -109,8 +117,8 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
               }
               
               return (
-                <tr key={rowIndex} className="print-tr">
-                  {selectedColumns.map((column) => {
+                <tr key={rowIndex} className="print-tr" style={{ display: 'table-row' }}>
+                  {columnsToDisplay.map((column) => {
                     const rawValue = getNestedValue(row, column.accessorKey);
                     const formattedValue = formatCellValue(rawValue, column);
                     
@@ -123,6 +131,11 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
                       <td
                         key={column.id}
                         className={`print-td ${column.align || 'left'}`}
+                        style={{
+                          display: 'table-cell',
+                          border: '1px solid #000',
+                          padding: '6px'
+                        }}
                       >
                         <div className="print-cell-content">
                           {formattedValue}
@@ -151,7 +164,7 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
       )}
 
       {/* Embedded CSS for print styling */}
-      <style jsx>{`
+      <style>{`
         .print-container {
           font-family: 'Arial', sans-serif;
           font-size: 12px;
@@ -218,6 +231,25 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
           border-collapse: collapse;
           margin: 0;
           font-size: 10px;
+          display: table !important;
+          table-layout: fixed;
+        }
+
+        .print-table thead {
+          display: table-header-group !important;
+        }
+
+        .print-table tbody {
+          display: table-row-group !important;
+        }
+
+        .print-table tr {
+          display: table-row !important;
+        }
+
+        .print-th,
+        .print-td {
+          display: table-cell !important;
         }
 
         .print-th {
@@ -228,6 +260,7 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
           font-size: 10px;
           vertical-align: middle;
           page-break-inside: avoid;
+          white-space: nowrap;
         }
 
         .print-th.left {
@@ -300,6 +333,54 @@ export const PrintContainer: React.FC<PrintContainerProps> = ({
 
         .report-footer {
           color: #666;
+        }
+
+        /* Print media queries */
+        @media print {
+          /* Ensure our print container is visible and positioned */
+          [data-print-content="true"] {
+            display: block !important;
+            visibility: visible !important;
+            position: relative !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 20px !important;
+          }
+
+          /* Force proper table display */
+          .print-table {
+            display: table !important;
+            width: 100% !important;
+            border-collapse: collapse !important;
+          }
+
+          .print-table thead {
+            display: table-header-group !important;
+          }
+
+          .print-table tbody {
+            display: table-row-group !important;
+          }
+
+          .print-table tr {
+            display: table-row !important;
+          }
+
+          .print-th,
+          .print-td {
+            display: table-cell !important;
+            border: 1px solid #000 !important;
+          }
+
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          /* Hide close button during print */
+          .no-print {
+            display: none !important;
+          }
         }
 
         /* Page break controls */
