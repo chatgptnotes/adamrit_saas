@@ -598,7 +598,8 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         .from('advance_payment')
         .select('advance_amount, status')
         .eq('visit_id', visitId)
-        .eq('status', 'ACTIVE'); // Only include active payments
+        .eq('status', 'ACTIVE') // Only include active payments
+        .eq('is_refund', false); // Only advance payments, NOT refunds
 
       console.log('📊 Advance payment query result:', { 
         advancePaymentData, 
@@ -626,6 +627,52 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
       return total;
     } catch (error) {
       console.error('❌ Error fetching advance payment total:', error);
+      return 0;
+    }
+  };
+
+  const fetchRefundedAmount = async (): Promise<number> => {
+    if (!visitId) {
+      console.log('🚫 No visitId provided for refunded amount');
+      return 0;
+    }
+
+    console.log('🔍 Fetching refunded amount for visit:', visitId);
+
+    try {
+      const { data: refundData, error: refundError } = await supabase
+        .from('advance_payment')
+        .select('advance_amount, status')
+        .eq('visit_id', visitId)
+        .eq('status', 'ACTIVE')
+        .eq('is_refund', true); // Only refunds, NOT advance payments
+
+      console.log('📊 Refund query result:', {
+        refundData,
+        refundError,
+        count: refundData?.length || 0
+      });
+
+      if (refundError) {
+        console.error('❌ Refund query error:', refundError);
+        return 0;
+      }
+
+      if (!refundData || refundData.length === 0) {
+        console.log('📝 No refund data found for visit');
+        return 0;
+      }
+
+      // Calculate total refunded amount
+      const total = refundData.reduce((sum, payment) => {
+        const amount = parseFloat(payment.advance_amount?.toString() || '0') || 0;
+        return sum + amount;
+      }, 0);
+
+      console.log('✅ Refunded amount calculated:', total, 'from', refundData.length, 'refunds');
+      return total;
+    } catch (error) {
+      console.error('❌ Error fetching refunded amount:', error);
       return 0;
     }
   };
@@ -941,6 +988,54 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         console.log('  2. The save operation failed silently');
         console.log('  3. We are loading from a different billId than we saved to');
         console.log('  4. The financial_summary table has different constraints than expected');
+
+        // 🔥 CRITICAL FIX: Load discount from visit_discounts table even if financial_summary doesn't exist
+        console.log('🔍 [DISCOUNT INTEGRATION - NO RECORD] Attempting to load discount from visit_discounts table...');
+        try {
+          const lookupId = visitId || billId;
+          if (lookupId) {
+            console.log('🔍 [DISCOUNT INTEGRATION - NO RECORD] Using ID for discount lookup:', lookupId);
+
+            // Get visit UUID from visitId or billId
+            const { data: visitData, error: visitError } = await supabase
+              .from('visits')
+              .select('id, visit_id')
+              .eq('visit_id', lookupId)
+              .single();
+
+            console.log('🔍 [DISCOUNT INTEGRATION - NO RECORD] Visit query result:', { visitData, visitError });
+
+            if (!visitError && visitData) {
+              // Load discount from visit_discounts table
+              console.log('🔍 [DISCOUNT INTEGRATION - NO RECORD] Querying visit_discounts with visit UUID:', visitData.id);
+              const { data: discountData, error: discountError } = await supabase
+                .from('visit_discounts')
+                .select('*')
+                .eq('visit_id', visitData.id)
+                .single();
+
+              console.log('🔍 [DISCOUNT INTEGRATION - NO RECORD] Discount query result:', { discountData, discountError });
+
+              if (!discountError && discountData) {
+                console.log('✅ [DISCOUNT INTEGRATION - NO RECORD] SUCCESS! Found discount:', discountData.discount_amount);
+                // Update state with discount value
+                setFinancialSummaryDataTracked(prev => ({
+                  ...prev,
+                  discount: {
+                    ...prev.discount,
+                    total: discountData.discount_amount?.toString() || ''
+                  }
+                }));
+                console.log('✅ [DISCOUNT INTEGRATION - NO RECORD] Updated state with discount total:', discountData.discount_amount);
+                setIsInitializing(false);
+                setHasLoadedFromDatabase(true);
+                return; // Exit early - discount loaded successfully
+              }
+            }
+          }
+        } catch (discountError) {
+          console.error('❌ [DISCOUNT INTEGRATION - NO RECORD] Exception loading discount:', discountError);
+        }
 
         // Try session backup first, then emergency backup as last resort
         console.log('🚨 [RECOVERY SEQUENCE] Starting recovery sequence for missing database data...');
@@ -1436,14 +1531,16 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         mandatoryTotal,
         radiologyTotal,
         pharmacyTotal,
-        advancePaymentTotal
+        advancePaymentTotal,
+        refundedTotal
       ] = await Promise.all([
         fetchLabTestsTotal(),
         fetchClinicalServicesTotal(),
         fetchMandatoryServicesTotal(),
         fetchRadiologyTotal(),
         fetchPharmacyTotal(),
-        fetchAdvancePaymentTotal()
+        fetchAdvancePaymentTotal(),
+        fetchRefundedAmount()
       ]);
 
       // Calculate grand total
@@ -1481,7 +1578,12 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
             advancePayment: advancePaymentTotal.toString(),
             total: advancePaymentTotal.toString()
           },
-          refundedAmount: { ...prev.refundedAmount },
+          // ✅ Update refunded amount in Refunded Amount row
+          refundedAmount: {
+            ...prev.refundedAmount,
+            advancePayment: refundedTotal.toString(),
+            total: refundedTotal.toString()
+          },
 
           // ⚠️ SIMPLE BALANCE: Calculate without discount (discount applied separately via Calculate button)
           balance: {
@@ -1492,7 +1594,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
             radiology: (radiologyTotal - (parseFloat(prev.amountPaid.radiology) || 0) + (parseFloat(prev.refundedAmount.radiology) || 0)).toString(),
             pharmacy: (pharmacyTotal - (parseFloat(prev.amountPaid.pharmacy) || 0) + (parseFloat(prev.refundedAmount.pharmacy) || 0)).toString(),
             mandatoryServices: (mandatoryTotal - (parseFloat(prev.amountPaid.mandatoryServices) || 0) + (parseFloat(prev.refundedAmount.mandatoryServices) || 0)).toString(),
-            total: (grandTotal - advancePaymentTotal + (parseFloat(prev.refundedAmount.total) || 0)).toString()
+            total: (grandTotal - advancePaymentTotal + refundedTotal).toString()
           }
         };
 
@@ -1509,6 +1611,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
 
       console.log('✅ [AUTO-POPULATE] Totals-only auto-populate completed successfully:', {
         advancePaymentTotal,
+        refundedTotal,
         labTotal,
         clinicalTotal,
         mandatoryTotal,
