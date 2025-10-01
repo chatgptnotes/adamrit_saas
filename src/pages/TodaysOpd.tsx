@@ -33,7 +33,7 @@ const TodaysOpd = () => {
   });
 
   // Fetch OPD patients
-  const { data: opdPatients = [], isLoading } = useQuery({
+  const { data: opdPatients = [], isLoading, refetch } = useQuery({
     queryKey: ['opd-patients', hospitalConfig?.name],
     queryFn: async () => {
       console.log('Fetching OPD patients...');
@@ -74,6 +74,22 @@ const TodaysOpd = () => {
 
       console.log('OPD Patients fetched:', data);
       console.log('Total OPD patients found:', data?.length || 0);
+
+      // Debug: Check comments in fetched data
+      console.log('📊 Sample OPD patient data (first patient):', data?.[0]);
+      console.log('💬 Comments in first patient:', data?.[0]?.comments);
+
+      // Log all patients with comments
+      const patientsWithComments = data?.filter(v => v.comments) || [];
+      console.log(`📝 Found ${patientsWithComments.length} patients with comments out of ${data?.length || 0} total patients`);
+      if (patientsWithComments.length > 0) {
+        console.log('💭 Patients with comments:', patientsWithComments.map(v => ({
+          id: v.id,
+          visit_id: v.visit_id,
+          patient_name: v.patients?.name,
+          comments: v.comments
+        })));
+      }
 
       // If you want to filter by today only, uncomment this:
       // const today = new Date();
@@ -203,7 +219,7 @@ const TodaysOpd = () => {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
           ) : (
-            <OpdPatientTable patients={filteredPatients} />
+            <OpdPatientTable patients={filteredPatients} refetch={refetch} />
           )}
         </CardContent>
       </Card>

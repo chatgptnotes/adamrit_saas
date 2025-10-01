@@ -35,25 +35,34 @@ export const usePrintColumns = (
       const savedColumns = localStorage.getItem(STORAGE_KEY_COLUMNS);
       const savedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
 
+      let columnsToUse: string[] = [];
+
       if (savedColumns) {
         const parsedColumns = JSON.parse(savedColumns);
         // Validate that saved columns still exist in current column set
-        const validColumns = parsedColumns.filter((id: string) => 
+        const validColumns = parsedColumns.filter((id: string) =>
           allColumns.some(col => col.id === id && col.printable)
         );
+        columnsToUse = validColumns;
         setSelectedIds(validColumns);
+        // CRITICAL: Sync to settings immediately
+        setSettings(prev => ({ ...prev, selectedColumnIds: validColumns }));
       } else {
         // Default to first 5 printable columns if no saved selection
         const defaultColumns = allColumns
           .filter(col => col.printable)
           .slice(0, 5)
           .map(col => col.id);
+        columnsToUse = defaultColumns;
         setSelectedIds(defaultColumns);
+        // CRITICAL: Sync to settings immediately
+        setSettings(prev => ({ ...prev, selectedColumnIds: defaultColumns }));
       }
 
       if (savedSettings) {
         const parsedSettings = { ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) };
-        setSettings(parsedSettings);
+        // CRITICAL: Ensure selectedColumnIds matches the loaded columns
+        setSettings({ ...parsedSettings, selectedColumnIds: columnsToUse });
       }
     } catch (error) {
       console.warn('Failed to load print preferences:', error);
@@ -63,6 +72,8 @@ export const usePrintColumns = (
         .slice(0, 5)
         .map(col => col.id);
       setSelectedIds(defaultColumns);
+      // CRITICAL: Sync to settings immediately
+      setSettings(prev => ({ ...prev, selectedColumnIds: defaultColumns }));
     }
   }, [reportKey, allColumns, STORAGE_KEY_COLUMNS, STORAGE_KEY_SETTINGS]);
 
@@ -85,10 +96,12 @@ export const usePrintColumns = (
 
   const handleSetSelectedIds = useCallback((ids: string[]) => {
     // Validate that all provided IDs exist in printable columns
-    const validIds = ids.filter(id => 
+    const validIds = ids.filter(id =>
       allColumns.some(col => col.id === id && col.printable)
     );
     setSelectedIds(validIds);
+    // CRITICAL: Sync selectedIds into settings.selectedColumnIds immediately
+    setSettings(prev => ({ ...prev, selectedColumnIds: validIds }));
   }, [allColumns]);
 
   const handleSetSettings = useCallback((partialSettings: Partial<PrintSettings>) => {
