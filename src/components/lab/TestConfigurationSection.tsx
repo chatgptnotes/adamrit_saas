@@ -11,6 +11,7 @@ export interface SubTest {
   unit: string;
   ageRanges: AgeRange[];
   normalRanges: NormalRange[];
+  subTests?: SubTest[]; // Nested sub-tests
 }
 
 export interface AgeRange {
@@ -53,7 +54,8 @@ const TestConfigurationSection: React.FC<TestConfigurationSectionProps> = ({
       name: '',
       unit: '',
       ageRanges: [],
-      normalRanges: []
+      normalRanges: [],
+      subTests: []
     };
     onSubTestsChange([...subTests, newSubTest]);
     setNextSubTestId(nextSubTestId + 1);
@@ -67,6 +69,85 @@ const TestConfigurationSection: React.FC<TestConfigurationSectionProps> = ({
 
   const removeSubTest = (id: string) => {
     onSubTestsChange(subTests.filter(st => st.id !== id));
+  };
+
+  // Nested sub-test functions
+  const addNestedSubTest = (parentId: string) => {
+    const newNestedSubTest: SubTest = {
+      id: `subtest_${nextSubTestId}`,
+      name: '',
+      unit: '',
+      ageRanges: [],
+      normalRanges: [],
+      subTests: []
+    };
+    setNextSubTestId(nextSubTestId + 1);
+
+    const updateNestedSubTests = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: [...(test.subTests || []), newNestedSubTest]
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return {
+            ...test,
+            subTests: updateNestedSubTests(test.subTests)
+          };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNestedSubTests(subTests));
+  };
+
+  const updateNestedSubTest = (parentId: string, nestedId: string, updatedSubTest: Partial<SubTest>) => {
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId ? { ...nested, ...updatedSubTest } : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return {
+            ...test,
+            subTests: updateNested(test.subTests)
+          };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
+  };
+
+  const removeNestedSubTest = (parentId: string, nestedId: string) => {
+    const removeNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).filter(nested => nested.id !== nestedId)
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return {
+            ...test,
+            subTests: removeNested(test.subTests)
+          };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(removeNested(subTests));
   };
 
   const addAgeRange = (subTestId: string) => {
@@ -136,6 +217,173 @@ const TestConfigurationSection: React.FC<TestConfigurationSectionProps> = ({
     updateSubTest(subTestId, {
       normalRanges: subTest.normalRanges.filter(nr => nr.id !== normalRangeId)
     });
+  };
+
+  // Functions for nested sub-test age ranges
+  const addNestedAgeRange = (parentId: string, nestedId: string) => {
+    const newAgeRange: AgeRange = {
+      id: `agerange_${Date.now()}`,
+      minAge: '',
+      maxAge: '',
+      unit: 'Years',
+      description: ''
+    };
+
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId
+                ? { ...nested, ageRanges: [...nested.ageRanges, newAgeRange] }
+                : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return { ...test, subTests: updateNested(test.subTests) };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
+  };
+
+  const updateNestedAgeRange = (parentId: string, nestedId: string, ageRangeId: string, updatedRange: Partial<AgeRange>) => {
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId
+                ? {
+                    ...nested,
+                    ageRanges: nested.ageRanges.map(ar =>
+                      ar.id === ageRangeId ? { ...ar, ...updatedRange } : ar
+                    )
+                  }
+                : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return { ...test, subTests: updateNested(test.subTests) };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
+  };
+
+  const removeNestedAgeRange = (parentId: string, nestedId: string, ageRangeId: string) => {
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId
+                ? { ...nested, ageRanges: nested.ageRanges.filter(ar => ar.id !== ageRangeId) }
+                : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return { ...test, subTests: updateNested(test.subTests) };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
+  };
+
+  // Functions for nested sub-test normal ranges
+  const addNestedNormalRange = (parentId: string, nestedId: string) => {
+    const newNormalRange: NormalRange = {
+      id: `normalrange_${Date.now()}`,
+      ageRange: '- Years',
+      gender: 'Both',
+      minValue: '',
+      maxValue: '',
+      unit: ''
+    };
+
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId
+                ? { ...nested, normalRanges: [...nested.normalRanges, newNormalRange] }
+                : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return { ...test, subTests: updateNested(test.subTests) };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
+  };
+
+  const updateNestedNormalRange = (parentId: string, nestedId: string, normalRangeId: string, updatedRange: Partial<NormalRange>) => {
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId
+                ? {
+                    ...nested,
+                    normalRanges: nested.normalRanges.map(nr =>
+                      nr.id === normalRangeId ? { ...nr, ...updatedRange } : nr
+                    )
+                  }
+                : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return { ...test, subTests: updateNested(test.subTests) };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
+  };
+
+  const removeNestedNormalRange = (parentId: string, nestedId: string, normalRangeId: string) => {
+    const updateNested = (tests: SubTest[]): SubTest[] => {
+      return tests.map(test => {
+        if (test.id === parentId) {
+          return {
+            ...test,
+            subTests: (test.subTests || []).map(nested =>
+              nested.id === nestedId
+                ? { ...nested, normalRanges: nested.normalRanges.filter(nr => nr.id !== normalRangeId) }
+                : nested
+            )
+          };
+        }
+        if (test.subTests && test.subTests.length > 0) {
+          return { ...test, subTests: updateNested(test.subTests) };
+        }
+        return test;
+      });
+    };
+
+    onSubTestsChange(updateNested(subTests));
   };
 
   return (
@@ -395,6 +643,226 @@ const TestConfigurationSection: React.FC<TestConfigurationSectionProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Nested Sub-Tests Section */}
+          {subTest.subTests && subTest.subTests.length > 0 && (
+            <div className="space-y-3 mt-4 pl-6 border-l-4 border-blue-300">
+              <Label className="text-sm font-semibold text-blue-800">Nested Sub-Tests</Label>
+              {subTest.subTests.map((nestedSubTest) => (
+                <div key={nestedSubTest.id} className="border border-blue-200 rounded-lg p-4 bg-blue-50 space-y-3 relative">
+                  {/* Remove nested sub-test button */}
+                  <Button
+                    type="button"
+                    onClick={() => removeNestedSubTest(subTest.id, nestedSubTest.id)}
+                    className="absolute top-2 right-2 w-5 h-5 rounded-full bg-gray-200 hover:bg-red-200 p-0 flex items-center justify-center"
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <X className="h-3 w-3 text-red-500" />
+                  </Button>
+
+                  {/* Nested Sub-Test Header */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs font-medium text-gray-700 mb-1 block">Nested Sub Test Name</Label>
+                      <Input
+                        placeholder="e.g. Differential Count"
+                        value={nestedSubTest.name}
+                        onChange={(e) => updateNestedSubTest(subTest.id, nestedSubTest.id, { name: e.target.value })}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-medium text-gray-700 mb-1 block">Unit</Label>
+                      <Input
+                        placeholder="e.g. %"
+                        value={nestedSubTest.unit}
+                        onChange={(e) => updateNestedSubTest(subTest.id, nestedSubTest.id, { unit: e.target.value })}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Nested Age Ranges */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-gray-700">Age Ranges</Label>
+                      <Button
+                        type="button"
+                        onClick={() => addNestedAgeRange(subTest.id, nestedSubTest.id)}
+                        className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 h-6 text-xs"
+                        size="sm"
+                      >
+                        <Plus className="h-2 w-2 mr-1" />
+                        Add Age Range
+                      </Button>
+                    </div>
+
+                    {nestedSubTest.ageRanges.map((ageRange) => (
+                      <div key={ageRange.id} className="grid grid-cols-12 gap-2 items-center">
+                        <div className="col-span-2">
+                          <Input
+                            placeholder="1"
+                            value={ageRange.minAge}
+                            onChange={(e) => updateNestedAgeRange(subTest.id, nestedSubTest.id, ageRange.id, { minAge: e.target.value })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            placeholder="5"
+                            value={ageRange.maxAge}
+                            onChange={(e) => updateNestedAgeRange(subTest.id, nestedSubTest.id, ageRange.id, { maxAge: e.target.value })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Select
+                            value={ageRange.unit}
+                            onValueChange={(value: 'Days' | 'Months' | 'Years') =>
+                              updateNestedAgeRange(subTest.id, nestedSubTest.id, ageRange.id, { unit: value })
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Days">Days</SelectItem>
+                              <SelectItem value="Months">Months</SelectItem>
+                              <SelectItem value="Years">Years</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-5">
+                          <Input
+                            placeholder="Description"
+                            value={ageRange.description}
+                            onChange={(e) => updateNestedAgeRange(subTest.id, nestedSubTest.id, ageRange.id, { description: e.target.value })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          <Button
+                            type="button"
+                            onClick={() => removeNestedAgeRange(subTest.id, nestedSubTest.id, ageRange.id)}
+                            className="w-5 h-5 rounded-full bg-red-100 hover:bg-red-200 p-0 flex items-center justify-center"
+                            size="sm"
+                            variant="ghost"
+                          >
+                            <X className="h-2 w-2 text-red-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Nested Normal Ranges */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-gray-700">Normal Ranges</Label>
+                      <Button
+                        type="button"
+                        onClick={() => addNestedNormalRange(subTest.id, nestedSubTest.id)}
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 h-6 text-xs"
+                        size="sm"
+                      >
+                        <Plus className="h-2 w-2 mr-1" />
+                        Add Normal Range
+                      </Button>
+                    </div>
+
+                    {nestedSubTest.normalRanges.map((normalRange) => (
+                      <div key={normalRange.id} className="grid grid-cols-12 gap-2 items-center">
+                        <div className="col-span-2">
+                          <Select
+                            value={normalRange.ageRange}
+                            onValueChange={(value) => updateNestedNormalRange(subTest.id, nestedSubTest.id, normalRange.id, { ageRange: value })}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="- Years">- Years</SelectItem>
+                              {nestedSubTest.ageRanges.map((ar, arIndex) => (
+                                <SelectItem key={`${ar.id}-${arIndex}`} value={`${ar.minAge}-${ar.maxAge} ${ar.unit}`}>
+                                  {ar.minAge}-{ar.maxAge} {ar.unit}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-2">
+                          <Select
+                            value={normalRange.gender}
+                            onValueChange={(value: 'Male' | 'Female' | 'Both') =>
+                              updateNestedNormalRange(subTest.id, nestedSubTest.id, normalRange.id, { gender: value })
+                            }
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Both">Both</SelectItem>
+                              <SelectItem value="Male">Male</SelectItem>
+                              <SelectItem value="Female">Female</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            placeholder="Min"
+                            value={normalRange.minValue}
+                            onChange={(e) => updateNestedNormalRange(subTest.id, nestedSubTest.id, normalRange.id, { minValue: e.target.value })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <Input
+                            placeholder="Max"
+                            value={normalRange.maxValue}
+                            onChange={(e) => updateNestedNormalRange(subTest.id, nestedSubTest.id, normalRange.id, { maxValue: e.target.value })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          <Input
+                            placeholder="Unit"
+                            value={normalRange.unit}
+                            onChange={(e) => updateNestedNormalRange(subTest.id, nestedSubTest.id, normalRange.id, { unit: e.target.value })}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          <Button
+                            type="button"
+                            onClick={() => removeNestedNormalRange(subTest.id, nestedSubTest.id, normalRange.id)}
+                            className="w-5 h-5 rounded-full bg-red-100 hover:bg-red-200 p-0 flex items-center justify-center"
+                            size="sm"
+                            variant="ghost"
+                          >
+                            <X className="h-2 w-2 text-red-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add Nested Sub-Test Button */}
+          <div className="flex justify-end mt-3">
+            <Button
+              type="button"
+              onClick={() => addNestedSubTest(subTest.id)}
+              className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 h-7 text-xs"
+              size="sm"
+            >
+              <Plus className="h-3 w-3" />
+              Add Nested Sub-Test
+            </Button>
           </div>
         </div>
       ))}
