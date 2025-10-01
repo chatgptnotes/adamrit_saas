@@ -1319,8 +1319,9 @@ const TodaysIpdDashboard = () => {
     const matchesBunch = !bunchFilter ||
       visit.bunch_no === bunchFilter;
 
-    const matchesCorporate = !corporateFilter ||
+    const matchesCorporate = !corporateFilter 
       visit.patients?.corporate?.toLowerCase().trim() === corporateFilter.toLowerCase().trim();
+
 
     const includeBy = (selected: string[], value?: string | null) =>
       selected.length === 0 || (value ? selected.includes(value) : false);

@@ -410,10 +410,20 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
   };
 
   const handleSave = async () => {
-    // Validation
-    if (!formData.advanceAmount || parseFloat(formData.advanceAmount) <= 0) {
-      toast.error('Please enter a valid advance amount');
-      return;
+    // Validation - allow empty amount for refund-only transactions
+    if (!formData.isRefund) {
+      // Advance payment - amount is required
+      if (!formData.advanceAmount || parseFloat(formData.advanceAmount) <= 0) {
+        toast.error('Please enter a valid advance amount');
+        return;
+      }
+    } else {
+      // Refund - amount is optional (can be refund-only or combined with advance)
+      if (formData.advanceAmount && parseFloat(formData.advanceAmount) <= 0) {
+        toast.error('Please enter a valid refund amount or leave empty');
+        return;
+      }
+
     }
 
     if (!patientId || !isValidUUID(patientId)) {
@@ -443,7 +453,7 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
         bill_no: patientInfo.billNo && patientInfo.billNo !== 'N/A' ? patientInfo.billNo : null,
         patients_id: patientInfo.registrationNo && patientInfo.registrationNo !== 'N/A' ? patientInfo.registrationNo : null,
         date_of_admission: parseDisplayDate(patientInfo.dateOfAdmission),
-        advance_amount: parseFloat(formData.advanceAmount),
+        advance_amount: formData.advanceAmount ? parseFloat(formData.advanceAmount) : 0,
         returned_amount: returnedAmount || 0.00,
         is_refund: formData.isRefund || false,
         refund_reason: formData.isRefund && formData.refundReason ? formData.refundReason.trim() : null,
@@ -740,16 +750,20 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
             {/* Advance Amount */}
             <div className="grid grid-cols-2 items-center gap-4">
               <Label htmlFor="advanceAmount" className="text-sm font-medium">
-                Advance Amount <span className="text-red-500">*</span>
+                {formData.isRefund ? 'Refund Amount' : 'Advance Amount'}
+                {!formData.isRefund && <span className="text-red-500"> *</span>}
+                {formData.isRefund && <span className="text-gray-500 text-xs"> (Optional)</span>}
               </Label>
               <Input
                 id="advanceAmount"
                 type="number"
                 step="0.01"
+                min="0"
                 value={formData.advanceAmount}
                 onChange={(e) => setFormData({ ...formData, advanceAmount: e.target.value })}
-                placeholder="Enter amount"
+                placeholder={formData.isRefund ? "Enter refund amount (optional)" : "Enter amount"}
                 className="w-full"
+                autoComplete="off"
               />
             </div>
 

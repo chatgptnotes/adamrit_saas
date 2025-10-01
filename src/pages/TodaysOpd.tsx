@@ -125,7 +125,7 @@ const TodaysOpd = () => {
     );
 
     const matchesCorporate = !corporateFilter ||
-      patient.patients?.corporate === corporateFilter;
+      patient.patients?.corporate?.trim().toLowerCase() === corporateFilter.trim().toLowerCase();
 
     return matchesSearch && matchesCorporate;
   });

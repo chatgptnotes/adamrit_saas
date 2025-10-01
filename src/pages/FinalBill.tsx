@@ -1056,6 +1056,7 @@ const FinalBill = () => {
 
   // Middle section state for search and selection
   const [serviceSearchTerm, setServiceSearchTerm] = useState("");
+  const [accommodationSearchTerm, setAccommodationSearchTerm] = useState("");
   const [activeServiceTab, setActiveServiceTab] = useState("Laboratory services");
   const [diagnosisSearchTerm, setDiagnosisSearchTerm] = useState("");
   const [selectedDiagnoses, setSelectedDiagnoses] = useState<any[]>([]);
@@ -1603,10 +1604,12 @@ const FinalBill = () => {
   const [savedMedicationData, setSavedMedicationData] = useState<any[]>([]);
   const [savedClinicalServicesData, setSavedClinicalServicesData] = useState<any[]>([]);
   const [savedMandatoryServicesData, setSavedMandatoryServicesData] = useState<any[]>([]);
+  const [savedAccommodationData, setSavedAccommodationData] = useState<any[]>([]);
 
   // State initialization flags to prevent duplicate fetches
   const [clinicalServicesInitialized, setClinicalServicesInitialized] = useState(false);
   const [mandatoryServicesInitialized, setMandatoryServicesInitialized] = useState(false);
+  const [accommodationInitialized, setAccommodationInitialized] = useState(false);
 
   // Force refresh counter for mandatory services UI
   const [mandatoryServicesRefreshKey, setMandatoryServicesRefreshKey] = useState(0);
@@ -1618,6 +1621,7 @@ const FinalBill = () => {
   const [editingLabId, setEditingLabId] = useState<string | null>(null);
   const [editingRadiologyId, setEditingRadiologyId] = useState<string | null>(null);
   const [editingMedicationId, setEditingMedicationId] = useState<string | null>(null);
+  const [editingAccommodationId, setEditingAccommodationId] = useState<string | null>(null);
 
   // State for medication modal
   const [selectedMedication, setSelectedMedication] = useState<any>(null);
@@ -1776,6 +1780,30 @@ const FinalBill = () => {
     } catch (error) {
       console.error('Error updating medication field:', error);
       toast.error('Failed to update medication data');
+    }
+  };
+
+  // Functions to update accommodation data
+  const updateAccommodationField = async (accommodationId: string, field: string, value: string) => {
+    try {
+      const { error } = await supabase
+        .from('visit_accommodations')
+        .update({ [field]: value })
+        .eq('id', accommodationId);
+
+      if (error) {
+        console.error('Error updating accommodation field:', error);
+        toast.error('Failed to update accommodation data');
+        return;
+      }
+
+      // Refresh accommodation data to get auto-calculated days and amount
+      await fetchSavedAccommodationData();
+
+      toast.success('Accommodation data updated successfully');
+    } catch (error) {
+      console.error('Error updating accommodation field:', error);
+      toast.error('Failed to update accommodation data');
     }
   };
 
@@ -2003,7 +2031,7 @@ const FinalBill = () => {
                 return {
                   ...item,
                   medication_name: medicationDetails?.name || 'Unknown Medication',
-                  cost: medicationDetails?.price_per_strip || 0,
+                  cost: item.cost || medicationDetails?.price_per_strip || 0,
                   description: medicationDetails?.description || ''
                 };
               }
@@ -6084,6 +6112,110 @@ INSTRUCTIONS:
     }
   };
 
+  // Function to ensure visit exists in database, creating it if necessary
+  const ensureVisitExists = async (targetVisitId: string) => {
+    console.log('🔍 [ENSURE VISIT] Checking if visit exists:', targetVisitId);
+
+    try {
+      // First check if visit already exists
+      const { data: existingVisit, error: existingError } = await supabase
+        .from('visits')
+        .select('id, visit_id')
+        .eq('visit_id', targetVisitId)
+        .single();
+
+      if (existingVisit && !existingError) {
+        console.log('✅ [ENSURE VISIT] Visit already exists:', existingVisit.id);
+        return {
+          success: true,
+          visitUuid: existingVisit.id,
+          created: false
+        };
+      }
+
+      // Visit doesn't exist - need to create it
+      console.log('🆕 [ENSURE VISIT] Visit not found, creating new visit record...');
+
+      // Get patient UUID - check multiple sources
+      let patientUuid = visitPatientData?.id;
+
+      if (!patientUuid && patientData.registrationNo) {
+        // Try to get patient UUID from registration number
+        console.log('🔍 [ENSURE VISIT] Looking up patient by registration number:', patientData.registrationNo);
+        const { data: patientLookup, error: patientError } = await supabase
+          .from('patients')
+          .select('id')
+          .eq('registration_no', patientData.registrationNo)
+          .single();
+
+        if (patientLookup && !patientError) {
+          patientUuid = patientLookup.id;
+          console.log('✅ [ENSURE VISIT] Found patient UUID:', patientUuid);
+        }
+      }
+
+      if (!patientUuid) {
+        console.error('❌ [ENSURE VISIT] Cannot create visit: patient UUID not available');
+        toast.error('Cannot add service: Patient record not found. Please save patient data first.');
+        return {
+          success: false,
+          error: 'Patient UUID not available',
+          created: false
+        };
+      }
+
+      // Prepare visit data with required fields
+      const newVisitData = {
+        visit_id: targetVisitId,
+        patient_id: patientUuid,
+        visit_date: patientData.dateOfAdmission || new Date().toISOString().split('T')[0],
+        visit_type: 'IPD', // Default to IPD (In-Patient Department)
+        appointment_with: patientData.beneficiaryName || patientData.name || 'Unknown',
+        status: 'scheduled',
+        // Optional fields that we have data for
+        admission_date: patientData.dateOfAdmission || null,
+        discharge_date: patientData.dateOfDischarge || null,
+        claim_id: patientData.claimId || null
+      };
+
+      console.log('💾 [ENSURE VISIT] Creating visit with data:', newVisitData);
+
+      // Create the visit
+      const { data: createdVisit, error: createError } = await supabase
+        .from('visits')
+        .insert(newVisitData)
+        .select('id, visit_id')
+        .single();
+
+      if (createError) {
+        console.error('❌ [ENSURE VISIT] Failed to create visit:', createError);
+        toast.error('Failed to create visit record: ' + createError.message);
+        return {
+          success: false,
+          error: createError,
+          created: false
+        };
+      }
+
+      console.log('✅ [ENSURE VISIT] Visit created successfully:', createdVisit);
+      toast.success('Visit record created automatically');
+
+      return {
+        success: true,
+        visitUuid: createdVisit.id,
+        created: true
+      };
+
+    } catch (error) {
+      console.error('❌ [ENSURE VISIT] Unexpected error:', error);
+      return {
+        success: false,
+        error,
+        created: false
+      };
+    }
+  };
+
   // Function to verify database schema for clinical and mandatory services columns
   const verifyDatabaseSchema = async () => {
     console.log('🔍 [SCHEMA VERIFICATION] Starting database schema verification...');
@@ -6434,20 +6566,6 @@ INSTRUCTIONS:
 
             console.log('🎉 [RAW DB EMERGENCY] Successfully recovered services:', recoveredServices);
 
-            // BACKUP TO LOCALSTORAGE for emergency recovery
-            try {
-              const backupData = {
-                visitId: visitId,
-                services: recoveredServices,
-                timestamp: Date.now(),
-                recoveryMethod: 'raw_db_emergency'
-              };
-              localStorage.setItem(`mandatory_services_${visitId}`, JSON.stringify(backupData));
-              console.log('💾 [EMERGENCY BACKUP] Saved to localStorage');
-            } catch (storageError) {
-              console.error('❌ [EMERGENCY BACKUP] Failed to save to localStorage:', storageError);
-            }
-
             // Update state directly
             setSavedMandatoryServicesData(recoveredServices);
             setMandatoryServices(recoveredServices);
@@ -6460,39 +6578,7 @@ INSTRUCTIONS:
         }
       }
 
-      console.log('⚠️ [RAW DB EMERGENCY] No services found with emergency method, trying localStorage backup...');
-
-      // FINAL FALLBACK: Check localStorage backup
-      try {
-        const backupKey = `mandatory_services_${visitId}`;
-        const backupData = localStorage.getItem(backupKey);
-
-        if (backupData) {
-          const parsed = JSON.parse(backupData);
-          const timeDiff = Date.now() - parsed.timestamp;
-
-          // Use backup if less than 1 hour old
-          if (timeDiff < 3600000 && parsed.services && parsed.services.length > 0) {
-            console.log('🔄 [LOCALSTORAGE RECOVERY] Found localStorage backup:', {
-              services: parsed.services,
-              age: Math.round(timeDiff / 1000) + ' seconds',
-              count: parsed.services.length
-            });
-
-            // Update state with backup data
-            setSavedMandatoryServicesData(parsed.services);
-            setMandatoryServices(parsed.services);
-            setMandatoryServicesInitialized(true);
-            setMandatoryServicesRefreshKey(prev => prev + 1);
-
-            return parsed.services;
-          }
-        }
-      } catch (storageError) {
-        console.error('❌ [LOCALSTORAGE RECOVERY] Failed to recover from localStorage:', storageError);
-      }
-
-      console.log('⚠️ [FINAL FALLBACK] All emergency methods failed, proceeding with normal fetch...');
+      console.log('⚠️ [RAW DB EMERGENCY] No services found with emergency method, proceeding with normal fetch...');
     } catch (emergencyError) {
       console.error('❌ [RAW DB EMERGENCY] Emergency recovery failed:', emergencyError);
     }
@@ -6979,6 +7065,200 @@ INSTRUCTIONS:
     }
   };
 
+  // Function to fetch saved accommodation data
+  const fetchSavedAccommodationData = async () => {
+    if (!visitId) {
+      console.log('⚠️ [ACCOMMODATION FETCH] No visitId available');
+      return [];
+    }
+
+    try {
+      console.log('🔍 [ACCOMMODATION FETCH] Starting fetch for visitId:', visitId);
+
+      // Get visit UUID
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.error('❌ [ACCOMMODATION FETCH] Visit not found:', visitError);
+        return [];
+      }
+
+      console.log('✅ [ACCOMMODATION FETCH] Visit found:', visitData.id);
+
+      // Fetch accommodation data with join
+      const { data: accommodationData, error: accommodationError } = await supabase
+        .from('visit_accommodations')
+        .select(`
+          *,
+          accommodation:accommodation_id (
+            id,
+            room_type,
+            private_rate,
+            nabh_rate,
+            non_nabh_rate,
+            tpa_rate
+          )
+        `)
+        .eq('visit_id', visitData.id)
+        .order('start_date', { ascending: false });
+
+      if (accommodationError) {
+        console.error('❌ [ACCOMMODATION FETCH] Error fetching accommodations:', accommodationError);
+        return [];
+      }
+
+      console.log('✅ [ACCOMMODATION FETCH] Raw data:', accommodationData);
+
+      // Format the data
+      const formattedData = (accommodationData || []).map((item: any) => ({
+        id: item.id,
+        accommodation_id: item.accommodation_id,
+        room_type: item.accommodation?.room_type || 'Unknown Room',
+        start_date: item.start_date,
+        end_date: item.end_date,
+        days: item.days,
+        rate_used: item.rate_used,
+        rate_type: item.rate_type,
+        amount: item.amount,
+        selected_at: item.selected_at,
+        // Include all rates for potential editing
+        private_rate: item.accommodation?.private_rate,
+        nabh_rate: item.accommodation?.nabh_rate,
+        non_nabh_rate: item.accommodation?.non_nabh_rate,
+        tpa_rate: item.accommodation?.tpa_rate
+      }));
+
+      console.log('✅ [ACCOMMODATION FETCH] Formatted data:', formattedData);
+
+      // Update state
+      setSavedAccommodationData(formattedData);
+      setAccommodationInitialized(true);
+
+      return formattedData;
+    } catch (error) {
+      console.error('❌ [ACCOMMODATION FETCH] Unexpected error:', error);
+      return [];
+    }
+  };
+
+  // Function to add accommodation to visit (dates will be edited in table)
+  const handleAddAccommodation = async (accommodation: any) => {
+    if (!visitId) {
+      toast.error('No visit ID available');
+      return;
+    }
+
+    try {
+      console.log('🏨 [ACCOMMODATION ADD] Adding accommodation:', accommodation.room_type);
+
+      // Ensure visit exists
+      const ensureResult = await ensureVisitExists(visitId);
+
+      if (!ensureResult.success) {
+        console.error('❌ [ACCOMMODATION ADD] Failed to ensure visit exists');
+        return;
+      }
+
+      // Get visit UUID
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        toast.error('Failed to find visit');
+        return;
+      }
+
+      // Use default values - user will edit dates in the table
+      const today = new Date().toISOString().split('T')[0];
+      const defaultRateType = 'private';
+      const rate = accommodation.private_rate || 0;
+
+      // Insert into visit_accommodations with default dates
+      const accommodationData = {
+        visit_id: visitData.id,
+        accommodation_id: accommodation.id,
+        start_date: today,
+        end_date: today,
+        rate_used: rate,
+        rate_type: defaultRateType
+      };
+
+      console.log('💾 [ACCOMMODATION ADD] Inserting with defaults:', accommodationData);
+
+      const { data: insertedData, error: insertError } = await supabase
+        .from('visit_accommodations')
+        .insert(accommodationData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('❌ [ACCOMMODATION ADD] Insert error:', insertError);
+        toast.error('Failed to add accommodation: ' + insertError.message);
+        return;
+      }
+
+      console.log('✅ [ACCOMMODATION ADD] Successfully added:', insertedData);
+      toast.success(`Room "${accommodation.room_type}" added. Edit dates and rate type in the table below.`);
+
+      // Refresh accommodation data
+      await fetchSavedAccommodationData();
+
+    } catch (error) {
+      console.error('❌ [ACCOMMODATION ADD] Unexpected error:', error);
+      toast.error('Failed to add accommodation');
+    }
+  };
+
+  // Function to delete accommodation
+  const handleDeleteAccommodation = async (accommodationId: string) => {
+    if (!confirm('Are you sure you want to delete this accommodation?')) {
+      return;
+    }
+
+    try {
+      console.log('🗑️ [ACCOMMODATION DELETE] Deleting accommodation:', accommodationId);
+
+      const { error: deleteError } = await supabase
+        .from('visit_accommodations')
+        .delete()
+        .eq('id', accommodationId);
+
+      if (deleteError) {
+        console.error('❌ [ACCOMMODATION DELETE] Delete error:', deleteError);
+        toast.error('Failed to delete accommodation');
+        return;
+      }
+
+      console.log('✅ [ACCOMMODATION DELETE] Successfully deleted');
+
+      // Update local state
+      setSavedAccommodationData(prev => prev.filter(a => a.id !== accommodationId));
+
+      // Refresh data
+      const remainingCount = savedAccommodationData.filter(a => a.id !== accommodationId).length;
+
+      if (remainingCount > 0) {
+        try {
+          await fetchSavedAccommodationData();
+        } catch (fetchError) {
+          console.log('⚠️ [ACCOMMODATION DELETE] Fetch after delete failed (expected if no accommodations remain)');
+        }
+      }
+
+      toast.success('Accommodation deleted successfully');
+    } catch (error) {
+      console.error('❌ [ACCOMMODATION DELETE] Unexpected error:', error);
+      toast.error('Failed to delete accommodation');
+    }
+  };
+
   // Function to delete saved medication
   const handleDeleteMedication = async (medicationId: string) => {
     if (!confirm('Are you sure you want to delete this medication?')) {
@@ -7080,63 +7360,64 @@ INSTRUCTIONS:
     }
 
     try {
-      // Get visit data for hybrid deletion
+      console.log('🗑️ [MANDATORY DELETE] Starting deletion for service:', serviceId);
+
+      // Get visit UUID
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id, mandatory_service_id')
+        .select('id')
         .eq('visit_id', visitId)
         .single();
 
-      if (visitError) {
-        console.error('Error fetching visit data:', visitError);
-        toast.error('Failed to delete mandatory service');
+      if (visitError || !visitData) {
+        console.error('❌ [MANDATORY DELETE] Error fetching visit data:', visitError);
+        toast.error('Failed to delete mandatory service - visit not found');
         return;
       }
 
-      // Check if the service to delete matches the current mandatory service
-      if (visitData?.mandatory_service_id !== serviceId) {
-        toast.error('Service not found or already deleted');
-        return;
-      }
+      console.log('🔍 [MANDATORY DELETE] Visit found:', visitData.id);
 
-      // Hybrid deletion: remove from both junction table and foreign key
-      console.log('🗑️ [MANDATORY DELETE] Starting hybrid deletion...');
-      
-      // Step 1: Delete from junction table
-      const { error: junctionDeleteError } = await supabase
+      // Delete from junction table (source of truth for multiple services)
+      const { error: deleteError } = await supabase
         .from('visit_mandatory_services')
         .delete()
         .eq('visit_id', visitData.id)
         .eq('mandatory_service_id', serviceId);
 
-      if (junctionDeleteError) {
-        console.error('Error deleting from junction table:', junctionDeleteError);
-        toast.error('Failed to delete from junction table');
-        return;
-      }
-
-      // Step 2: Remove mandatory service by setting foreign key to null
-      const { error: updateError } = await supabase
-        .from('visits')
-        .update({
-          mandatory_service_id: null
-        })
-        .eq('visit_id', visitId);
-
-      if (updateError) {
-        console.error('Error updating mandatory services FK:', updateError);
+      if (deleteError) {
+        console.error('❌ [MANDATORY DELETE] Error deleting from junction table:', deleteError);
         toast.error('Failed to delete mandatory service');
         return;
       }
 
-      console.log('✅ [MANDATORY DELETE] Hybrid deletion completed');
+      console.log('✅ [MANDATORY DELETE] Successfully deleted from junction table');
 
-      // Refresh saved mandatory services data
-      await fetchSavedMandatoryServicesData();
+      // Update local state immediately
+      setSavedMandatoryServicesData(prev => {
+        const updated = prev.filter(s => s.id !== serviceId);
+        console.log('🔄 [MANDATORY DELETE] Updated local state, remaining services:', updated.length);
+        return updated;
+      });
+
+      // Only refresh if there might be remaining services, otherwise clear state
+      const remainingCount = savedMandatoryServicesData.filter(s => s.id !== serviceId).length;
+
+      if (remainingCount > 0) {
+        // Refresh data from database to ensure consistency
+        try {
+          await fetchSavedMandatoryServicesData();
+        } catch (fetchError) {
+          console.log('⚠️ [MANDATORY DELETE] Fetch after delete failed (expected if no services remain):', fetchError);
+          // Don't show error to user - state is already updated
+        }
+      } else {
+        console.log('✅ [MANDATORY DELETE] No remaining services, state already updated');
+      }
+
       toast.success('Mandatory service deleted successfully');
     } catch (error) {
-      console.error('Error deleting mandatory service:', error);
-      toast.error('Failed to delete mandatory service');
+      console.error('❌ [MANDATORY DELETE] Unexpected error:', error);
+      toast.error('Failed to delete mandatory service: ' + (error instanceof Error ? error.message : 'Unknown error'));
     }
   };
 
@@ -8489,6 +8770,25 @@ INSTRUCTIONS:
       return transformedData;
     },
     enabled: serviceSearchTerm.length >= 2 && activeServiceTab === "Mandatory services",
+  });
+
+  // Accommodation query
+  const { data: availableAccommodations = [], isLoading: isLoadingAccommodations } = useQuery({
+    queryKey: ['accommodations', hospitalConfig.name],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('accommodations')
+        .select('*')
+        .order('room_type');
+
+      if (error) {
+        console.error('Error fetching accommodations:', error);
+        return [];
+      }
+
+      return data || [];
+    },
+    enabled: true,
   });
 
   const filteredPharmacyServices = serviceSearchTerm.length >= 2 ? searchedPharmacyServices :
@@ -14766,6 +15066,15 @@ Dr. Murali B K
                                       toast.info(`Updating "${service.service_name}" quantity to ${newQuantity}...`);
 
                                       try {
+                                        // ENSURE visit exists before updating
+                                        const ensureResult = await ensureVisitExists(visitId);
+
+                                        if (!ensureResult.success) {
+                                          console.error('❌ [QUANTITY UPDATE] Failed to ensure visit exists:', ensureResult.error);
+                                          toast.error('Failed to update quantity - visit not available');
+                                          return;
+                                        }
+
                                         // Get visit UUID for database update
                                         const { data: visitData, error: visitError } = await supabase
                                           .from('visits')
@@ -14844,11 +15153,24 @@ Dr. Murali B K
                                         patientCategory: service.patientCategory
                                       });
 
-                                      // Validate visit existence first
+                                      // ENSURE visit exists (auto-create if needed) BEFORE validation
+                                      const ensureResult = await ensureVisitExists(visitId);
+
+                                      if (!ensureResult.success) {
+                                        console.error('❌ [MANDATORY SAVE] Failed to ensure visit exists:', ensureResult.error);
+                                        // Error toast already shown by ensureVisitExists
+                                        return;
+                                      }
+
+                                      if (ensureResult.created) {
+                                        console.log('🆕 [MANDATORY SAVE] Visit was auto-created, continuing with service addition...');
+                                      }
+
+                                      // Now validate (should always pass since we ensured visit exists)
                                       const validationResult = await validateVisitAndGetDebugInfo(visitId);
 
                                       if (!validationResult.exists) {
-                                        console.error('❌ [MANDATORY SAVE] Visit validation failed:', {
+                                        console.error('❌ [MANDATORY SAVE] Visit validation failed even after creation:', {
                                           visitId,
                                           error: validationResult.error,
                                           availableVisits: validationResult.debugInfo.recentVisits
@@ -14967,8 +15289,8 @@ Dr. Murali B K
                                         quantity: 1,
                                         rate_used: numericRate,
                                         rate_type: service.rateType,
-                                        amount: numericAmount,
-                                        patient_category: service.patientCategory
+                                        amount: numericAmount
+                                        // Note: patient_category removed - column doesn't exist in visit_mandatory_services table schema
                                       };
 
                                       // CRITICAL DEBUG: Check if save operation uses same visit UUID as fetch
@@ -15158,32 +15480,6 @@ Dr. Murali B K
                                       toast.success(`Mandatory service "${service.service_name}" saved for ${service.patientCategory} patient (${service.rateType.toUpperCase()} rate: ₹${service.selectedRate})`);
                                       setServiceSearchTerm("");
 
-                                      // BACKUP SUCCESSFUL SAVE TO LOCALSTORAGE
-                                      try {
-                                        const currentServices = [...savedMandatoryServicesData, {
-                                          id: service.id,
-                                          service_name: service.service_name,
-                                          selectedRate: numericRate,
-                                          cost: numericAmount,
-                                          amount: numericAmount,
-                                          rate_used: numericRate,
-                                          rate_type: service.rateType,
-                                          selected_at: new Date().toISOString(),
-                                          ...service
-                                        }];
-
-                                        const backupData = {
-                                          visitId: visitId,
-                                          services: currentServices,
-                                          timestamp: Date.now(),
-                                          recoveryMethod: 'save_backup'
-                                        };
-                                        localStorage.setItem(`mandatory_services_${visitId}`, JSON.stringify(backupData));
-                                        console.log('💾 [SAVE BACKUP] Updated localStorage with new service');
-                                      } catch (backupError) {
-                                        console.error('❌ [SAVE BACKUP] Failed to backup to localStorage:', backupError);
-                                      }
-
                                       // IMMEDIATE VERIFICATION - Check if record exists right after save
                                       console.log('🔍 [IMMEDIATE CHECK] Verifying record was saved...');
                                       try {
@@ -15271,131 +15567,14 @@ Dr. Murali B K
                                         console.error('❌ [IMMEDIATE CHECK] Verification failed:', immediateCheckError);
                                       }
 
-                                      // Enhanced refresh with retry logic
-                                      console.log('🔄 [REFRESH] Starting mandatory services data refresh after save...');
-
-                                      // Function to attempt fetch with retry logic
-                                      const attemptFetchWithRetry = async (maxRetries = 3, delay = 500) => {
-                                        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                                          console.log(`🔄 [RETRY ${attempt}/${maxRetries}] Attempting to fetch saved services...`);
-
-                                          // Wait before each attempt
-                                          await new Promise(resolve => setTimeout(resolve, delay * attempt));
-
-                                          try {
-                                            const fetchedData = await fetchSavedMandatoryServicesData();
-                                            console.log(`🔄 [RETRY ${attempt}/${maxRetries}] Fetch result:`, {
-                                              fetchedCount: fetchedData ? fetchedData.length : 'undefined',
-                                              hasNewService: fetchedData ? fetchedData.some(s => s.service_name === service.service_name) : false
-                                            });
-
-                                            // Success condition: found the service we just saved
-                                            if (fetchedData && fetchedData.length > 0 &&
-                                                fetchedData.some(s => s.service_name === service.service_name)) {
-                                              console.log(`✅ [RETRY ${attempt}/${maxRetries}] SUCCESS: Found the saved service!`);
-                                              return { success: true, data: fetchedData, attempts: attempt };
-                                            }
-
-                                            // If this was the last attempt and still no success
-                                            if (attempt === maxRetries) {
-                                              console.warn(`⚠️ [RETRY ${attempt}/${maxRetries}] Final attempt: Service not found in fetch results`);
-                                              return { success: false, data: fetchedData, attempts: attempt };
-                                            }
-
-                                          } catch (fetchError) {
-                                            console.error(`❌ [RETRY ${attempt}/${maxRetries}] Fetch error:`, fetchError);
-                                            if (attempt === maxRetries) {
-                                              throw fetchError;
-                                            }
-                                          }
-                                        }
-                                      };
-
+                                      // Simple refresh after save - trust the database as single source of truth
+                                      console.log('🔄 [REFRESH] Refreshing mandatory services data...');
                                       try {
-                                        const retryResult = await attemptFetchWithRetry();
-
-                                        if (retryResult.success) {
-                                          console.log(`🎉 [REFRESH] Success after ${retryResult.attempts} attempts!`);
-                                          toast.success(`Service saved and displayed successfully! (${retryResult.attempts} attempts)`);
-
-                                          // Force additional state refresh to ensure UI updates
-                                          setTimeout(() => {
-                                            setMandatoryServicesRefreshKey(prev => {
-                                              const newKey = prev + 1;
-                                              console.log('🔄 [FORCE REFRESH] Incrementing refresh key for UI update:', prev, '→', newKey);
-                                              return newKey;
-                                            });
-                                          }, 100);
-
-                                        } else {
-                                          console.error('🚨 [REFRESH] Failed to find saved service after all retries');
-                                          console.log('🔄 [FALLBACK] Implementing forced state refresh with known data...');
-
-                                          // FALLBACK STRATEGY: Directly update UI state with the saved service data
-                                          const fallbackServiceData = {
-                                            id: service.id,
-                                            service_name: service.service_name,
-                                            tpa_rate: service.tpa_rate,
-                                            private_rate: service.private_rate,
-                                            nabh_rate: service.nabh_rate,
-                                            non_nabh_rate: service.non_nabh_rate,
-                                            // Junction table data
-                                            quantity: 1,
-                                            rate_used: numericRate,
-                                            rate_type: service.rateType,
-                                            amount: numericAmount,
-                                            selected_at: new Date().toISOString(),
-                                            // UI compatibility
-                                            selectedRate: numericRate,
-                                            cost: numericAmount,
-                                            patientCategory: service.patientCategory,
-                                            junction_id: `fallback_${Date.now()}`
-                                          };
-
-                                          console.log('🔄 [FALLBACK] Creating UI state with fallback data:', fallbackServiceData);
-
-                                          // Direct state updates to bypass fetch issues
-                                          setSavedMandatoryServicesData(prev => {
-                                            const updated = [...prev, fallbackServiceData];
-                                            console.log('🔄 [FALLBACK] Updated savedMandatoryServicesData:', updated.length);
-                                            return updated;
-                                          });
-
-                                          setMandatoryServices(prev => {
-                                            const updated = [...prev, fallbackServiceData];
-                                            console.log('🔄 [FALLBACK] Updated mandatoryServices:', updated.length);
-                                            return updated;
-                                          });
-
-                                          // Force UI refresh
-                                          setMandatoryServicesRefreshKey(prev => prev + 1);
-                                          setMandatoryServicesInitialized(true);
-
-                                          // STATE SYNCHRONIZATION: Ensure all states are in sync
-                                          setTimeout(() => {
-                                            console.log('🔄 [STATE SYNC] Verifying state synchronization after fallback...');
-                                            const verification = {
-                                              savedMandatoryServicesData_length: savedMandatoryServicesData.length,
-                                              mandatoryServices_length: mandatoryServices.length,
-                                              refreshKey: mandatoryServicesRefreshKey,
-                                              initialized: mandatoryServicesInitialized
-                                            };
-                                            console.log('🔄 [STATE SYNC] Current state verification:', verification);
-
-                                            // If states are out of sync, force synchronization
-                                            if (savedMandatoryServicesData.length === 0 && visitId) {
-                                              console.log('⚠️ [STATE SYNC] State mismatch detected, triggering emergency sync...');
-                                              fetchSavedMandatoryServicesData().catch(console.error);
-                                            }
-                                          }, 500);
-
-                                          console.log('✅ [FALLBACK] Forced state refresh completed');
-                                          toast.success(`Service "${service.service_name}" saved and displayed via fallback method!`);
-                                        }
-
+                                        await fetchSavedMandatoryServicesData();
+                                        console.log('✅ [REFRESH] Data refreshed successfully');
                                       } catch (refreshError) {
-                                        console.error('❌ [REFRESH] Failed to refresh mandatory services data:', refreshError);
-                                        toast.error('Service saved but failed to refresh display. Please refresh the page.');
+                                        console.error('❌ [REFRESH] Failed to refresh:', refreshError);
+                                        toast.warning('Service saved but display may be delayed. Please refresh the page if needed.');
                                       }
 
                                     } catch (error) {
@@ -15447,6 +15626,47 @@ Dr. Murali B K
                             </>
                           )}
                         </>
+                      )}
+
+                      {activeServiceTab === "Accommodation charges" && (
+                        <div className="space-y-3 p-4">
+                          {isLoadingAccommodations ? (
+                            <div className="text-center py-8 text-gray-500">Loading accommodations...</div>
+                          ) : (
+                            <>
+                              {availableAccommodations.map((accommodation) => (
+                                <div
+                                  key={accommodation.id}
+                                  className="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow flex justify-between items-center"
+                                >
+                                  <div className="flex-1">
+                                    <h5 className="font-semibold text-gray-900 mb-2">{accommodation.room_type}</h5>
+                                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600">
+                                      <div>TPA: ₹{accommodation.tpa_rate || 'N/A'}</div>
+                                      <div>Private: ₹{accommodation.private_rate || 'N/A'}</div>
+                                      <div>NABH: ₹{accommodation.nabh_rate || 'N/A'}</div>
+                                      <div>Non-NABH: ₹{accommodation.non_nabh_rate || 'N/A'}</div>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleAddAccommodation(accommodation)}
+                                    className="ml-4"
+                                  >
+                                    Add Room
+                                  </Button>
+                                </div>
+                              ))}
+                              {availableAccommodations.length === 0 && (
+                                <div className="text-center py-8 text-gray-500">
+                                  <div className="text-4xl mb-2">🏨</div>
+                                  <p className="font-medium">No accommodations available</p>
+                                  <p className="text-sm mt-2">Please add room types in settings</p>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
                       )}
 
                       {activeServiceTab === "Pharmacy" && (
@@ -15533,11 +15753,24 @@ Dr. Murali B K
                                         patientCategory: service.patientCategory
                                       });
 
-                                      // Validate visit existence first
+                                      // ENSURE visit exists (auto-create if needed) BEFORE validation
+                                      const ensureResult = await ensureVisitExists(visitId);
+
+                                      if (!ensureResult.success) {
+                                        console.error('❌ [CLINICAL SAVE] Failed to ensure visit exists:', ensureResult.error);
+                                        // Error toast already shown by ensureVisitExists
+                                        return;
+                                      }
+
+                                      if (ensureResult.created) {
+                                        console.log('🆕 [CLINICAL SAVE] Visit was auto-created, continuing with service addition...');
+                                      }
+
+                                      // Now validate (should always pass since we ensured visit exists)
                                       const validationResult = await validateVisitAndGetDebugInfo(visitId);
 
                                       if (!validationResult.exists) {
-                                        console.error('❌ [CLINICAL SAVE] Visit validation failed:', {
+                                        console.error('❌ [CLINICAL SAVE] Visit validation failed even after creation:', {
                                           visitId,
                                           error: validationResult.error,
                                           availableVisits: validationResult.debugInfo.recentVisits
@@ -16009,6 +16242,28 @@ Dr. Murali B K
                           Mandatory Services
                         </button>
                         <button
+                          className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'accommodation'
+                            ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
+                            : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                          onClick={async () => {
+                            console.log('🔄 [TAB SWITCH] Switching to accommodation tab...');
+                            setSavedDataTab('accommodation');
+
+                            if (savedAccommodationData.length === 0 && visitId) {
+                              console.log('🚨 [TAB SWITCH RECOVERY] No accommodation data, triggering fetch...');
+                              try {
+                                await fetchSavedAccommodationData();
+                                console.log('✅ [TAB SWITCH RECOVERY] Accommodation data loaded');
+                              } catch (recoveryError) {
+                                console.error('❌ [TAB SWITCH RECOVERY] Failed:', recoveryError);
+                              }
+                            }
+                          }}
+                        >
+                          Accommodation ({savedAccommodationData.length})
+                        </button>
+                        <button
                           className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'discount'
                             ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
                             : 'text-gray-500 hover:text-gray-700'
@@ -16343,8 +16598,6 @@ Dr. Murali B K
                                   <thead>
                                     <tr className="bg-gray-100">
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Service Name</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Patient Type</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate Type</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Selected Date</th>
                                       <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Action</th>
@@ -16355,12 +16608,6 @@ Dr. Murali B K
                                       <tr key={index} className="hover:bg-gray-50">
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
                                           {service.service_name}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                          {service.patientCategory}
-                                        </td>
-                                        <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
-                                          {service.rateType?.toUpperCase()}
                                         </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-green-600">
                                           ₹{service.selectedRate || service.amount}
@@ -16435,8 +16682,6 @@ Dr. Murali B K
                                   <thead>
                                     <tr className="bg-gray-100">
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Service Name</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Patient Type</th>
-                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate Type</th>
                                       <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Qty</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate</th>
                                       <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
@@ -16455,17 +16700,11 @@ Dr. Murali B K
                                         amount: service.amount,
                                         selected_at: service.selected_at
                                       });
-                                      
+
                                       return (
                                         <tr key={index} className="hover:bg-gray-50">
                                           <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
                                             {service.service_name || 'Unknown Service'}
-                                          </td>
-                                          <td className="border border-gray-300 px-4 py-2 text-sm text-gray-600">
-                                            {service.patientCategory || 'Unknown'}
-                                          </td>
-                                          <td className="border border-gray-300 px-4 py-2 text-sm text-blue-600">
-                                            {service.rateType?.toUpperCase() || 'STANDARD'}
                                           </td>
                                           <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-purple-600">
                                             {service.quantity || 1}
@@ -16516,27 +16755,126 @@ Dr. Murali B K
                             )}
                           </div>
                         )}
+                        {savedDataTab === 'accommodation' && (
+                          <div className="p-4">
+                            <div className="flex justify-between items-center mb-4">
+                              <h4 className="font-semibold text-gray-800">Saved Accommodations ({savedAccommodationData.length})</h4>
+                              <div className="text-right">
+                                <div className="text-sm text-gray-600">Total:</div>
+                                <div className="text-xl font-bold text-green-600">
+                                  ₹{savedAccommodationData.reduce((sum, acc) => sum + (parseFloat(acc.amount) || 0), 0).toLocaleString('en-IN')}
+                                </div>
+                              </div>
+                            </div>
+                            {savedAccommodationData.length > 0 ? (
+                              <div className="overflow-x-auto">
+                                <table className="w-full border-collapse border border-gray-300">
+                                  <thead>
+                                    <tr className="bg-gray-100">
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Room Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Start Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">End Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Days</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {savedAccommodationData.map((accommodation, index) => (
+                                      <tr key={index} className="hover:bg-gray-50">
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
+                                          {accommodation.room_type}
+                                        </td>
+                                        <td className="border border-gray-300 px-2 py-2 text-sm text-gray-600">
+                                          <input
+                                            type="date"
+                                            className="w-full border-0 bg-transparent text-sm px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
+                                            value={accommodation.start_date}
+                                            onChange={(e) => updateAccommodationField(accommodation.id, 'start_date', e.target.value)}
+                                          />
+                                        </td>
+                                        <td className="border border-gray-300 px-2 py-2 text-sm text-gray-600">
+                                          <input
+                                            type="date"
+                                            className="w-full border-0 bg-transparent text-sm px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
+                                            value={accommodation.end_date}
+                                            onChange={(e) => updateAccommodationField(accommodation.id, 'end_date', e.target.value)}
+                                          />
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-purple-600">
+                                          {accommodation.days}
+                                        </td>
+                                        <td className="border border-gray-300 px-2 py-2 text-sm text-gray-700">
+                                          <select
+                                            className="w-full border-0 bg-transparent text-sm px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
+                                            value={accommodation.rate_type}
+                                            onChange={(e) => updateAccommodationField(accommodation.id, 'rate_type', e.target.value)}
+                                          >
+                                            <option value="private">Private</option>
+                                            <option value="tpa">TPA</option>
+                                            <option value="nabh">NABH</option>
+                                            <option value="non_nabh">Non-NABH</option>
+                                          </select>
+                                          <div className="text-xs text-gray-500 mt-1">₹{accommodation.rate_used}</div>
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm font-semibold text-green-600">
+                                          ₹{accommodation.amount}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-center">
+                                          <button
+                                            onClick={() => handleDeleteAccommodation(accommodation.id)}
+                                            className="text-red-600 hover:text-red-800 text-sm"
+                                            title="Delete accommodation"
+                                          >
+                                            🗑️
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-center py-8 text-gray-500">
+                                <div className="text-4xl mb-2">🏨</div>
+                                <p className="font-medium">No accommodations saved for this visit</p>
+                                <p className="text-sm mt-2">Select accommodations from the Accommodation charges section above to save them here</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {savedDataTab === 'discount' && (
                           <DiscountTab
                             visitId={visitId}
-                            onDiscountUpdate={(discountAmount) => {
+                            onDiscountUpdate={async (discountAmount) => {
                               // Callback when discount is updated
                               console.log('🔥 [FINALBILL CALLBACK] Discount updated:', discountAmount);
                               console.log('🔥 [FINALBILL CALLBACK] Current visitId:', visitId);
                               console.log('🔥 [FINALBILL CALLBACK] Current billData?.id:', billData?.id);
-                              console.log('🔥 [FINALBILL CALLBACK] autoPopulateFinancialData available:', !!autoPopulateFinancialData);
+                              console.log('🔥 [FINALBILL CALLBACK] loadFinancialSummary available:', !!loadFinancialSummary);
+                              console.log('🔥 [FINALBILL CALLBACK] calculateBalanceWithDiscount available:', !!calculateBalanceWithDiscount);
 
                               // Add delay to ensure database transaction is committed
                               console.log('⏱️ [FINALBILL CALLBACK] Adding 1000ms delay for database commit...');
-                              setTimeout(() => {
-                                console.log('⏱️ [FINALBILL CALLBACK] Delay complete, refreshing financial data...');
+                              setTimeout(async () => {
+                                console.log('⏱️ [FINALBILL CALLBACK] Delay complete, reloading financial summary to show discount...');
 
-                                // Trigger financial summary refresh to show discount in table
-                                if (autoPopulateFinancialData) {
-                                  console.log('🔥 [FINALBILL CALLBACK] Calling autoPopulateFinancialData after delay...');
-                                  autoPopulateFinancialData();
+                                // Load financial summary to display discount from visit_discounts table
+                                if (loadFinancialSummary) {
+                                  console.log('🔥 [FINALBILL CALLBACK] Calling loadFinancialSummary to reload discount value...');
+                                  await loadFinancialSummary();
+
+                                  // Auto-calculate balance to deduct discount from total
+                                  console.log('🧮 [FINALBILL CALLBACK] Auto-calculating balance with discount...');
+                                  if (calculateBalanceWithDiscount) {
+                                    await calculateBalanceWithDiscount();
+                                    console.log('✅ [FINALBILL CALLBACK] Balance calculation completed - discount deducted from total');
+                                  } else {
+                                    console.error('❌ [FINALBILL CALLBACK] calculateBalanceWithDiscount not available!');
+                                  }
                                 } else {
-                                  console.error('❌ [FINALBILL CALLBACK] autoPopulateFinancialData not available!');
+                                  console.error('❌ [FINALBILL CALLBACK] loadFinancialSummary not available!');
                                 }
                               }, 1000); // 1 second delay to ensure database commit
                             }}
@@ -17594,74 +17932,6 @@ Dr. Murali B K
                     {isFinancialSummarySaving ? 'Saving...' : '💾 Save Financial Summary'}
                   </button>
 
-                  {/* Debug button to manually refresh financial summary */}
-                  <button
-                    onClick={async () => {
-                      console.log('🔥 [DEBUG BUTTON] Manual refresh triggered');
-                      console.log('🔥 [DEBUG BUTTON] visitId:', visitId);
-                      console.log('🔥 [DEBUG BUTTON] billData?.id:', billData?.id);
-
-                      // Direct database query to check discount
-                      try {
-                        console.log('🔍 [DEBUG] Checking discount in database...');
-
-                        // First, find the visit UUID
-                        const { data: visitData, error: visitError } = await supabase
-                          .from('visits')
-                          .select('id, visit_id')
-                          .eq('visit_id', visitId)
-                          .single();
-
-                        console.log('🔍 [DEBUG] Visit lookup result:', { visitData, visitError });
-
-                        if (visitData) {
-                          // Then check for discount
-                          const { data: discountData, error: discountError } = await supabase
-                            .from('visit_discounts')
-                            .select('*')
-                            .eq('visit_id', visitData.id)
-                            .single();
-
-                          console.log('🔍 [DEBUG] Discount lookup result:', { discountData, discountError });
-
-                          if (discountData) {
-                            console.log('✅ [DEBUG] Found discount in DB:', discountData.discount_amount);
-                          } else {
-                            console.log('❌ [DEBUG] No discount found in DB');
-                          }
-                        }
-                      } catch (error) {
-                        console.error('❌ [DEBUG] Database check failed:', error);
-                      }
-
-                      // Trigger financial summary refresh
-                      if (autoPopulateFinancialData) {
-                        console.log('🔄 [DEBUG] Calling autoPopulateFinancialData...');
-                        autoPopulateFinancialData();
-                      }
-                    }}
-                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm"
-                  >
-                    🔄 Debug Refresh
-                  </button>
-
-                  {/* Manual discount override button for testing */}
-                  <button
-                    onClick={() => {
-                      console.log('🔥 [DEBUG OVERRIDE] Manually setting discount to 6200');
-                      console.log('🔥 [DEBUG OVERRIDE] Current financialSummaryData:', financialSummaryData);
-
-                      // Manual state override
-                      if (handleFinancialSummaryChange) {
-                        handleFinancialSummaryChange('discount', 'total', '6200');
-                        console.log('🔥 [DEBUG OVERRIDE] Called handleFinancialSummaryChange');
-                      }
-                    }}
-                    className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm"
-                  >
-                    🧪 Set 6200
-                  </button>
-
                   {/* Visual indicators for save/load status */}
                   <div className="flex items-center gap-2 text-sm">
                     {isFinancialSummaryLoading && (
@@ -17723,9 +17993,9 @@ Dr. Murali B K
                           }
                         }}
                         className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
-                        title="Calculate balance with discount applied"
+                        title="Apply discount to balance calculation"
                       >
-                        🧮 Calculate
+                        💰 Apply Discount
                       </button>
                       <button
                         onClick={() => {
@@ -17947,14 +18217,10 @@ Dr. Murali B K
                               {financialSummaryData.discount.accommodationCharges || '0'}
                             </div>
                           </td>
-                          <td className="border border-gray-300 p-2 font-bold">
-                            <input
-                              type="number"
-                              value={financialSummaryData.discount.total}
-                              onChange={(e) => handleFinancialSummaryChange('discount', 'total', e.target.value)}
-                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-center font-bold"
-                              placeholder="0"
-                            />
+                          <td className="border border-gray-300 p-3 font-bold">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-gray-50 rounded border border-gray-200 min-h-[38px] flex items-center justify-center font-bold">
+                              {financialSummaryData.discount.total || '0'}
+                            </div>
                           </td>
                         </tr>
                         {/* Row 3: Amount Paid */}
