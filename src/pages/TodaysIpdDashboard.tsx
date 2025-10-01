@@ -1320,7 +1320,7 @@ const TodaysIpdDashboard = () => {
       visit.bunch_no === bunchFilter;
 
     const matchesCorporate = !corporateFilter ||
-      visit.patients?.corporate === corporateFilter;
+      visit.patients?.corporate?.trim().toLowerCase() === corporateFilter.trim().toLowerCase();
 
     const includeBy = (selected: string[], value?: string | null) =>
       selected.length === 0 || (value ? selected.includes(value) : false);
