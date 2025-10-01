@@ -1320,7 +1320,7 @@ const TodaysIpdDashboard = () => {
       visit.bunch_no === bunchFilter;
 
     const matchesCorporate = !corporateFilter ||
-      visit.patients?.corporate === corporateFilter;
+      visit.patients?.corporate?.toLowerCase().trim() === corporateFilter.toLowerCase().trim();
 
     const includeBy = (selected: string[], value?: string | null) =>
       selected.length === 0 || (value ? selected.includes(value) : false);
@@ -1994,15 +1994,17 @@ const TodaysIpdDashboard = () => {
           </div>
         </div>
 
-        {/* Print Info - Only visible when printing */}
-        <div className="print-info">
-          <h3 className="font-semibold">Applied Filters:</h3>
-          {billingExecutiveFilter && <p>Billing Executive: {billingExecutiveFilter}</p>}
-          {billingStatusFilter && <p>Billing Status: {billingStatusFilter}</p>}
-          {bunchFilter && <p>Bunch: {bunchFilter}</p>}
-          {searchTerm && <p>Search: {searchTerm}</p>}
-          {!billingExecutiveFilter && !billingStatusFilter && !bunchFilter && !searchTerm && <p>No filters applied - Showing all visits</p>}
-        </div>
+        {/* Print Info - Disabled to remove blank space in print output */}
+        {false && (
+          <div className="print-info">
+            <h3 className="font-semibold">Applied Filters:</h3>
+            {billingExecutiveFilter && <p>Billing Executive: {billingExecutiveFilter}</p>}
+            {billingStatusFilter && <p>Billing Status: {billingStatusFilter}</p>}
+            {bunchFilter && <p>Bunch: {bunchFilter}</p>}
+            {searchTerm && <p>Search: {searchTerm}</p>}
+            {!billingExecutiveFilter && !billingStatusFilter && !bunchFilter && !searchTerm && <p>No filters applied - Showing all visits</p>}
+          </div>
+        )}
 
         {/* Visits Table */}
         <div className="bg-card rounded-lg border">
