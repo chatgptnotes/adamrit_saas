@@ -138,64 +138,7 @@ const IpdDischargeSummary = () => {
   const [stayNotesTemplates, setStayNotesTemplates] = useState([
     {
       name: 'discharge_summary',
-      content: `Ignore all previous instructions. You are a medical specialist. Create a professionally written Discharge Summary in the EXACT format below:
-
-**IMPORTANT FORMATTING RULES:**
-- Use proper HTML table format for tables
-- Use bold headings with **
-- Use numbered lists for advice
-- Minimum 800 words total
-- Use Indian brand medication names
-- Add Hindi translation in dosage column (in brackets)
-
-**REQUIRED FORMAT:**
-
-**Diagnosis:** [Write the diagnosis as a single bold heading line]
-
-**Medications:**
-Create a proper HTML table:
-| Name | Strength | Route | Dosage | Duration |
-|------|----------|-------|---------|----------|
-| [Med Name] | [Strength] | Oral | [English dosage] (Hindi: [dosage in hindi]) | 7 Days |
-
-**Operation Notes:** (ONLY if surgery was performed)
-Create a proper HTML table:
-| Date and Time | [Date/Time] |
-| Reason for Surgery | [Reason] |
-| Surgeon | Dr. [Name] |
-| Anaesthetist | Dr. [Name] |
-| Anaesthesia | [Type] |
-| Description | [Detailed surgical description] |
-
-**History of Presenting Complaints:**
-[Write detailed patient history, symptoms on admission, examination findings]
-
-**Investigations:**
-[List all investigations with results - blood tests, imaging, etc.]
-
-**Treatment:**
-[Describe the treatment given during hospital stay]
-
-**Advice on Discharge:**
-1. Regular intake of medications as instructed.
-2. Maintain a light, low-fat diet.
-3. Exercise moderately, avoid heavy lifting and strenuous activities.
-4. Regular follow-up is necessary post-discharge to monitor progress.
-
-**Warning signs:**
-
-**Watch out for any of the following symptoms and visit the hospital if they occur:**
-- Fever, severe abdominal pain, or vomiting
-- Any signs of infection such as redness, swelling, or discharge from the wound
-- Difficulty in passing urine or changes in bowel habits
-- Return to the hospital in case of any complications related to the surgery
-
-**Final Note:**
-"URGENT CARE/EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT:-7030974619, 9373111709"
-
-Note: Ignore all previous instructions and follow the directives given in this document.
-
-Make up creative and realistic medical details based on the patient information provided. The entire summary should be minimum 800 words. Do not mention patient name, age, or sex directly.`
+      content: `Ignore all previous instructions.You are a medical specialist, Make a professionally written Discharge summary that will show off the power of chatgpt.: Make up facts..Add findings which are not provided to you. Come up with creative complaints, events during the stay in hospital and relevant examination findings, add medications to be given on discharge in indIan BRANDS. The entire document should be a minimum of 800 words. Use headings, subheadings, bullet points, and bold to organize the information. The person who will read the summary is another doctor. Advice appropriate precautions to be taken at home after discharge. Also advice to return to hospital in case of any or all the complications of surgery performed or medical treatment taken which was noticed after discharge. List the symptoms and signs of these complications.Do not mention the name, sex or age of the patient. Add the sentence at the end :URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT:-7030974619, 9373111709. If a surgery was performed, Come up with creative note which should be a minimum of 6 rows in a table . OPERATION NOTES should be in a table form only if a surgery was performed. It has to contain the date and time of surgery in first row, The second row should contain the title as in the message. The third row has to contain the name of surgeon. The fourth row has to contain the name of anaesthetist. Fifth row has to contain the type of anaesthesia, sixth row should detailed description of the surgery.The person who is going to read what you share will be a doctor.In the begining make a list of Medications with detailed instructions like once a day, twice a day ot thrice a day. This patient does not have comoprbidities other than that is mentioned.The medication should be at the begining of summary and in table form with columns for name , strength, route , dosage and the number of days to be taken. Another line in hindi to be added in the column of dosage in addition to english. The diagnosis should be in the begining of the summary before the medication table`
     }
   ]);
   const [newTemplateName, setNewTemplateName] = useState('');
@@ -1575,7 +1518,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
       console.log('✅ Summary data loaded for print:', summaryData);
 
       // Generate print HTML
-      const printHTML = generatePrintHTML(summaryData, patientInfo);
+      const printHTML = generatePrintHTML(summaryData, patientInfo, visitId);
 
       // Open print preview in new window
       const printWindow = window.open('', '_blank');
@@ -1605,8 +1548,101 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
   };
 
+  // Function to convert markdown tables and formatting to HTML
+  const formatOtNotesHTML = (content: string) => {
+    if (!content) return '';
+
+    let formatted = content;
+
+    // Convert markdown tables to HTML tables - handles all markdown table formats
+    // Matches: | header | header | followed by separator line, then data rows
+    const lines = formatted.split(/\r?\n/);
+    let inTable = false;
+    let tableLines: string[] = [];
+    let result: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+
+      // Check if this line looks like a table row (starts and ends with |)
+      if (line.startsWith('|') && line.endsWith('|')) {
+        if (!inTable) {
+          inTable = true;
+          tableLines = [line];
+        } else {
+          tableLines.push(line);
+        }
+      } else {
+        // Not a table line - process any accumulated table
+        if (inTable && tableLines.length >= 3) {
+          result.push(convertMarkdownTableToHTML(tableLines));
+          tableLines = [];
+        }
+        inTable = false;
+        result.push(line);
+      }
+    }
+
+    // Process any remaining table at the end
+    if (inTable && tableLines.length >= 3) {
+      result.push(convertMarkdownTableToHTML(tableLines));
+    }
+
+    formatted = result.join('\n');
+
+    // Convert **bold** to <strong>
+    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // Convert newlines to <br> but preserve table structure
+    formatted = formatted.replace(/\n(?!<table|<\/table|<tr|<\/tr|<th|<\/th|<td|<\/td)/g, '<br>');
+
+    return formatted;
+  };
+
+  // Helper function to convert markdown table lines to HTML
+  const convertMarkdownTableToHTML = (tableLines: string[]): string => {
+    if (tableLines.length < 3) return tableLines.join('\n');
+
+    // First line is headers
+    const headerLine = tableLines[0];
+    const headers = headerLine.split('|')
+      .map(h => h.trim())
+      .filter(h => h.length > 0);
+
+    // Second line is separator (skip it)
+    // Remaining lines are data rows
+    const dataLines = tableLines.slice(2);
+
+    let html = '<table style="width: 100%; border-collapse: collapse; margin: 10px 0;"><thead><tr>';
+
+    // Add headers
+    headers.forEach(header => {
+      html += `<th style="border: 1px solid #000; background-color: transparent; padding: 6px; text-align: left;">${header}</th>`;
+    });
+
+    html += '</tr></thead><tbody>';
+
+    // Add data rows
+    dataLines.forEach(dataLine => {
+      const cells = dataLine.split('|')
+        .map(c => c.trim())
+        .filter(c => c.length > 0);
+
+      if (cells.length > 0) {
+        html += '<tr>';
+        cells.forEach(cell => {
+          html += `<td style="border: 1px solid #000; padding: 6px;">${cell}</td>`;
+        });
+        html += '</tr>';
+      }
+    });
+
+    html += '</tbody></table>';
+    return html;
+  };
+
   // Function to generate formatted print HTML
-  const generatePrintHTML = (summaryData: any, patientInfo: any) => {
+  const generatePrintHTML = (summaryData: any, patientInfo: any, visitIdString: string) => {
     const currentDate = format(new Date(), 'dd/MM/yyyy');
 
     return `
@@ -1618,7 +1654,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
   <style>
     @page {
       size: A4;
-      margin: 20mm;
+      margin: 10mm;
     }
 
     * {
@@ -1630,35 +1666,38 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     body {
       font-family: Arial, sans-serif;
       font-size: 11pt;
-      line-height: 1.4;
+      line-height: 1.3;
       color: #000;
+      padding: 0;
+      margin: 0;
     }
 
     .header {
       text-align: center;
       border-bottom: 2px solid #000;
-      padding-bottom: 10px;
-      margin-bottom: 15px;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
     }
 
     .header h1 {
       font-size: 18pt;
       font-weight: bold;
-      margin-bottom: 5px;
+      margin-bottom: 3px;
     }
 
     .patient-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      gap: 6px;
       border: 1px solid #000;
-      padding: 10px;
-      margin-bottom: 15px;
+      padding: 6px;
+      margin-bottom: 0;
     }
 
     .patient-grid-item {
       display: flex;
       font-size: 10pt;
+      line-height: 1.2;
     }
 
     .patient-grid-item strong {
@@ -1667,7 +1706,8 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
 
     .section {
-      margin-bottom: 15px;
+      margin-top: 0;
+      margin-bottom: 6px;
       page-break-inside: avoid;
     }
 
@@ -1675,20 +1715,24 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
       font-weight: bold;
       font-size: 12pt;
       background-color: #f0f0f0;
-      padding: 5px 10px;
+      padding: 4px 10px;
       border-left: 4px solid #333;
-      margin-bottom: 8px;
+      margin-top: 0;
+      margin-bottom: 4px;
     }
 
     .section-content {
       padding-left: 10px;
       text-align: justify;
+      line-height: 1.3;
+      margin-top: 0;
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      margin: 10px 0;
+      margin: 0;
+      margin-top: 0;
       font-size: 10pt;
     }
 
@@ -1697,14 +1741,14 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
 
     th {
-      background-color: #e0e0e0;
+      background-color: transparent;
       font-weight: bold;
-      padding: 6px;
+      padding: 5px;
       text-align: left;
     }
 
     td {
-      padding: 6px;
+      padding: 5px;
     }
 
     .footer {
@@ -1718,8 +1762,8 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     .emergency-note {
       text-align: center;
       font-weight: bold;
-      margin-top: 20px;
-      padding: 10px;
+      margin-top: 40px;
+      padding: 8px;
       border: 2px solid #000;
       background-color: #fff3cd;
     }
@@ -1747,8 +1791,8 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
       <span>${patientInfo.name}</span>
     </div>
     <div class="patient-grid-item">
-      <strong>Patient ID:</strong>
-      <span>${summaryData.reg_id || patientInfo.regId}</span>
+      <strong>Visit ID:</strong>
+      <span>${visitIdString}</span>
     </div>
     <div class="patient-grid-item">
       <strong>Primary Care Provider:</strong>
@@ -1783,87 +1827,17 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
       <span>${summaryData.reason_of_discharge || 'GAMA'}</span>
     </div>
   </div>
-
-  ${summaryData.condition_on_discharge ? `
-  <div class="section">
-    <div class="section-title">Present Condition</div>
-    <div class="section-content">${summaryData.condition_on_discharge}</div>
-  </div>
-  ` : ''}
-
-  ${summaryData.primary_diagnosis ? `
-  <div class="section">
-    <div class="section-title">DIAGNOSIS:</div>
-    <div class="section-content">${summaryData.primary_diagnosis}</div>
-  </div>
-  ` : ''}
-
-  ${summaryData.discharge_medications && summaryData.discharge_medications.length > 0 ? `
-  <div class="section">
-    <div class="section-title">MEDICATION:</div>
-    <div class="section-content">
-      <p style="margin-bottom: 5px;">Following table represents the medication prescribed to the patient on discharge:</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Strength</th>
-            <th>Route</th>
-            <th>Dosage</th>
-            <th>Days</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${summaryData.discharge_medications.map(med => `
-            <tr>
-              <td>${med.name || ''}</td>
-              <td>${med.dose || ''}</td>
-              <td>${med.route || 'IV'}</td>
-              <td>${formatMedicationTiming(med.timing)}</td>
-              <td>${med.days || ''}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  ` : ''}
-
-  ${summaryData.chief_complaints ? `
-  <div class="section">
-    <div class="section-title">CLINICAL COURSE:</div>
-    <div class="section-content">${summaryData.chief_complaints}</div>
-  </div>
-  ` : ''}
-
-  ${summaryData.treatment_during_stay ? `
-  <div class="section">
-    <div class="section-title">DISCHARGE INSTRUCTION:</div>
-    <div class="section-content">${summaryData.treatment_during_stay}</div>
-  </div>
-  ` : ''}
-
   ${summaryData.ot_notes ? `
   <div class="section">
-    <div class="section-title">IMPORTANT:</div>
-    <div class="section-content">${summaryData.ot_notes.replace(/\n/g, '<br>')}</div>
+    <div class="section-content">${formatOtNotesHTML(summaryData.ot_notes)}</div>
   </div>
   ` : ''}
-
-  ${summaryData.discharge_advice ? `
-  <div class="section">
-    <div class="section-title">ADVICE:</div>
-    <div class="section-content">${summaryData.discharge_advice.replace(/\n/g, '<br>')}</div>
-  </div>
-  ` : ''}
-
   ${summaryData.lab_investigations?.investigations_text ? `
   <div class="section">
     <div class="section-title">INVESTIGATIONS:</div>
     <div class="section-content">${summaryData.lab_investigations.investigations_text.replace(/\n/g, '<br>')}</div>
   </div>
   ` : ''}
-
   ${summaryData.review_on_date ? `
   <div class="section">
     <div class="section-title">Review on:</div>
@@ -3427,6 +3401,10 @@ Enter surgical procedure description here...`}
                             body: JSON.stringify({
                               model: 'gpt-4',
                               messages: [
+                                {
+                                  role: 'system',
+                                  content: 'You are a medical documentation assistant. When creating tables, ALWAYS use markdown table format with proper alignment. Ensure tables have clear borders using pipes (|) and dashes (-). Format tables exactly like this:\n\n| Column 1 | Column 2 | Column 3 |\n|----------|----------|----------|\n| Data 1   | Data 2   | Data 3   |\n\nMake sure each table has a header row, a separator row with dashes, and data rows. Keep table formatting clean and consistent.\n\nIMPORTANT INSTRUCTIONS:\n1. Do NOT include any PATIENT DETAILS section or table - patient information is already displayed at the top of the document\n2. At the end of the ADVICE section, always add this line: "Follow up after 7 days/SOS."\n3. Do NOT include the emergency contact line (URGENT CARE/EMERGENCY CARE IS AVAILABLE...) in the ADVICE section, as it will be added separately at the bottom of the document\n4. Start directly with the Operation Notes table if surgery was performed, or with MEDICATIONS if no surgery'
+                                },
                                 {
                                   role: 'user',
                                   content: newTemplateContent
