@@ -655,16 +655,21 @@ const FinalBill = () => {
       try {
         setIsLoadingLabServices(true);
 
+        // Get current hospital for filtering
+        const currentHospital = hospitalConfig?.name || 'hope';
+        console.log('🏥 [LAB SERVICES] Fetching lab services for hospital:', currentHospital);
+
         const { data, error } = await supabase
           .from('lab')
-          .select(`id, name, "CGHS_code", private`)
+          .select(`id, name, "CGHS_code", private, hospital_name`)
+          .eq('hospital_name', currentHospital)
           .order('name');
 
         if (error) {
           console.error('Error fetching lab services:', error);
           toast.error('Failed to load lab services');
         } else if (data) {
-          console.log('Lab services fetched successfully:', data.length, 'records');
+          console.log('Lab services fetched successfully:', data.length, 'records for', currentHospital);
           console.log('Sample lab services:', data.slice(0, 3));
 
           // Map the field names to expected format using private rates
@@ -7287,68 +7292,45 @@ INSTRUCTIONS:
   };
 
   // Function to delete saved clinical service
-  const handleDeleteClinicalService = async (serviceId: string) => {
+  const handleDeleteClinicalService = async (junctionId: string) => {
     if (!confirm('Are you sure you want to delete this clinical service?')) {
       return;
     }
 
     try {
-      // Get visit data for hybrid deletion
-      const { data: visitData, error: visitError } = await supabase
-        .from('visits')
-        .select('id, clinical_service_id')
-        .eq('visit_id', visitId)
-        .single();
+      console.log('🗑️ [CLINICAL DELETE] Deleting service with junction ID:', junctionId);
 
-      if (visitError) {
-        console.error('Error fetching visit data:', visitError);
-        toast.error('Failed to delete clinical service');
-        return;
-      }
-
-      // Check if the service to delete matches the current clinical service
-      if (visitData?.clinical_service_id !== serviceId) {
-        toast.error('Service not found or already deleted');
-        return;
-      }
-
-      // Hybrid deletion: remove from both junction table and foreign key
-      console.log('🗑️ [CLINICAL DELETE] Starting hybrid deletion...');
-      
-      // Step 1: Delete from junction table
-      const { error: junctionDeleteError } = await supabase
+      // Delete from junction table only
+      const { error: deleteError } = await supabase
         .from('visit_clinical_services')
         .delete()
-        .eq('visit_id', visitData.id)
-        .eq('clinical_service_id', serviceId);
+        .eq('id', junctionId);
 
-      if (junctionDeleteError) {
-        console.error('Error deleting from junction table:', junctionDeleteError);
-        toast.error('Failed to delete from junction table');
-        return;
-      }
-
-      // Step 2: Remove clinical service by setting foreign key to null
-      const { error: updateError } = await supabase
-        .from('visits')
-        .update({
-          clinical_service_id: null
-        })
-        .eq('visit_id', visitId);
-
-      if (updateError) {
-        console.error('Error updating clinical services FK:', updateError);
+      if (deleteError) {
+        console.error('❌ [CLINICAL DELETE] Error:', deleteError);
         toast.error('Failed to delete clinical service');
         return;
       }
 
-      console.log('✅ [CLINICAL DELETE] Hybrid deletion completed');
+      console.log('✅ [CLINICAL DELETE] Service deleted successfully');
 
-      // Refresh saved clinical services data
-      await fetchSavedClinicalServicesData();
+      // Update local state immediately
+      setSavedClinicalServicesData(prev => prev.filter(s => s.junction_id !== junctionId));
+
+      // Conditional fetch based on remaining count
+      const remainingCount = savedClinicalServicesData.filter(s => s.junction_id !== junctionId).length;
+
+      if (remainingCount > 0) {
+        try {
+          await fetchSavedClinicalServicesData();
+        } catch (fetchError) {
+          console.log('⚠️ [CLINICAL DELETE] Fetch after delete failed (expected if no services remain)');
+        }
+      }
+
       toast.success('Clinical service deleted successfully');
     } catch (error) {
-      console.error('Error deleting clinical service:', error);
+      console.error('❌ [CLINICAL DELETE] Unexpected error:', error);
       toast.error('Failed to delete clinical service');
     }
   };
@@ -8430,7 +8412,7 @@ INSTRUCTIONS:
 
       // Build select clause with only existing columns
       const baseColumns = ['id', 'service_name', 'status'];
-      const optionalColumns = ['tpa_rate', 'private_rate', 'cghs_rate', 'non_cghs_rate', 'hospital', 'amount', 'rate', 'cost'];
+      const optionalColumns = ['tpa_rate', 'private_rate', 'cghs_rate', 'non_cghs_rate', 'hospital_name', 'amount', 'rate', 'cost'];
 
       const existingColumns = baseColumns.concat(
         optionalColumns.filter(col => availableColumns.includes(col))
@@ -8497,14 +8479,14 @@ INSTRUCTIONS:
 
       // Try hospital filtering if we have the data
       if (finalData.length > 0) {
-        // Check if any service has hospital field
-        const hasHospitalField = finalData.some(service => 'hospital' in service);
+        // Check if any service has hospital_name field
+        const hasHospitalField = finalData.some(service => 'hospital_name' in service);
         if (hasHospitalField) {
           console.log('✅ Hospital field found, filtering by:', hospitalFilter);
-          finalData = finalData.filter(service => service.hospital === hospitalFilter);
+          finalData = finalData.filter(service => service.hospital_name === hospitalFilter);
           console.log('📊 After hospital filter:', finalData.length, 'services');
         } else {
-          console.log('ℹ️ No hospital field found, returning all active services');
+          console.log('ℹ️ No hospital_name field found, returning all active services');
         }
       }
 
@@ -8639,8 +8621,22 @@ INSTRUCTIONS:
         console.error('⚠️ Could not fetch patient data for mandatory services, defaulting to Private:', patientError);
       }
 
+      // Hospital-specific filtering for mandatory services
+      let hospitalFilter = 'hope'; // Default fallback
+      if (hospitalConfig.name === 'hope') {
+        hospitalFilter = 'hope';
+        console.log('🏥 HOPE Hospital login detected - filtering mandatory services');
+      } else if (hospitalConfig.name === 'ayushman') {
+        hospitalFilter = 'ayushman';
+        console.log('🏥 AYUSHMAN Hospital login detected - filtering mandatory services');
+      } else {
+        hospitalFilter = 'hope'; // Default fallback
+        console.log('🏥 Unknown hospital, defaulting to HOPE - filtering mandatory services');
+      }
+
       console.log('🔍 About to query mandatory services with:', {
         searchTerm: serviceSearchTerm,
+        hospitalFilter,
         activeTab: activeServiceTab,
         patientCategory
       });
@@ -8703,6 +8699,19 @@ INSTRUCTIONS:
       let finalData = searchResults || [];
       finalData = finalData.filter(service => service.status === 'Active');
       console.log('📊 After status filter (Active only):', finalData.length, 'mandatory services');
+
+      // Try hospital filtering if we have the data
+      if (finalData.length > 0) {
+        // Check if any service has hospital_name field
+        const hasHospitalField = finalData.some(service => 'hospital_name' in service);
+        if (hasHospitalField) {
+          console.log('✅ Hospital field found in mandatory services, filtering by:', hospitalFilter);
+          finalData = finalData.filter(service => service.hospital_name === hospitalFilter);
+          console.log('📊 After hospital filter:', finalData.length, 'mandatory services');
+        } else {
+          console.log('ℹ️ No hospital_name field found in mandatory services, returning all active services');
+        }
+      }
 
       // Transform data to match expected format and handle missing fields with patient type-based rates
       const transformedData = finalData?.map((item, index) => {
@@ -16617,7 +16626,7 @@ Dr. Murali B K
                                         </td>
                                         <td className="border border-gray-300 px-4 py-2 text-sm text-center">
                                           <button
-                                            onClick={() => handleDeleteClinicalService(service.id)}
+                                            onClick={() => handleDeleteClinicalService(service.junction_id)}
                                             className="text-red-600 hover:text-red-800 p-2 rounded-full hover:bg-red-50 transition-colors"
                                             title="Delete clinical service"
                                           >
