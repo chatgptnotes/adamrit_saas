@@ -17,9 +17,29 @@
   .discharge-summary-print,
   .discharge-summary-print * {
     visibility: visible !important;
-    display: block !important;
-    height: auto !important;
-    overflow: visible !important;
+  }
+
+  /* Explicitly preserve table structure - HIGHEST PRIORITY */
+  table.print-table,
+  .print-table,
+  table {
+    display: table !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tbody {
+    display: table-row-group !important;
+  }
+
+  tr {
+    display: table-row !important;
+  }
+
+  th, td {
+    display: table-cell !important;
   }
 
   /* Ensure tables in discharge summary display correctly */
@@ -39,7 +59,7 @@
   .discharge-summary-simple th,
   .discharge-summary-simple td { display: table-cell !important; }
 
-  /* Hide all app chrome elements */
+  /* Hide all app chrome elements and potential debug/code output */
   [data-sidebar],
   [data-sidebar="sidebar"],
   aside,
@@ -52,9 +72,18 @@
   button:not(.print-button),
   select:not(.print-select),
   input:not(.print-input),
-  .print-hide {
+  .print-hide,
+  code:not(.print-code),
+  pre:not(.print-pre),
+  script,
+  noscript {
     display: none !important;
     visibility: hidden !important;
+  }
+
+  /* Explicitly hide any style tags in body (they should be in HEAD) */
+  body style {
+    display: none !important;
   }
 
   /* Position print container properly for discharge summary */
@@ -110,8 +139,8 @@
 
   /* Page settings - A4 portrait with proper margins for multi-page */
   @page {
-    margin: 0.75in 0.5in !important;
-    size: A4 portrait !important;
+    margin: 0.75in 0.5in;
+    size: A4 portrait;
   }
 
   /* Landscape page variant */

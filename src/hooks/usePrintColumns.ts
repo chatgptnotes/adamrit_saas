@@ -48,11 +48,18 @@ export const usePrintColumns = (
         // CRITICAL: Sync to settings immediately
         setSettings(prev => ({ ...prev, selectedColumnIds: validColumns }));
       } else {
-        // Default to first 5 printable columns if no saved selection
-        const defaultColumns = allColumns
-          .filter(col => col.printable)
-          .slice(0, 5)
-          .map(col => col.id);
+        // Default to meaningful columns for better initial experience
+        // Priority order: sr_no, visit_id, patient_name, claim_id, billing_status, corporate
+        const priorityColumnIds = ['sr_no', 'visit_id', 'patient_name', 'claim_id', 'billing_status', 'corporate'];
+        const defaultColumns = priorityColumnIds
+          .filter(id => allColumns.some(col => col.id === id && col.printable))
+          .concat(
+            allColumns
+              .filter(col => col.printable && !priorityColumnIds.includes(col.id))
+              .slice(0, Math.max(0, 8 - priorityColumnIds.length))
+              .map(col => col.id)
+          )
+          .slice(0, 8); // Default to 8 columns for better coverage
         columnsToUse = defaultColumns;
         setSelectedIds(defaultColumns);
         // CRITICAL: Sync to settings immediately
@@ -66,11 +73,17 @@ export const usePrintColumns = (
       }
     } catch (error) {
       console.warn('Failed to load print preferences:', error);
-      // Fallback to default selection
-      const defaultColumns = allColumns
-        .filter(col => col.printable)
-        .slice(0, 5)
-        .map(col => col.id);
+      // Fallback to meaningful columns
+      const priorityColumnIds = ['sr_no', 'visit_id', 'patient_name', 'claim_id', 'billing_status', 'corporate'];
+      const defaultColumns = priorityColumnIds
+        .filter(id => allColumns.some(col => col.id === id && col.printable))
+        .concat(
+          allColumns
+            .filter(col => col.printable && !priorityColumnIds.includes(col.id))
+            .slice(0, Math.max(0, 8 - priorityColumnIds.length))
+            .map(col => col.id)
+        )
+        .slice(0, 8);
       setSelectedIds(defaultColumns);
       // CRITICAL: Sync to settings immediately
       setSettings(prev => ({ ...prev, selectedColumnIds: defaultColumns }));
