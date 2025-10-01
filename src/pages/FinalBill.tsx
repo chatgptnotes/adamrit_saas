@@ -1056,6 +1056,7 @@ const FinalBill = () => {
 
   // Middle section state for search and selection
   const [serviceSearchTerm, setServiceSearchTerm] = useState("");
+  const [accommodationSearchTerm, setAccommodationSearchTerm] = useState("");
   const [activeServiceTab, setActiveServiceTab] = useState("Laboratory services");
   const [diagnosisSearchTerm, setDiagnosisSearchTerm] = useState("");
   const [selectedDiagnoses, setSelectedDiagnoses] = useState<any[]>([]);
@@ -1603,10 +1604,12 @@ const FinalBill = () => {
   const [savedMedicationData, setSavedMedicationData] = useState<any[]>([]);
   const [savedClinicalServicesData, setSavedClinicalServicesData] = useState<any[]>([]);
   const [savedMandatoryServicesData, setSavedMandatoryServicesData] = useState<any[]>([]);
+  const [savedAccommodationData, setSavedAccommodationData] = useState<any[]>([]);
 
   // State initialization flags to prevent duplicate fetches
   const [clinicalServicesInitialized, setClinicalServicesInitialized] = useState(false);
   const [mandatoryServicesInitialized, setMandatoryServicesInitialized] = useState(false);
+  const [accommodationInitialized, setAccommodationInitialized] = useState(false);
 
   // Force refresh counter for mandatory services UI
   const [mandatoryServicesRefreshKey, setMandatoryServicesRefreshKey] = useState(0);
@@ -1618,6 +1621,7 @@ const FinalBill = () => {
   const [editingLabId, setEditingLabId] = useState<string | null>(null);
   const [editingRadiologyId, setEditingRadiologyId] = useState<string | null>(null);
   const [editingMedicationId, setEditingMedicationId] = useState<string | null>(null);
+  const [editingAccommodationId, setEditingAccommodationId] = useState<string | null>(null);
 
   // State for medication modal
   const [selectedMedication, setSelectedMedication] = useState<any>(null);
@@ -1776,6 +1780,30 @@ const FinalBill = () => {
     } catch (error) {
       console.error('Error updating medication field:', error);
       toast.error('Failed to update medication data');
+    }
+  };
+
+  // Functions to update accommodation data
+  const updateAccommodationField = async (accommodationId: string, field: string, value: string) => {
+    try {
+      const { error } = await supabase
+        .from('visit_accommodations')
+        .update({ [field]: value })
+        .eq('id', accommodationId);
+
+      if (error) {
+        console.error('Error updating accommodation field:', error);
+        toast.error('Failed to update accommodation data');
+        return;
+      }
+
+      // Refresh accommodation data to get auto-calculated days and amount
+      await fetchSavedAccommodationData();
+
+      toast.success('Accommodation data updated successfully');
+    } catch (error) {
+      console.error('Error updating accommodation field:', error);
+      toast.error('Failed to update accommodation data');
     }
   };
 
@@ -7037,6 +7065,200 @@ INSTRUCTIONS:
     }
   };
 
+  // Function to fetch saved accommodation data
+  const fetchSavedAccommodationData = async () => {
+    if (!visitId) {
+      console.log('⚠️ [ACCOMMODATION FETCH] No visitId available');
+      return [];
+    }
+
+    try {
+      console.log('🔍 [ACCOMMODATION FETCH] Starting fetch for visitId:', visitId);
+
+      // Get visit UUID
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        console.error('❌ [ACCOMMODATION FETCH] Visit not found:', visitError);
+        return [];
+      }
+
+      console.log('✅ [ACCOMMODATION FETCH] Visit found:', visitData.id);
+
+      // Fetch accommodation data with join
+      const { data: accommodationData, error: accommodationError } = await supabase
+        .from('visit_accommodations')
+        .select(`
+          *,
+          accommodation:accommodation_id (
+            id,
+            room_type,
+            private_rate,
+            nabh_rate,
+            non_nabh_rate,
+            tpa_rate
+          )
+        `)
+        .eq('visit_id', visitData.id)
+        .order('start_date', { ascending: false });
+
+      if (accommodationError) {
+        console.error('❌ [ACCOMMODATION FETCH] Error fetching accommodations:', accommodationError);
+        return [];
+      }
+
+      console.log('✅ [ACCOMMODATION FETCH] Raw data:', accommodationData);
+
+      // Format the data
+      const formattedData = (accommodationData || []).map((item: any) => ({
+        id: item.id,
+        accommodation_id: item.accommodation_id,
+        room_type: item.accommodation?.room_type || 'Unknown Room',
+        start_date: item.start_date,
+        end_date: item.end_date,
+        days: item.days,
+        rate_used: item.rate_used,
+        rate_type: item.rate_type,
+        amount: item.amount,
+        selected_at: item.selected_at,
+        // Include all rates for potential editing
+        private_rate: item.accommodation?.private_rate,
+        nabh_rate: item.accommodation?.nabh_rate,
+        non_nabh_rate: item.accommodation?.non_nabh_rate,
+        tpa_rate: item.accommodation?.tpa_rate
+      }));
+
+      console.log('✅ [ACCOMMODATION FETCH] Formatted data:', formattedData);
+
+      // Update state
+      setSavedAccommodationData(formattedData);
+      setAccommodationInitialized(true);
+
+      return formattedData;
+    } catch (error) {
+      console.error('❌ [ACCOMMODATION FETCH] Unexpected error:', error);
+      return [];
+    }
+  };
+
+  // Function to add accommodation to visit (dates will be edited in table)
+  const handleAddAccommodation = async (accommodation: any) => {
+    if (!visitId) {
+      toast.error('No visit ID available');
+      return;
+    }
+
+    try {
+      console.log('🏨 [ACCOMMODATION ADD] Adding accommodation:', accommodation.room_type);
+
+      // Ensure visit exists
+      const ensureResult = await ensureVisitExists(visitId);
+
+      if (!ensureResult.success) {
+        console.error('❌ [ACCOMMODATION ADD] Failed to ensure visit exists');
+        return;
+      }
+
+      // Get visit UUID
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) {
+        toast.error('Failed to find visit');
+        return;
+      }
+
+      // Use default values - user will edit dates in the table
+      const today = new Date().toISOString().split('T')[0];
+      const defaultRateType = 'private';
+      const rate = accommodation.private_rate || 0;
+
+      // Insert into visit_accommodations with default dates
+      const accommodationData = {
+        visit_id: visitData.id,
+        accommodation_id: accommodation.id,
+        start_date: today,
+        end_date: today,
+        rate_used: rate,
+        rate_type: defaultRateType
+      };
+
+      console.log('💾 [ACCOMMODATION ADD] Inserting with defaults:', accommodationData);
+
+      const { data: insertedData, error: insertError } = await supabase
+        .from('visit_accommodations')
+        .insert(accommodationData)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('❌ [ACCOMMODATION ADD] Insert error:', insertError);
+        toast.error('Failed to add accommodation: ' + insertError.message);
+        return;
+      }
+
+      console.log('✅ [ACCOMMODATION ADD] Successfully added:', insertedData);
+      toast.success(`Room "${accommodation.room_type}" added. Edit dates and rate type in the table below.`);
+
+      // Refresh accommodation data
+      await fetchSavedAccommodationData();
+
+    } catch (error) {
+      console.error('❌ [ACCOMMODATION ADD] Unexpected error:', error);
+      toast.error('Failed to add accommodation');
+    }
+  };
+
+  // Function to delete accommodation
+  const handleDeleteAccommodation = async (accommodationId: string) => {
+    if (!confirm('Are you sure you want to delete this accommodation?')) {
+      return;
+    }
+
+    try {
+      console.log('🗑️ [ACCOMMODATION DELETE] Deleting accommodation:', accommodationId);
+
+      const { error: deleteError } = await supabase
+        .from('visit_accommodations')
+        .delete()
+        .eq('id', accommodationId);
+
+      if (deleteError) {
+        console.error('❌ [ACCOMMODATION DELETE] Delete error:', deleteError);
+        toast.error('Failed to delete accommodation');
+        return;
+      }
+
+      console.log('✅ [ACCOMMODATION DELETE] Successfully deleted');
+
+      // Update local state
+      setSavedAccommodationData(prev => prev.filter(a => a.id !== accommodationId));
+
+      // Refresh data
+      const remainingCount = savedAccommodationData.filter(a => a.id !== accommodationId).length;
+
+      if (remainingCount > 0) {
+        try {
+          await fetchSavedAccommodationData();
+        } catch (fetchError) {
+          console.log('⚠️ [ACCOMMODATION DELETE] Fetch after delete failed (expected if no accommodations remain)');
+        }
+      }
+
+      toast.success('Accommodation deleted successfully');
+    } catch (error) {
+      console.error('❌ [ACCOMMODATION DELETE] Unexpected error:', error);
+      toast.error('Failed to delete accommodation');
+    }
+  };
+
   // Function to delete saved medication
   const handleDeleteMedication = async (medicationId: string) => {
     if (!confirm('Are you sure you want to delete this medication?')) {
@@ -8548,6 +8770,25 @@ INSTRUCTIONS:
       return transformedData;
     },
     enabled: serviceSearchTerm.length >= 2 && activeServiceTab === "Mandatory services",
+  });
+
+  // Accommodation query
+  const { data: availableAccommodations = [], isLoading: isLoadingAccommodations } = useQuery({
+    queryKey: ['accommodations', hospitalConfig.name],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('accommodations')
+        .select('*')
+        .order('room_type');
+
+      if (error) {
+        console.error('Error fetching accommodations:', error);
+        return [];
+      }
+
+      return data || [];
+    },
+    enabled: true,
   });
 
   const filteredPharmacyServices = serviceSearchTerm.length >= 2 ? searchedPharmacyServices :
@@ -15387,6 +15628,47 @@ Dr. Murali B K
                         </>
                       )}
 
+                      {activeServiceTab === "Accommodation charges" && (
+                        <div className="space-y-3 p-4">
+                          {isLoadingAccommodations ? (
+                            <div className="text-center py-8 text-gray-500">Loading accommodations...</div>
+                          ) : (
+                            <>
+                              {availableAccommodations.map((accommodation) => (
+                                <div
+                                  key={accommodation.id}
+                                  className="border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow flex justify-between items-center"
+                                >
+                                  <div className="flex-1">
+                                    <h5 className="font-semibold text-gray-900 mb-2">{accommodation.room_type}</h5>
+                                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600">
+                                      <div>TPA: ₹{accommodation.tpa_rate || 'N/A'}</div>
+                                      <div>Private: ₹{accommodation.private_rate || 'N/A'}</div>
+                                      <div>NABH: ₹{accommodation.nabh_rate || 'N/A'}</div>
+                                      <div>Non-NABH: ₹{accommodation.non_nabh_rate || 'N/A'}</div>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleAddAccommodation(accommodation)}
+                                    className="ml-4"
+                                  >
+                                    Add Room
+                                  </Button>
+                                </div>
+                              ))}
+                              {availableAccommodations.length === 0 && (
+                                <div className="text-center py-8 text-gray-500">
+                                  <div className="text-4xl mb-2">🏨</div>
+                                  <p className="font-medium">No accommodations available</p>
+                                  <p className="text-sm mt-2">Please add room types in settings</p>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+
                       {activeServiceTab === "Pharmacy" && (
                         <>
                           {(isLoadingPharmacyServices || isSearchingPharmacyServices) ? (
@@ -15960,6 +16242,28 @@ Dr. Murali B K
                           Mandatory Services
                         </button>
                         <button
+                          className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'accommodation'
+                            ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
+                            : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                          onClick={async () => {
+                            console.log('🔄 [TAB SWITCH] Switching to accommodation tab...');
+                            setSavedDataTab('accommodation');
+
+                            if (savedAccommodationData.length === 0 && visitId) {
+                              console.log('🚨 [TAB SWITCH RECOVERY] No accommodation data, triggering fetch...');
+                              try {
+                                await fetchSavedAccommodationData();
+                                console.log('✅ [TAB SWITCH RECOVERY] Accommodation data loaded');
+                              } catch (recoveryError) {
+                                console.error('❌ [TAB SWITCH RECOVERY] Failed:', recoveryError);
+                              }
+                            }
+                          }}
+                        >
+                          Accommodation ({savedAccommodationData.length})
+                        </button>
+                        <button
                           className={`px-4 py-2 text-sm font-medium ${savedDataTab === 'discount'
                             ? 'border-b-2 border-blue-500 text-blue-600 bg-blue-50'
                             : 'text-gray-500 hover:text-gray-700'
@@ -16447,6 +16751,95 @@ Dr. Murali B K
                                 <div className="text-4xl mb-2">🔧</div>
                                 <p className="font-medium">No mandatory services saved for this visit</p>
                                 <p className="text-sm mt-2">Search and select mandatory services from the Mandatory services section above to save them here</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {savedDataTab === 'accommodation' && (
+                          <div className="p-4">
+                            <div className="flex justify-between items-center mb-4">
+                              <h4 className="font-semibold text-gray-800">Saved Accommodations ({savedAccommodationData.length})</h4>
+                              <div className="text-right">
+                                <div className="text-sm text-gray-600">Total:</div>
+                                <div className="text-xl font-bold text-green-600">
+                                  ₹{savedAccommodationData.reduce((sum, acc) => sum + (parseFloat(acc.amount) || 0), 0).toLocaleString('en-IN')}
+                                </div>
+                              </div>
+                            </div>
+                            {savedAccommodationData.length > 0 ? (
+                              <div className="overflow-x-auto">
+                                <table className="w-full border-collapse border border-gray-300">
+                                  <thead>
+                                    <tr className="bg-gray-100">
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Room Type</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Start Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">End Date</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Days</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Rate</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-left text-sm font-medium text-gray-900">Amount</th>
+                                      <th className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-gray-900">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {savedAccommodationData.map((accommodation, index) => (
+                                      <tr key={index} className="hover:bg-gray-50">
+                                        <td className="border border-gray-300 px-4 py-2 text-sm text-gray-900 font-medium">
+                                          {accommodation.room_type}
+                                        </td>
+                                        <td className="border border-gray-300 px-2 py-2 text-sm text-gray-600">
+                                          <input
+                                            type="date"
+                                            className="w-full border-0 bg-transparent text-sm px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
+                                            value={accommodation.start_date}
+                                            onChange={(e) => updateAccommodationField(accommodation.id, 'start_date', e.target.value)}
+                                          />
+                                        </td>
+                                        <td className="border border-gray-300 px-2 py-2 text-sm text-gray-600">
+                                          <input
+                                            type="date"
+                                            className="w-full border-0 bg-transparent text-sm px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
+                                            value={accommodation.end_date}
+                                            onChange={(e) => updateAccommodationField(accommodation.id, 'end_date', e.target.value)}
+                                          />
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-center text-sm font-medium text-purple-600">
+                                          {accommodation.days}
+                                        </td>
+                                        <td className="border border-gray-300 px-2 py-2 text-sm text-gray-700">
+                                          <select
+                                            className="w-full border-0 bg-transparent text-sm px-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded"
+                                            value={accommodation.rate_type}
+                                            onChange={(e) => updateAccommodationField(accommodation.id, 'rate_type', e.target.value)}
+                                          >
+                                            <option value="private">Private</option>
+                                            <option value="tpa">TPA</option>
+                                            <option value="nabh">NABH</option>
+                                            <option value="non_nabh">Non-NABH</option>
+                                          </select>
+                                          <div className="text-xs text-gray-500 mt-1">₹{accommodation.rate_used}</div>
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-sm font-semibold text-green-600">
+                                          ₹{accommodation.amount}
+                                        </td>
+                                        <td className="border border-gray-300 px-4 py-2 text-center">
+                                          <button
+                                            onClick={() => handleDeleteAccommodation(accommodation.id)}
+                                            className="text-red-600 hover:text-red-800 text-sm"
+                                            title="Delete accommodation"
+                                          >
+                                            🗑️
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-center py-8 text-gray-500">
+                                <div className="text-4xl mb-2">🏨</div>
+                                <p className="font-medium">No accommodations saved for this visit</p>
+                                <p className="text-sm mt-2">Select accommodations from the Accommodation charges section above to save them here</p>
                               </div>
                             )}
                           </div>

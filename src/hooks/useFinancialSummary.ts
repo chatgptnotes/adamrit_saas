@@ -677,6 +677,37 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
     }
   };
 
+  const fetchAccommodationTotal = async (): Promise<number> => {
+    if (!visitId) return 0;
+
+    try {
+      // Get visit UUID first
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError || !visitData) return 0;
+
+      // Fetch accommodation charges from junction table
+      const { data: accommodationData, error: accommodationError } = await supabase
+        .from('visit_accommodations')
+        .select('amount')
+        .eq('visit_id', visitData.id);
+
+      if (accommodationError || !accommodationData) return 0;
+
+      // Calculate total
+      const total = accommodationData.reduce((sum, accommodation) => sum + (parseFloat(accommodation.amount) || 0), 0);
+      console.log('💰 Accommodation charges total calculated:', total);
+      return total;
+    } catch (error) {
+      console.error('Error fetching accommodation total:', error);
+      return 0;
+    }
+  };
+
   // Load financial summary data from database
   const loadFinancialSummary = async () => {
     const loadSessionId = Math.random().toString(36).substr(2, 9);
@@ -1531,6 +1562,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         mandatoryTotal,
         radiologyTotal,
         pharmacyTotal,
+        accommodationTotal,
         advancePaymentTotal,
         refundedTotal
       ] = await Promise.all([
@@ -1539,12 +1571,13 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         fetchMandatoryServicesTotal(),
         fetchRadiologyTotal(),
         fetchPharmacyTotal(),
+        fetchAccommodationTotal(),
         fetchAdvancePaymentTotal(),
         fetchRefundedAmount()
       ]);
 
       // Calculate grand total
-      const grandTotal = labTotal + clinicalTotal + mandatoryTotal + radiologyTotal + pharmacyTotal;
+      const grandTotal = labTotal + clinicalTotal + mandatoryTotal + radiologyTotal + pharmacyTotal + accommodationTotal;
       console.log('✅ [AUTO-POPULATE] Step 1 Complete: Calculated totals only');
 
       // 🔥 STEP 2: Update ONLY totals, preserve existing discount values from state
@@ -1568,6 +1601,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
             radiology: radiologyTotal.toString(),
             pharmacy: pharmacyTotal.toString(),
             mandatoryServices: mandatoryTotal.toString(),
+            accommodationCharges: accommodationTotal.toString(),
             total: grandTotal.toString()
           },
           // 🛡️ PRESERVE EXISTING DISCOUNT VALUES: No database loading, use current state
@@ -1617,6 +1651,7 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
         mandatoryTotal,
         radiologyTotal,
         pharmacyTotal,
+        accommodationTotal,
         grandTotal,
         discountHandling: 'preserved from state (loaded by loadFinancialSummary)'
       });
