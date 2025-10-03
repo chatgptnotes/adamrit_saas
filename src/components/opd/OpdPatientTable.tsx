@@ -889,10 +889,13 @@ Verified by: [To be verified by doctor]`;
               <TableCell className="font-mono text-sm">
                 <button
                   onClick={() => handleVisitIdClick(patient.patient_id || patient.patients?.id, patient.visit_id)}
-                  className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
+                  className="text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors print:hidden"
                 >
                   {patient.visit_id || 'N/A'}
                 </button>
+                <span className="hidden print:inline">
+                  {patient.visit_id || 'N/A'}
+                </span>
               </TableCell>
               <TableCell>
                 <div>
