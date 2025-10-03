@@ -265,6 +265,7 @@ export default function DischargeSummaryEdit() {
 
   // Lab results state
   const [labResults, setLabResults] = useState<any[]>([]);
+  const [visitLabs, setVisitLabs] = useState<any[]>([]);
 
   // Debounced auto-save
   const [debouncedText] = useDebounce(dischargeSummaryText, 1500);
@@ -442,6 +443,13 @@ export default function DischargeSummaryEdit() {
 
       // 4. Use diagnosis data from the hook - no more database query here
       console.log('🔍 Using diagnosis data from hook:', visitDiagnosis);
+      if (visitDiagnosis) {
+        console.log('✅ Primary Diagnosis:', visitDiagnosis.primaryDiagnosis);
+        console.log('✅ Secondary Diagnoses:', visitDiagnosis.secondaryDiagnoses);
+        console.log('📊 Total diagnosis count:', 1 + (visitDiagnosis.secondaryDiagnoses?.length || 0));
+      } else {
+        console.log('⚠️ No diagnosis data available from hook');
+      }
 
       // Check if we have valid visitData with UUID for subsequent queries
       if (!visitData?.id) {
@@ -871,6 +879,64 @@ export default function DischargeSummaryEdit() {
       console.log('📊 Final labResultsData to store:', labResultsData?.length || 0, 'results');
       setLabResults(labResultsData || []);
 
+      // 6c. Fetch lab test orders from visit_labs table (ordered tests from billing page)
+      let visitLabsData = [];
+      console.log('🔬 Fetching lab test orders from visit_labs table...');
+
+      if (visitData?.id) {
+        try {
+          const { data: visitLabsRaw, error: visitLabsError } = await supabase
+            .from('visit_labs' as any)
+            .select('*')
+            .eq('visit_id', visitData.id)
+            .order('ordered_date', { ascending: false });
+
+          if (visitLabsError) {
+            console.error('❌ Error fetching visit_labs:', visitLabsError);
+          } else if (visitLabsRaw && visitLabsRaw.length > 0) {
+            console.log('✅ Found visit_labs:', visitLabsRaw.length, 'lab orders');
+
+            // Get lab details for each lab_id
+            const labIds = visitLabsRaw.map((item: any) => item.lab_id);
+            const { data: labsData, error: labsError } = await supabase
+              .from('lab')
+              .select('id, name, description, category')
+              .in('id', labIds);
+
+            if (labsError) {
+              console.error('❌ Error fetching lab details:', labsError);
+              visitLabsData = visitLabsRaw.map((item: any) => ({
+                ...item,
+                lab_name: `Lab ID: ${item.lab_id}`,
+                test_name: `Test ${item.lab_id}`
+              }));
+            } else {
+              // Combine visit_labs with lab details
+              visitLabsData = visitLabsRaw.map((visitLab: any) => {
+                const labDetail = labsData?.find((l: any) => l.id === visitLab.lab_id);
+                return {
+                  ...visitLab,
+                  lab_name: labDetail?.name || `Lab ${visitLab.lab_id}`,
+                  test_name: labDetail?.name || 'Unknown Test',
+                  description: labDetail?.description || '',
+                  category: labDetail?.category || ''
+                };
+              });
+              console.log('📋 Formatted visit_labs data:', visitLabsData);
+            }
+          } else {
+            console.log('ℹ️ No lab orders found in visit_labs');
+          }
+        } catch (error) {
+          console.error('💥 Exception fetching visit_labs:', error);
+        }
+      } else {
+        console.log('⏭️ Skipping visit_labs fetch - no visit UUID available');
+      }
+
+      // Store visit_labs in state for AI generation
+      setVisitLabs(visitLabsData || []);
+
       // 7. Fetch radiology orders using the correct UUID from visitData.id
       let radiologyOrders = null;
       let radError = null;
@@ -1072,18 +1138,29 @@ export default function DischargeSummaryEdit() {
         }
       }) || [];
 
-      // Process lab results from lab_results table
+      // Process lab results - PRIORITIZE visit_labs (ordered tests from billing page)
       let formattedLabResultsLocal = [];
       let abnormalResultsLocal = [];
 
       try {
         console.log('🧪 LAB RESULTS PROCESSING DEBUG:');
+        console.log('📊 visitLabsData exists:', !!visitLabsData);
+        console.log('📊 visitLabsData length:', visitLabsData?.length || 0);
         console.log('📊 labResultsData exists:', !!labResultsData);
         console.log('📊 labResultsData length:', labResultsData?.length || 0);
-        console.log('📊 labResultsData sample:', labResultsData?.[0] || 'none');
 
-      if (labResultsData && labResultsData.length > 0) {
-        console.log('✅ Processing lab results data:', labResultsData);
+      // PRIORITY: Process visit_labs data first (ordered tests from billing page)
+      if (visitLabsData && visitLabsData.length > 0) {
+        console.log('✅ Processing visit_labs data for AI modal:', visitLabsData);
+
+        visitLabsData.forEach(test => {
+          const testName = test.test_name || test.lab_name || 'Unknown Test';
+          formattedLabResultsLocal.push(`• ${testName}: Ordered - Pending`);
+        });
+      }
+      // ONLY process lab_results if visit_labs is empty
+      else if (labResultsData && labResultsData.length > 0) {
+        console.log('✅ Processing lab results data (no visit_labs):', labResultsData);
 
         // Group results by test category or main_test_name for better organization
         const groupedResults = {};
@@ -1273,8 +1350,9 @@ Name                     Strength    Route     Dosage                          D
 
       // Create lab results table format
       let labResultsTable = '';
-      // Check if we have any lab data to display
-      const hasLabData = (labResultsData && labResultsData.length > 0) ||
+      // Check if we have any lab data to display - prioritize visit_labs
+      const hasLabData = (visitLabsData && visitLabsData.length > 0) ||
+                        (labResultsData && labResultsData.length > 0) ||
                         (labOrders && labOrders.length > 0) ||
                         (formattedLabResultsLocal && formattedLabResultsLocal.length > 0) ||
                         (labResultsList && labResultsList.length > 0);
@@ -1286,9 +1364,21 @@ LABORATORY INVESTIGATIONS:
 Test Name                       Result              Reference Range     Status
 --------------------------------------------------------------------------------\n`;
 
-        // Add formatted lab results from lab_results table first (if available)
-        if (labResultsData && labResultsData.length > 0) {
-          console.log('📊 Including lab results from lab_results table:', labResultsData.length, 'results');
+        // PRIORITY: Add lab tests from visit_labs table (ordered tests from billing page)
+        // This is the source of truth for what tests were ordered for THIS visit
+        if (visitLabsData && visitLabsData.length > 0) {
+          console.log('📊 Including lab tests from visit_labs table:', visitLabsData.length, 'tests');
+          visitLabsData.forEach(test => {
+            const testName = (test.test_name || test.lab_name || 'Unknown Test').substring(0, 30).padEnd(30);
+            const value = 'Ordered'.substring(0, 18).padEnd(18);
+            const range = (test.description || '-').substring(0, 18).padEnd(18);
+            const status = 'Pending';
+            labResultsTable += `${testName} ${value} ${range} ${status}\n`;
+          });
+        }
+        // ONLY add lab_results if visit_labs is empty AND we have visit-specific results
+        else if (labResultsData && labResultsData.length > 0) {
+          console.log('📊 Including lab results from lab_results table (no visit_labs found):', labResultsData.length, 'results');
           labResultsData.forEach(result => {
             const testName = (result.test_name || 'Unknown Test').substring(0, 30).padEnd(30);
             const value = (result.result_value ? `${result.result_value}${result.result_unit ? ' ' + result.result_unit : ''}` : 'N/A').substring(0, 18).padEnd(18);
@@ -1440,7 +1530,21 @@ PLEASE CONTACT: 7030974619, 9373111709.
       });
 
       const dataInfo = [];
-      if (labResultsData && labResultsData.length > 0) {
+
+      // Add diagnosis information first (most important)
+      if (visitDiagnosis?.primaryDiagnosis && visitDiagnosis.primaryDiagnosis !== 'No diagnosis recorded') {
+        const diagnosisCount = 1 + (visitDiagnosis.secondaryDiagnoses?.length || 0);
+        if (diagnosisCount === 1) {
+          dataInfo.push(`1 diagnosis (Primary: ${visitDiagnosis.primaryDiagnosis})`);
+        } else {
+          dataInfo.push(`${diagnosisCount} diagnoses (Primary: ${visitDiagnosis.primaryDiagnosis})`);
+        }
+      }
+
+      // Prioritize visit_labs (ordered tests from billing page)
+      if (visitLabsData && visitLabsData.length > 0) {
+        dataInfo.push(`${visitLabsData.length} lab test(s)`);
+      } else if (labResultsData && labResultsData.length > 0) {
         dataInfo.push(`${labResultsData.length} lab result(s)`);
       } else if (labOrders && labOrders.length > 0) {
         dataInfo.push(`${labOrders.length} lab order(s)`);
@@ -1713,8 +1817,17 @@ PLEASE CONTACT: 7030974619, 9373111709.
       console.log('Error fetching radiology data:', error);
     }
 
-    // Process lab investigations
-    if (labResults && labResults.length > 0) {
+    // Process lab investigations - PRIORITIZE visit_labs (ordered tests from billing page)
+    if (visitLabs && visitLabs.length > 0) {
+      labInvestigationsData = visitLabs.map(test => ({
+        name: test.test_name || test.lab_name || 'Unknown Test',
+        result: 'Ordered',
+        range: test.description || '-',
+        status: 'Pending'
+      }));
+    }
+    // ONLY use labResults if visitLabs is empty
+    else if (labResults && labResults.length > 0) {
       labInvestigationsData = labResults.map(lab => ({
         name: lab.test_name || lab.main_test_name || 'Unknown Test',
         result: `${lab.result_value || 'Pending'}${lab.result_unit ? ' ' + lab.result_unit : ''}`,
