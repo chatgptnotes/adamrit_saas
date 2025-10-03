@@ -2008,7 +2008,7 @@ const TodaysIpdDashboard = () => {
         )}
 
         {/* Visits Table */}
-        <div className="bg-card rounded-lg border">
+        <div className="bg-card rounded-lg border no-print">
           <div className="p-4 border-b">
             <h2 className="text-lg font-semibold">IPD PATIENT</h2>
           </div>
@@ -2484,51 +2484,51 @@ const TodaysIpdDashboard = () => {
       {/* Print Styles */}
       <style>{`
         @media print {
-          /* Hide everything except the table */
-          body * {
-            visibility: hidden !important;
+          /* Page settings */
+          @page {
+            margin: 0.5in;
+            size: A4 landscape;
           }
 
-          /* Show only the table container and its contents */
-          .bg-card.rounded-lg.border:last-child,
-          .bg-card.rounded-lg.border:last-child *,
-          .print-info,
-          .print-info * {
-            visibility: visible !important;
-          }
-
-          /* Hide sidebar and navigation */
-          [data-sidebar],
-          [data-sidebar="sidebar"],
-          aside,
-          nav,
-          button,
-          select,
-          input,
-          .no-print {
-            display: none !important;
-            visibility: hidden !important;
-          }
-
-          /* Hide the header section completely */
-          .flex.flex-col.md\\:flex-row.justify-between.items-start.md\\:items-center.mb-6,
-          .grid.grid-cols-1.md\\:grid-cols-4.gap-4,
-          .p-4.border-b {
-            display: none !important;
-            visibility: hidden !important;
-          }
-
-          /* Reset layout for print */
+          /* Reset body and html */
           body, html {
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
           }
 
+          /* Hide non-printable elements */
+          [data-sidebar],
+          aside,
+          nav,
+          button,
+          select,
+          input,
+          .no-print,
+          .flex.flex-col.md\\:flex-row.justify-between.items-start.md\\:items-center.mb-6,
+          .grid.grid-cols-1.md\\:grid-cols-4.gap-4 {
+            display: none !important;
+          }
+
+          /* Hide the page title/header inside the table card */
+          .bg-card.rounded-lg.border .p-4.border-b {
+            display: none !important;
+          }
+
+          /* Hide the filter row (second header row) */
+          thead tr:nth-child(2) {
+            display: none !important;
+          }
+
+          /* Hide actions column */
+          th:last-child,
+          td:last-child {
+            display: none !important;
+          }
+
+          /* Main container adjustments */
           .min-h-screen.flex.w-full {
             display: block !important;
-            margin: 0 !important;
-            padding: 0 !important;
           }
 
           main {
@@ -2541,115 +2541,92 @@ const TodaysIpdDashboard = () => {
             max-width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
-            space-y: 0 !important;
           }
 
-          /* Position table at top of page */
-          .bg-card.rounded-lg.border:last-child {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            margin: 0 !important;
-            padding: 0 !important;
+          /* Table container */
+          .bg-card.rounded-lg.border {
             border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
             background: white !important;
+            page-break-inside: auto !important;
           }
 
-          /* Style the table */
+          /* Table styling */
           table {
             width: 100% !important;
             border-collapse: collapse !important;
-            margin: 0 !important;
-            font-size: 10px !important;
-          }
-
-          th, td {
-            border: 1px solid #000 !important;
-            padding: 4px !important;
-            text-align: left !important;
-            background: white !important;
-          }
-
-          thead th {
-            background: #f5f5f5 !important;
-            font-weight: bold !important;
-          }
-
-          /* Show print info at top */
-          .print-info {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            background: white !important;
-            padding: 10px !important;
-            font-size: 12px !important;
-            border-bottom: 1px solid #000 !important;
-            margin-bottom: 10px !important;
-          }
-
-          /* Adjust table position when print-info is present */
-          .bg-card.rounded-lg.border:last-child {
-            top: 60px !important;
-          }
-
-          /* Page settings */
-          @page {
-            margin: 0.5in !important;
-            size: A4 !important;
-          }
-
-          /* Optimize table for printing */
-          .min-h-screen {
-            min-height: auto !important;
-          }
-
-          .bg-background {
-            background: white !important;
-          }
-
-          table {
-            break-inside: auto !important;
-            font-size: 10px !important;
+            display: table !important;
+            font-size: 9px !important;
+            table-layout: auto !important;
           }
 
           thead {
             display: table-header-group !important;
           }
 
+          tbody {
+            display: table-row-group !important;
+          }
+
           tr {
+            display: table-row !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
 
-          /* Make text smaller for better fit */
-          .text-3xl {
-            font-size: 20px !important;
+          th, td {
+            display: table-cell !important;
+            border: 1px solid #333 !important;
+            padding: 4px 6px !important;
+            text-align: left !important;
+            background: white !important;
+            vertical-align: middle !important;
+            word-wrap: break-word !important;
           }
 
-          .text-lg {
-            font-size: 14px !important;
+          thead th {
+            background: #f0f0f0 !important;
+            font-weight: bold !important;
+            font-size: 10px !important;
+            color: black !important;
           }
 
-          /* Hide actions column in print */
-          th:last-child,
-          td:last-child {
-            display: none !important;
+          /* Ensure visibility of table content */
+          .bg-card.rounded-lg.border,
+          .bg-card.rounded-lg.border table,
+          .bg-card.rounded-lg.border thead,
+          .bg-card.rounded-lg.border tbody,
+          .bg-card.rounded-lg.border tr,
+          .bg-card.rounded-lg.border th,
+          .bg-card.rounded-lg.border td {
+            visibility: visible !important;
+            opacity: 1 !important;
           }
 
-          /* Ensure proper margins */
-          @page {
-            margin: 0.5in;
-            size: A4;
-          }
-
-          /* Show filter info in print */
+          /* Print info */
           .print-info {
             display: block !important;
-            margin-bottom: 10px;
-            font-size: 12px;
-            color: #666;
+            margin-bottom: 10px !important;
+            padding: 10px !important;
+            font-size: 12px !important;
+            color: #333 !important;
+            border-bottom: 1px solid #ccc !important;
+          }
+
+          /* Remove any interactive elements styling */
+          a {
+            color: black !important;
+            text-decoration: none !important;
+          }
+
+          /* Ensure proper text sizing */
+          .text-sm, .text-xs {
+            font-size: 9px !important;
+          }
+
+          .font-mono {
+            font-family: monospace !important;
           }
         }
 
