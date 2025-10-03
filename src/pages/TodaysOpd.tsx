@@ -13,6 +13,8 @@ const TodaysOpd = () => {
   const { hospitalConfig } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [corporateFilter, setCorporateFilter] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   // Fetch corporates from corporate table
   const { data: corporates = [] } = useQuery({
@@ -114,7 +116,7 @@ const TodaysOpd = () => {
     total: opdPatients.length
   };
 
-  // Filter patients based on search term and corporate
+  // Filter patients based on search term, corporate, and date range
   const filteredPatients = opdPatients.filter(patient => {
     const searchLower = searchTerm.toLowerCase();
     const matchesSearch = (
@@ -127,7 +129,26 @@ const TodaysOpd = () => {
     const matchesCorporate = !corporateFilter ||
       patient.patients?.corporate?.trim().toLowerCase() === corporateFilter.trim().toLowerCase();
 
-    return matchesSearch && matchesCorporate;
+    // Date range filter
+    let matchesDateRange = true;
+    if (startDate || endDate) {
+      const visitDate = new Date(patient.created_at || patient.visit_date);
+      visitDate.setHours(0, 0, 0, 0);
+
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        matchesDateRange = matchesDateRange && visitDate >= start;
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        matchesDateRange = matchesDateRange && visitDate <= end;
+      }
+    }
+
+    return matchesSearch && matchesCorporate && matchesDateRange;
   });
 
   const handlePrintList = () => {
@@ -179,6 +200,24 @@ const TodaysOpd = () => {
                 <Printer className="h-4 w-4" />
                 Print List
               </Button>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-600">From:</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="h-10 text-sm border border-gray-300 rounded-md px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-600">To:</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="h-10 text-sm border border-gray-300 rounded-md px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
               <select
                 value={corporateFilter}
                 onChange={(e) => setCorporateFilter(e.target.value)}
@@ -206,7 +245,9 @@ const TodaysOpd = () => {
       </Card>
 
       {/* Statistics Cards */}
-      <OpdStatisticsCards statistics={statistics} />
+      <div className="print:hidden">
+        <OpdStatisticsCards statistics={statistics} />
+      </div>
 
       {/* Patients Table */}
       <Card>
