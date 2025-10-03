@@ -1319,7 +1319,7 @@ const TodaysIpdDashboard = () => {
     const matchesBunch = !bunchFilter ||
       visit.bunch_no === bunchFilter;
 
-    const matchesCorporate = !corporateFilter 
+    const matchesCorporate = !corporateFilter ||
       visit.patients?.corporate?.toLowerCase().trim() === corporateFilter.toLowerCase().trim();
 
 
