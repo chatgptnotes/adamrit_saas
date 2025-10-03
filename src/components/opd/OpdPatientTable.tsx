@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Check, Eye, FileText, UserCheck, Trash2, DollarSign, MessageSquare, FileTextIcon } from 'lucide-react';
+import { X, Check, Eye, FileText, UserCheck, Trash2, DollarSign, MessageSquare, FileTextIcon, Activity } from 'lucide-react';
 import { VisitRegistrationForm } from '@/components/VisitRegistrationForm';
 import { supabase } from '@/integrations/supabase/client';
 import { useDebounce } from 'use-debounce';
@@ -156,6 +156,14 @@ export const OpdPatientTable = ({ patients, refetch }: OpdPatientTableProps) => 
   const handleDischargeSummaryClick = (patient: Patient) => {
     if (patient.visit_id) {
       navigate(`/discharge-summary-edit/${patient.visit_id}`);
+    } else {
+      alert('Visit ID not found for this patient');
+    }
+  };
+
+  const handlePhysiotherapyBillClick = (patient: Patient) => {
+    if (patient.visit_id) {
+      navigate(`/physiotherapy-bill/${patient.visit_id}`);
     } else {
       alert('Visit ID not found for this patient');
     }
@@ -877,6 +885,7 @@ Verified by: [To be verified by doctor]`;
             <TableHead className="font-medium">Corporate</TableHead>
             <TableHead className="text-center font-medium">Payment Received</TableHead>
             <TableHead className="text-center font-medium">Admit To Hospital</TableHead>
+            <TableHead className="text-center font-medium">Physiotherapy Bill</TableHead>
             <TableHead className="text-center font-medium">Discharge Summary</TableHead>
             <TableHead className="text-center font-medium">Actions</TableHead>
           </TableRow>
@@ -949,6 +958,17 @@ Verified by: [To be verified by doctor]`;
                   title="Register Visit"
                 >
                   <UserCheck className="h-4 w-4 text-blue-600" />
+                </Button>
+              </TableCell>
+              <TableCell className="text-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => handlePhysiotherapyBillClick(patient)}
+                  title="View/Add Physiotherapy Bill"
+                >
+                  <Activity className="h-4 w-4 text-teal-600" />
                 </Button>
               </TableCell>
               <TableCell className="text-center">
