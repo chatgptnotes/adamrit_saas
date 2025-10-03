@@ -47,6 +47,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { DiscountTab } from "@/components/DiscountTab"
 import { AdvancePaymentModal } from "@/components/AdvancePaymentModal"
@@ -538,6 +544,59 @@ const FinalBill = () => {
 
   // Advance Payment Modal State
   const [isAdvancePaymentModalOpen, setIsAdvancePaymentModalOpen] = useState(false);
+
+  // Final Payment Modal State
+  const [isFinalPaymentModalOpen, setIsFinalPaymentModalOpen] = useState(false);
+  const [finalPaymentAmount, setFinalPaymentAmount] = useState('');
+  const [finalPaymentMode, setFinalPaymentMode] = useState('');
+  const [finalPaymentReason, setFinalPaymentReason] = useState('');
+  const [finalPaymentRemark, setFinalPaymentRemark] = useState('');
+  const [isSavingFinalPayment, setIsSavingFinalPayment] = useState(false);
+  const [isPatientDischarged, setIsPatientDischarged] = useState(false);
+
+  // Load existing final payment data when modal opens
+  useEffect(() => {
+    const loadExistingFinalPayment = async () => {
+      if (!isFinalPaymentModalOpen || !visitId) return;
+
+      console.log('📥 Loading existing final payment data for visit:', visitId);
+
+      try {
+        const { data, error } = await supabase
+          .from('final_payments')
+          .select('*')
+          .eq('visit_id', visitId)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching existing final payment:', error);
+          return;
+        }
+
+        if (data) {
+          console.log('✅ Found existing final payment data:', data);
+          setFinalPaymentAmount(data.amount?.toString() || '');
+          setFinalPaymentMode(data.mode_of_payment || '');
+          setFinalPaymentReason(data.reason_of_discharge || '');
+          setFinalPaymentRemark(data.payment_remark || '');
+          setIsPatientDischarged(true); // Mark as already discharged
+          toast.info('Patient already discharged - View only mode');
+        } else {
+          console.log('ℹ️ No existing final payment data found');
+          // Reset form fields if no data exists
+          setFinalPaymentAmount('');
+          setFinalPaymentMode('');
+          setFinalPaymentReason('');
+          setFinalPaymentRemark('');
+          setIsPatientDischarged(false); // Mark as not discharged
+        }
+      } catch (error) {
+        console.error('Error in loadExistingFinalPayment:', error);
+      }
+    };
+
+    loadExistingFinalPayment();
+  }, [isFinalPaymentModalOpen, visitId]);
 
   // Document Modal States - removed 4 document modals
 
@@ -2355,6 +2414,75 @@ const FinalBill = () => {
       setOtNotes(notes);
       toast.success('OT Notes added successfully');
       // Here you would save the notes to the database
+    }
+  };
+
+  const handleSaveAndDischarge = async () => {
+    try {
+      // Validate required fields
+      if (!finalPaymentAmount || !finalPaymentMode || !finalPaymentReason) {
+        toast.error('Please fill in all required fields');
+        return;
+      }
+
+      setIsSavingFinalPayment(true);
+
+      // Check if final payment already exists
+      const { data: existingPayment } = await supabase
+        .from('final_payments')
+        .select('id')
+        .eq('visit_id', visitId)
+        .maybeSingle();
+
+      // Upsert final payment (insert or update)
+      const { error } = await supabase
+        .from('final_payments')
+        .upsert({
+          id: existingPayment?.id, // Include id if updating existing record
+          visit_id: visitId,
+          amount: parseFloat(finalPaymentAmount),
+          mode_of_payment: finalPaymentMode,
+          reason_of_discharge: finalPaymentReason,
+          payment_remark: finalPaymentRemark || `Being cash received towards from pt. ${patientData?.name || billData?.name || 'Patient'} against R. No.:`,
+          created_by: hospitalConfig?.user_id || 'system'
+        }, {
+          onConflict: 'visit_id' // Use visit_id as conflict target since it's unique
+        });
+
+      if (error) {
+        console.error('Error saving final payment:', error);
+        toast.error('Failed to save final payment');
+        return;
+      }
+
+      // Update visit discharge status and discharge date
+      await supabase
+        .from('visits')
+        .update({
+          discharge_date: new Date().toISOString().split('T')[0], // Set discharge date to today (YYYY-MM-DD format)
+          discharge_mode: finalPaymentReason.toLowerCase().includes('death') ? 'death' :
+                         finalPaymentReason.toLowerCase().includes('dama') ? 'dama' : 'recovery',
+          bill_paid: true
+        })
+        .eq('visit_id', visitId);
+
+      toast.success('Final payment saved successfully!');
+
+      // Reset form and close modal
+      setFinalPaymentAmount('');
+      setFinalPaymentMode('');
+      setFinalPaymentReason('');
+      setFinalPaymentRemark('');
+      setIsFinalPaymentModalOpen(false);
+
+      // Refresh financial summary data
+      window.location.reload(); // Simple refresh for now, can be improved with query invalidation
+
+    } catch (error) {
+      console.error('Error in handleSaveAndDischarge:', error);
+      toast.error('An error occurred while saving');
+    } finally {
+      setIsSavingFinalPayment(false);
     }
   };
 
@@ -15936,13 +16064,18 @@ Dr. Murali B K
                                         return;
                                       }
 
-                                      // Verify the update was successful by reading back the data with join
-                                      console.log('✅ [CLINICAL SAVE] Verifying the update was successful...');
+                                      // Verify the save was successful by checking junction table (actual data source)
+                                      console.log('✅ [CLINICAL SAVE] Verifying save from junction table...');
                                       const { data: verificationData, error: verificationError } = await supabase
-                                        .from('visits')
+                                        .from('visit_clinical_services')
                                         .select(`
+                                          id,
                                           clinical_service_id,
-                                          clinical_service:clinical_services(
+                                          quantity,
+                                          rate_used,
+                                          rate_type,
+                                          amount,
+                                          clinical_services!clinical_service_id (
                                             id,
                                             service_name,
                                             tpa_rate,
@@ -15951,56 +16084,39 @@ Dr. Murali B K
                                             non_nabh_rate
                                           )
                                         `)
-                                        .eq('visit_id', visitId)
-                                        .single();
+                                        .eq('visit_id', visitData.id)
+                                        .eq('clinical_service_id', service.id)
+                                        .maybeSingle();
 
-                                      if (verificationError || !verificationData) {
-                                        console.error('❌ [CLINICAL SAVE] Post-update verification failed:', {
-                                          verificationError,
-                                          verificationData
+                                      if (verificationError) {
+                                        console.error('❌ [CLINICAL SAVE] Post-save verification query failed:', {
+                                          verificationError
                                         });
-                                        toast.error('Save operation uncertain - please refresh page to verify');
+                                        toast.error('Save verification failed - please refresh page to verify');
                                         return;
                                       }
 
-                                      console.log('✅ [CLINICAL SAVE] Post-update verification successful:', {
-                                        clinicalServiceId: verificationData.clinical_service_id,
-                                        serviceFound: !!verificationData.clinical_service,
-                                        serviceName: verificationData.clinical_service?.service_name
+                                      if (!verificationData) {
+                                        console.error('❌ [CLINICAL SAVE] No data found in junction table after save');
+                                        toast.error('Save verification failed - data not found. Please refresh page.');
+                                        return;
+                                      }
+
+                                      console.log('✅ [CLINICAL SAVE] Post-save verification successful from junction table:', {
+                                        junctionId: verificationData.id,
+                                        serviceFound: !!verificationData.clinical_services,
+                                        serviceName: verificationData.clinical_services?.service_name,
+                                        amount: verificationData.amount
                                       });
 
-                                      console.log('✅ [CLINICAL SERVICES SAVE] Service saved successfully with UUID foreign key');
+                                      console.log('✅ [CLINICAL SERVICES SAVE] Service saved and verified successfully');
 
                                       toast.success(`Clinical service "${service.service_name}" saved successfully! (${service.patientCategory} - ${service.rateType.toUpperCase()} rate: ₹${service.selectedRate})`);
                                       setServiceSearchTerm("");
 
-                                      // Update state - for UUID foreign key, we have single service objects instead of arrays
-                                      console.log('🔄 [CLINICAL SERVICES SAVE] Updating state with verified data...');
-                                      if (verificationData.clinical_service) {
-                                        // Convert the joined service data to match expected format
-                                        const serviceData = {
-                                          id: verificationData.clinical_service.id,
-                                          service_name: verificationData.clinical_service.service_name,
-                                          selectedRate: service.selectedRate,
-                                          rateType: service.rateType,
-                                          patientCategory: service.patientCategory,
-                                          private_rate: verificationData.clinical_service.private_rate,
-                                          tpa_rate: verificationData.clinical_service.tpa_rate,
-                                          nabh_rate: verificationData.clinical_service.nabh_rate,
-                                          non_nabh_rate: verificationData.clinical_service.non_nabh_rate,
-                                          selected_at: new Date().toISOString()
-                                        };
-                                        setSavedClinicalServicesData([serviceData]);
-                                      } else {
-                                        setSavedClinicalServicesData([]);
-                                      }
-                                      setClinicalServicesInitialized(true);
-
-                                      // Also trigger a fresh fetch to double-verify
-                                      console.log('🔄 [CLINICAL SERVICES SAVE] Triggering additional verification fetch...');
-                                      setTimeout(() => {
-                                        fetchSavedClinicalServicesData().catch(console.error);
-                                      }, 100);
+                                      // Trigger immediate fetch to update state with all saved services
+                                      console.log('🔄 [CLINICAL SERVICES SAVE] Fetching all saved clinical services...');
+                                      await fetchSavedClinicalServicesData();
 
                                     } catch (error) {
                                       console.error('❌ Error in clinical service selection:', error);
@@ -18007,11 +18123,16 @@ Dr. Murali B K
                         💰 Apply Discount
                       </button>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           console.log('🔄 Manual refresh triggered for visit (TOTALS ONLY):', visitId);
                           console.log('🛡️ [REFRESH] This will preserve all discount values and only update totals');
                           if (visitId && autoPopulateFinancialData) {
-                            autoPopulateFinancialData();
+                            // Wait for data refresh to complete
+                            await autoPopulateFinancialData();
+                            // Then calculate balance with discount and final payment
+                            if (calculateBalanceWithDiscount) {
+                              await calculateBalanceWithDiscount();
+                            }
                           } else {
                             console.error('❌ Cannot refresh: missing visitId or autoPopulateFinancialData');
                           }
@@ -18404,7 +18525,95 @@ Dr. Murali B K
                             </div>
                           </td>
                         </tr>
-                        {/* Row 5: Balance */}
+
+                        {/* Row 5: Final Payment */}
+                        <tr className="bg-green-50">
+                          <td className="border border-gray-300 px-4 py-3 font-semibold text-green-800 bg-green-100">
+                            Final Payment
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.advancePayment || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.clinicalServices || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.laboratoryServices || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.radiology || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.pharmacy || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.implant || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.blood || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.surgery || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.mandatoryServices || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.physiotherapy || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.consultation || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.surgeryInternalReport || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.implantCost || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.private || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-3 min-w-[120px]">
+                            <div className="w-full px-3 py-2 text-sm text-center bg-white rounded border border-gray-200 min-h-[38px] flex items-center justify-center">
+                              {financialSummaryData.finalPayment?.accommodationCharges || '0'}
+                            </div>
+                          </td>
+                          <td className="border border-gray-300 p-2 font-bold">
+                            <div className="w-full px-2 py-1 text-sm text-center bg-green-50 rounded border border-gray-200 min-h-[32px] flex items-center justify-center font-bold text-green-800">
+                              {financialSummaryData.finalPayment?.total || '0'}
+                            </div>
+                          </td>
+                        </tr>
+
+                        {/* Row 6: Balance */}
                         <tr className="bg-blue-50 hover:bg-blue-100 transition-colors">
                           <td className="border border-gray-300 p-3 font-bold text-left bg-blue-100">
                             Balance
@@ -18512,7 +18721,10 @@ Dr. Murali B K
                   <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
                     Corporate Bill
                   </button>
-                  <button className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+                  <button
+                    onClick={() => setIsFinalPaymentModalOpen(true)}
+                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                  >
                     Final Payment
                   </button>
                   <button
@@ -20601,6 +20813,222 @@ Dr. Murali B K
         <>
         </>
       )}
+
+      {/* Final Payment Modal */}
+      <Dialog open={isFinalPaymentModalOpen} onOpenChange={setIsFinalPaymentModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-gradient-to-br from-gray-50 to-white">
+          <DialogHeader className="bg-gradient-to-r from-blue-600 to-indigo-700 -mx-6 -mt-6 px-6 py-4 rounded-t-lg">
+            <DialogTitle className="text-2xl font-bold text-white flex items-center gap-2">
+              <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Finalization of Invoice
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="mt-6 space-y-6">
+            {/* Date Information Card */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <div className="grid grid-cols-3 gap-6">
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-gray-500 mb-1">Date Of Registration</span>
+                  <span className="text-base font-semibold text-gray-900">
+                    {(() => {
+                      console.log('🔍 billData.admission_date:', billData?.admission_date);
+                      console.log('🔍 billData.created_at:', billData?.created_at);
+                      console.log('🔍 billData.visit_date:', billData?.visit_date);
+                      return billData?.admission_date ? format(new Date(billData.admission_date), 'dd/MM/yyyy') :
+                             billData?.visit_date ? format(new Date(billData.visit_date), 'dd/MM/yyyy') :
+                             billData?.created_at ? format(new Date(billData.created_at), 'dd/MM/yyyy') : 'N/A';
+                    })()}
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-gray-500 mb-1">Today's Date</span>
+                  <span className="text-base font-semibold text-gray-900">
+                    {format(new Date(), 'dd/MM/yyyy')}
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-xs font-medium text-gray-500 mb-1">Total Days</span>
+                  <span className="text-base font-semibold text-indigo-600">
+                    {(() => {
+                      const admissionDate = visitData?.admission_date || visitData?.visit_date || visitData?.created_at;
+                      const dischargeDate = visitData?.discharge_date;
+
+                      if (!admissionDate) return '0 Days';
+
+                      const startDate = new Date(admissionDate);
+                      const endDate = dischargeDate ? new Date(dischargeDate) : new Date();
+                      const days = differenceInDays(endDate, startDate) + 1;
+
+                      return `${days} Days`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Financial Summary Section */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Financial Summary
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Total Amount</label>
+                  <div className="text-2xl font-bold text-indigo-700">
+                    ₹ {Number(financialSummaryData?.totalAmount?.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Amount Paid</label>
+                  <div className="text-2xl font-bold text-green-700">
+                    ₹ {Number(financialSummaryData?.amountPaid?.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50 rounded-lg p-4 border border-orange-200">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Discount Given</label>
+                  <div className="text-2xl font-bold text-orange-700">
+                    ₹ {Number(financialSummaryData?.discount?.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div className="bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 border border-red-200">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Amount Pending</label>
+                  <div className="text-2xl font-bold text-red-700">
+                    ₹ {Number(financialSummaryData?.balance?.total || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Details Section */}
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                </svg>
+                Payment Details
+              </h3>
+              <div className="space-y-4">
+                {/* Amount */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Amount <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Enter amount"
+                    value={finalPaymentAmount}
+                    onChange={(e) => setFinalPaymentAmount(e.target.value)}
+                    disabled={isPatientDischarged}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  />
+                </div>
+
+                {/* Mode Of Payment */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mode Of Payment <span className="text-red-600">*</span>
+                  </label>
+                  <select
+                    value={finalPaymentMode}
+                    onChange={(e) => setFinalPaymentMode(e.target.value)}
+                    disabled={isPatientDischarged}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="">Please select</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Card">Card</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+                </div>
+
+                {/* Reason Of Discharge */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Reason Of Discharge <span className="text-red-600">*</span>
+                  </label>
+                  <select
+                    value={finalPaymentReason}
+                    onChange={(e) => setFinalPaymentReason(e.target.value)}
+                    disabled={isPatientDischarged}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="">Please select</option>
+                    <option value="Recovered">Recovered</option>
+                    <option value="Discharge On Request">Discharge On Request</option>
+                    <option value="DAMA">DAMA</option>
+                    <option value="Death">Death</option>
+                  </select>
+                </div>
+
+                {/* Payment Remark */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Payment Remark
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={finalPaymentRemark}
+                    onChange={(e) => setFinalPaymentRemark(e.target.value)}
+                    disabled={isPatientDischarged}
+                    placeholder={`Being cash received towards from pt. ${patientData?.name || billData?.name || 'Patient'} against R. No.:`}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors resize-none disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+              <button
+                onClick={() => setIsFinalPaymentModalOpen(false)}
+                disabled={isSavingFinalPayment}
+                className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-medium transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-gray-500 max-w-xs">
+                  {isPatientDischarged
+                    ? 'Patient has been discharged - View only mode'
+                    : 'Save and discharge button is visible only on Zero balance for private patients'}
+                </span>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSaveAndDischarge}
+                    disabled={isSavingFinalPayment || isPatientDischarged}
+                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-lg hover:from-indigo-700 hover:to-blue-700 font-semibold transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPatientDischarged
+                      ? 'Patient Already Discharged'
+                      : isSavingFinalPayment ? 'Saving...' : 'Save & Discharge'}
+                  </button>
+
+                  {isPatientDischarged && (
+                    <button
+                      onClick={() => {
+                        console.log('Opening discharge invoice for visit:', visitId);
+                        window.open(`/discharge-invoice/${visitId}`, '_blank');
+                      }}
+                      className="px-8 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 font-semibold transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                    >
+                      Invoice
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

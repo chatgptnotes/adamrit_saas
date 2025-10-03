@@ -98,6 +98,25 @@ export interface FinancialSummaryData {
     accommodationCharges: string;
     total: string;
   };
+  // Final Payment Row
+  finalPayment: {
+    advancePayment: string;
+    clinicalServices: string;
+    laboratoryServices: string;
+    radiology: string;
+    pharmacy: string;
+    implant: string;
+    blood: string;
+    surgery: string;
+    mandatoryServices: string;
+    physiotherapy: string;
+    consultation: string;
+    surgeryInternalReport: string;
+    implantCost: string;
+    private: string;
+    accommodationCharges: string;
+    total: string;
+  };
 }
 
 export interface PackageDates {
@@ -247,6 +266,24 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
       private: '',
       accommodationCharges: '',
       total: ''
+    },
+    finalPayment: {
+      advancePayment: '0',
+      clinicalServices: '0',
+      laboratoryServices: '0',
+      radiology: '0',
+      pharmacy: '0',
+      implant: '0',
+      blood: '0',
+      surgery: '0',
+      mandatoryServices: '0',
+      physiotherapy: '0',
+      consultation: '0',
+      surgeryInternalReport: '0',
+      implantCost: '0',
+      private: '0',
+      accommodationCharges: '0',
+      total: '0'
     }
   };
 
@@ -1760,6 +1797,45 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
     lastDiscountDataRef.current = currentDiscountData;
   }, [financialSummaryData.discount, billId, userHasModifiedDiscounts]);
 
+  // Fetch final payment data from database
+  useEffect(() => {
+    const fetchFinalPayment = async () => {
+      if (!visitId) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('final_payments')
+          .select('*')
+          .eq('visit_id', visitId)
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error fetching final payment:', error);
+          return;
+        }
+
+        if (data) {
+          console.log('✅ Final payment data loaded:', data);
+
+          // Update finalPayment in state with the amount
+          // For now, we'll put the full amount in the total
+          // You can distribute it across categories if needed
+          setFinancialSummaryDataTracked((prev) => ({
+            ...prev,
+            finalPayment: {
+              ...prev.finalPayment,
+              total: data.amount ? data.amount.toString() : '0'
+            }
+          }));
+        }
+      } catch (error) {
+        console.error('Error in fetchFinalPayment:', error);
+      }
+    };
+
+    fetchFinalPayment();
+  }, [visitId]);
+
   // 🔄 DEDICATED DISCOUNT PERSISTENCE SYSTEM - Completely separate from auto-populate
   const loadSavedDiscountValues = useCallback(async () => {
     if (!billId) {
@@ -1871,14 +1947,16 @@ export const useFinancialSummary = (billId?: string, visitId?: string, savedMedi
       const totalAmount = parseFloat(prev.totalAmount.total) || 0;
       const amountPaidTotal = parseFloat(prev.amountPaid.total) || 0;
       const refundedTotal = parseFloat(prev.refundedAmount.total) || 0;
+      const finalPaymentTotal = parseFloat(prev.finalPayment.total) || 0;
 
-      // Calculate new balance: Total - Discount - Amount Paid + Refunded
-      const newBalance = totalAmount - discountTotal - amountPaidTotal + refundedTotal;
+      // Calculate new balance: Total - Discount - Amount Paid - Final Payment + Refunded
+      const newBalance = totalAmount - discountTotal - amountPaidTotal - finalPaymentTotal + refundedTotal;
 
       console.log('🧮 [MANUAL CALCULATE] Enhanced balance calculation:', {
         totalAmount,
         discountTotal,
         amountPaidTotal,
+        finalPaymentTotal,
         refundedTotal,
         newBalance,
         discountSource: savedDiscountValues ? 'database' : 'memory'
