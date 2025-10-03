@@ -131,8 +131,10 @@ const TodaysOpd = () => {
 
     // Date range filter
     let matchesDateRange = true;
+    const visitDate = new Date(patient.created_at || patient.visit_date);
+
     if (startDate || endDate) {
-      const visitDate = new Date(patient.created_at || patient.visit_date);
+      // Custom date range filter applied
       visitDate.setHours(0, 0, 0, 0);
 
       if (startDate) {
@@ -146,6 +148,11 @@ const TodaysOpd = () => {
         end.setHours(23, 59, 59, 999);
         matchesDateRange = matchesDateRange && visitDate <= end;
       }
+    } else {
+      // Default: Show only last 24 hours
+      const twentyFourHoursAgo = new Date();
+      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+      matchesDateRange = visitDate >= twentyFourHoursAgo;
     }
 
     return matchesSearch && matchesCorporate && matchesDateRange;
@@ -188,9 +195,20 @@ const TodaysOpd = () => {
               <div>
                 <CardTitle className="text-2xl font-bold">OPD PATIENT DASHBOARD</CardTitle>
                 <p className="text-sm text-muted-foreground">Total OPD Patients: {statistics.total}</p>
+                {/* Date range display for print */}
+                <p className="hidden print:block text-sm text-gray-700 mt-1">
+                  {startDate || endDate ? (
+                    <>
+                      From: {startDate ? new Date(startDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Beginning'}
+                      {' '} To: {endDate ? new Date(endDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Present'}
+                    </>
+                  ) : (
+                    'From: Last 24 Hours'
+                  )}
+                </p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 print:hidden">
               <Button
                 variant="outline"
                 size="sm"
