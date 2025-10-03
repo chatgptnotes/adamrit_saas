@@ -108,14 +108,6 @@ const TodaysOpd = () => {
     refetchInterval: 30000 // Refresh every 30 seconds
   });
 
-  // Calculate statistics
-  const statistics = {
-    waiting: opdPatients.filter(p => p.status === 'waiting').length,
-    inProgress: opdPatients.filter(p => p.status === 'in_progress').length,
-    completed: opdPatients.filter(p => p.status === 'completed').length,
-    total: opdPatients.length
-  };
-
   // Filter patients based on search term, corporate, and date range
   const filteredPatients = opdPatients.filter(patient => {
     const searchLower = searchTerm.toLowerCase();
@@ -157,6 +149,14 @@ const TodaysOpd = () => {
 
     return matchesSearch && matchesCorporate && matchesDateRange;
   });
+
+  // Calculate statistics from filtered patients (to match displayed data)
+  const statistics = {
+    waiting: filteredPatients.filter(p => p.status === 'waiting').length,
+    inProgress: filteredPatients.filter(p => p.status === 'in_progress').length,
+    completed: filteredPatients.filter(p => p.status === 'completed').length,
+    total: filteredPatients.length
+  };
 
   const handlePrintList = () => {
     window.print();

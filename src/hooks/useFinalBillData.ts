@@ -38,6 +38,10 @@ export interface BillData {
   category: string;
   total_amount: number;
   status: string;
+  admission_date?: string;
+  discharge_date?: string;
+  visit_date?: string;
+  visit_created_at?: string;
   sections: BillSection[];
   line_items: BillLineItem[];
 }
@@ -48,10 +52,10 @@ export const useFinalBillData = (visitId: string) => {
   const { data: billData, isLoading, error } = useQuery({
     queryKey: ['final-bill', visitId],
     queryFn: async () => {
-      // First get patient ID from visit
+      // First get patient ID and visit dates from visit
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('patient_id')
+        .select('patient_id, admission_date, discharge_date, created_at, visit_date')
         .eq('visit_id', visitId)
         .single();
 
@@ -108,6 +112,10 @@ export const useFinalBillData = (visitId: string) => {
 
       return {
         ...billsData,
+        admission_date: visitData.admission_date,
+        discharge_date: visitData.discharge_date,
+        visit_date: visitData.visit_date,
+        visit_created_at: visitData.created_at,
         sections: sectionsData || [],
         line_items: lineItemsData || []
       } as BillData;
