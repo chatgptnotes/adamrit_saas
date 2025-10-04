@@ -71,6 +71,8 @@ interface LabTestRow {
   ordering_doctor: string;
   clinical_history?: string;
   sample_status: 'not_taken' | 'taken' | 'saved';
+  visit_id?: string;  // Add visit_id field
+  patient_id?: string; // Add patient_id field
 }
 
 interface PatientWithVisit {
@@ -1531,7 +1533,9 @@ const LabOrders = () => {
          order_status: entry.status || 'ordered',
          ordering_doctor: entry.visits?.appointment_with || 'Dr. Unknown',
          clinical_history: entry.visits?.reason_for_visit,
-         sample_status: entry.collected_date ? 'taken' : 'not_taken' as const
+         sample_status: entry.collected_date ? 'taken' : 'not_taken' as const,
+         visit_id: entry.visits?.id, // Add the actual visit table ID (not visit_id text)
+         patient_id: entry.visits?.patient_id // Add patient_id from visits table
        })) || [];
 
       return testRows;
@@ -2312,7 +2316,7 @@ const LabOrders = () => {
       }
 
       // Create print content with fetched data or current form data
-      const printContent = generatePrintContent(resultsToUse);
+      const printContent = await generatePrintContent(resultsToUse);
       console.log('📄 Generated print content length:', printContent.length);
 
       // Open print preview
@@ -2347,7 +2351,7 @@ const LabOrders = () => {
   };
 
   // Generate Print Content
-  const generatePrintContent = (fetchedLabResults = []) => {
+  const generatePrintContent = async (fetchedLabResults = []) => {
     console.log('🖨️ Generating print content...');
     console.log('📋 Selected tests:', selectedTestsForEntry);
     console.log('📝 Current form data:', labResultsForm);
@@ -2369,7 +2373,7 @@ const LabOrders = () => {
     const patientInfo = selectedTestsForEntry[0];
     const reportDate = new Date().toLocaleDateString('en-GB', {
       day: '2-digit',
-      month: '2-digit', 
+      month: '2-digit',
       year: 'numeric'
     });
     const reportTime = new Date().toLocaleTimeString('en-GB', {
@@ -2377,6 +2381,64 @@ const LabOrders = () => {
       minute: '2-digit',
       second: '2-digit'
     });
+
+    // Fetch patient and visit data from database
+    let actualPatientId = 'N/A';
+    let actualVisitId = 'N/A';
+    const firstTest = selectedTestsForEntry[0];
+    const firstTestId = firstTest?.id;
+
+    console.log('🔍 DEBUG: First test data:', firstTest);
+    console.log('🔍 DEBUG: Looking for visit_id in:', {
+      visit_id: firstTest?.visit_id,
+      order_id: firstTest?.order_id,
+      id: firstTest?.id
+    });
+
+    // Try to get visit ID from multiple sources
+    let visitIdToQuery = firstTest?.visit_id || firstTest?.order_id;
+
+    console.log('🔍 DEBUG: Will query with visitId:', visitIdToQuery);
+
+    if (visitIdToQuery) {
+      try {
+        console.log('🔍 Querying visits table with id:', visitIdToQuery);
+        const { data: visitData, error } = await supabase
+          .from('visits')
+          .select('visit_id, patient_id, patients(patients_id)')
+          .eq('id', visitIdToQuery)
+          .single();
+
+        console.log('🔍 Visit query result:', { visitData, error });
+
+        if (!error && visitData) {
+          actualPatientId = visitData.patients?.patients_id || 'N/A';
+          actualVisitId = visitData.visit_id || 'N/A';
+          console.log('✅ Fetched patient_id and visit_id from visits table:', { actualPatientId, actualVisitId });
+        } else {
+          console.log('⚠️ Visit query failed, trying saved results...');
+        }
+      } catch (err) {
+        console.error('❌ Error fetching patient/visit data:', err);
+      }
+    } else {
+      console.log('⚠️ No visit_id available, checking saved results...');
+    }
+
+    // Try to get from saved results as fallback
+    const savedResult = savedLabResults[firstTestId];
+    console.log('🔍 DEBUG: Saved result for firstTestId', firstTestId, ':', savedResult);
+
+    if (actualPatientId === 'N/A' && savedResult?.patient_info?.actual_patient_uid) {
+      actualPatientId = savedResult.patient_info.actual_patient_uid;
+      console.log('✅ Got patient_id from saved results:', actualPatientId);
+    }
+    if (actualVisitId === 'N/A' && savedResult?.patient_info?.actual_visit_id) {
+      actualVisitId = savedResult.patient_info.actual_visit_id;
+      console.log('✅ Got visit_id from saved results:', actualVisitId);
+    }
+
+    console.log('📋 FINAL VALUES FOR PRINT:', { actualPatientId, actualVisitId });
 
     return `
       <!DOCTYPE html>
@@ -2554,45 +2616,30 @@ const LabOrders = () => {
         <div class="patient-info">
           <div>
             <div><strong>Patient Name :</strong> ${patientInfo?.patient_name || 'N/A'}</div>
-            <div><strong>Patient ID :</strong> ${(() => {
-              // Try to get actual patient UID from saved results
-              const firstTestId = selectedTestsForEntry[0]?.id;
-              const savedResult = savedLabResults[firstTestId];
-              return savedResult?.patient_info?.actual_patient_uid || patientInfo?.order_number?.split('-')[0] || 'Not Available';
-            })()}</div>
+            <div><strong>Patient ID :</strong> ${actualPatientId}</div>
             <div><strong>Ref By :</strong> ${(() => {
-              const firstTestId = selectedTestsForEntry[0]?.id;
               const savedResult = savedLabResults[firstTestId];
-              return savedResult?.patient_info?.actual_ref_by || patientInfo?.ordering_doctor || 'Not specified';
+              return savedResult?.patient_info?.actual_ref_by || savedResult?.patient_info?.ref_by || patientInfo?.ordering_doctor || 'Not specified';
             })()}</div>
             <div><strong>Sample Received :</strong> ${reportDate} ${reportTime}</div>
             <div><strong>Request No. :</strong> ${patientInfo?.order_number?.split('-').pop() || 'N/A'}</div>
           </div>
           <div>
             <div><strong>Age/Sex :</strong> ${(() => {
-              // Try to get actual age/gender from saved results
-              const firstTestId = selectedTestsForEntry[0]?.id;
               const savedResult = savedLabResults[firstTestId];
               const age = savedResult?.patient_info?.actual_age || patientInfo?.patient_age || 'N/A';
               const gender = savedResult?.patient_info?.actual_gender || patientInfo?.patient_gender || 'N/A';
               return `${age}Y ${gender}`;
             })()}</div>
-            <div><strong>MRN NO :</strong> ${(() => {
-              // Try to get actual visit ID from saved results
-              const firstTestId = selectedTestsForEntry[0]?.id;
-              const savedResult = savedLabResults[firstTestId];
-              return savedResult?.patient_info?.actual_visit_id || patientInfo?.order_number || 'Not Available';
-            })()}</div>
+            <div><strong>MRN NO :</strong> ${actualVisitId}</div>
             <div><strong>Report Date :</strong> ${reportDate} ${reportTime}</div>
             <div><strong>Consultant Name :</strong> ${(() => {
-              const firstTestId = selectedTestsForEntry[0]?.id;
               const savedResult = savedLabResults[firstTestId];
-              return savedResult?.patient_info?.actual_consultant || patientInfo?.ordering_doctor || 'Not specified';
+              return savedResult?.patient_info?.actual_consultant || savedResult?.patient_info?.consultant_name || patientInfo?.ordering_doctor || 'Not specified';
             })()}</div>
             <div><strong>Provisional Diagnosis :</strong> ${(() => {
-              const firstTestId = selectedTestsForEntry[0]?.id;
               const savedResult = savedLabResults[firstTestId];
-              return savedResult?.patient_info?.actual_clinical_history || patientInfo?.clinical_history || 'Not Specified';
+              return savedResult?.patient_info?.actual_clinical_history || savedResult?.patient_info?.clinical_history || patientInfo?.clinical_history || 'Not Specified';
             })()}</div>
           </div>
         </div>
@@ -2890,7 +2937,7 @@ const LabOrders = () => {
   };
 
   // Download Files Handler
-  const handleDownloadFiles = () => {
+  const handleDownloadFiles = async () => {
     if (selectedTestsForEntry.length === 0) {
       toast({
         title: "No Tests Selected",
@@ -2910,7 +2957,7 @@ const LabOrders = () => {
     }
 
     // Generate report content
-    const reportContent = generatePrintContent([]);
+    const reportContent = await generatePrintContent([]);
     
     // Create blob and download HTML
     const blob = new Blob([reportContent], { type: 'text/html;charset=utf-8' });
