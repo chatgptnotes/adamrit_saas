@@ -2024,7 +2024,8 @@ const EditPanelForm: React.FC<EditPanelFormProps> = ({ panel, onSubmit }) => {
             name: config.sub_test_name,
             unit: config.unit || config.normal_unit || '',
             ageRanges: [],
-            normalRanges: []
+            normalRanges: [],
+            subTests: []
           };
           subTestsMap.set(subTestKey, newSubTest);
         }
@@ -2048,6 +2049,31 @@ const EditPanelForm: React.FC<EditPanelFormProps> = ({ panel, onSubmit }) => {
           unit: config.normal_unit || config.unit || ''
         };
         subTest.normalRanges.push(normalRange);
+
+        // Load nested sub-tests from JSONB column
+        if (config.nested_sub_tests && Array.isArray(config.nested_sub_tests) && config.nested_sub_tests.length > 0 && !subTest.subTests?.length) {
+          subTest.subTests = config.nested_sub_tests.map((nst: any, index: number) => ({
+            id: `nested_${subTestKey}_${index}_${Date.now()}`,
+            name: nst.name || '',
+            unit: nst.unit || '',
+            ageRanges: (nst.age_ranges || []).map((ar: any, arIndex: number) => ({
+              id: `agerange_${index}_${arIndex}_${Date.now()}`,
+              minAge: ar.min_age?.toString() || '',
+              maxAge: ar.max_age?.toString() || '',
+              unit: ar.age_unit || 'Years',
+              description: ar.description || ''
+            })),
+            normalRanges: (nst.normal_ranges || []).map((nr: any, nrIndex: number) => ({
+              id: `normalrange_${index}_${nrIndex}_${Date.now()}`,
+              ageRange: nr.age_range || '- Years',
+              gender: nr.gender || 'Both',
+              minValue: nr.min_value?.toString() || '0',
+              maxValue: nr.max_value?.toString() || '0',
+              unit: nr.unit || ''
+            })),
+            subTests: []
+          }));
+        }
       }
 
       return Array.from(subTestsMap.values());
