@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
-import { ArrowLeft, Printer, Plus, Calendar as CalendarIcon } from 'lucide-react';
+import { ArrowLeft, Printer, Plus, Calendar as CalendarIcon, Save } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface PhysiotherapyItem {
@@ -51,6 +51,7 @@ const PhysiotherapyBill = () => {
     cghs_rate: 0,
     quantity: 1
   });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (visitId) {
@@ -91,18 +92,38 @@ const PhysiotherapyBill = () => {
           corporate: visitData.patients?.corporate || 'CGHS'
         });
 
-        const billNumber = `OH${visitData.visit_id?.replace(/[^0-9]/g, '') || Date.now()}`;
+        // Use saved bill number if it exists, otherwise generate new one
+        const billNumber = visitData.physiotherapy_bill_number ||
+                          `OH${visitData.visit_id?.replace(/[^0-9]/g, '') || Date.now()}`;
         setBillNo(billNumber);
 
         setCorporateType(visitData.patients?.corporate || 'CGHS');
-        setStartDate(visitData.visit_date || new Date().toISOString().split('T')[0]);
-        setEndDate(new Date().toISOString().split('T')[0]);
+
+        // Use saved dates if they exist, otherwise use defaults
+        const dateFrom = visitData.physiotherapy_bill_date_from ||
+                        visitData.visit_date ||
+                        new Date().toISOString().split('T')[0];
+        const dateTo = visitData.physiotherapy_bill_date_to ||
+                      new Date().toISOString().split('T')[0];
+
+        setStartDate(dateFrom);
+        setEndDate(dateTo);
+
+        console.log('Loaded bill data from visits table:', {
+          billNumber,
+          dateFrom,
+          dateTo,
+          hasSavedBillNumber: !!visitData.physiotherapy_bill_number,
+          hasSavedDates: !!visitData.physiotherapy_bill_date_from
+        });
       }
 
       const { data: existingItems, error: itemsError } = await supabase
         .from('physiotherapy_bill_items')
         .select('*')
         .eq('visit_id', visitId);
+
+      console.log('Fetched items from database:', existingItems);
 
       if (!itemsError && existingItems && existingItems.length > 0) {
         setItems(existingItems.map(item => ({
@@ -346,6 +367,81 @@ const PhysiotherapyBill = () => {
     window.print();
   };
 
+  const handleSaveBill = async () => {
+    try {
+      setIsSaving(true);
+      const totalAmount = calculateTotal();
+
+      console.log('Saving bill data:', {
+        billNo,
+        totalAmount,
+        startDate,
+        endDate,
+        itemsCount: items.length
+      });
+
+      // Save bill summary to visits table
+      const { error: visitError } = await supabase
+        .from('visits')
+        .update({
+          physiotherapy_bill_number: billNo,
+          physiotherapy_bill_total: totalAmount,
+          physiotherapy_bill_date_from: startDate,
+          physiotherapy_bill_date_to: endDate,
+          physiotherapy_bill_generated_at: new Date().toISOString()
+        })
+        .eq('visit_id', visitId);
+
+      if (visitError) {
+        console.error('Error saving to visits table:', visitError);
+        throw visitError;
+      }
+      console.log('Bill summary saved to visits table successfully');
+
+      // Delete existing items for this visit
+      const { error: deleteError } = await supabase
+        .from('physiotherapy_bill_items')
+        .delete()
+        .eq('visit_id', visitId);
+
+      if (deleteError) {
+        console.error('Error deleting old items:', deleteError);
+        throw deleteError;
+      }
+      console.log('Old items deleted successfully');
+
+      // Insert all current items
+      if (items.length > 0) {
+        console.log('Inserting items:', items);
+        const { error: itemsError } = await supabase
+          .from('physiotherapy_bill_items')
+          .insert(
+            items.map(item => ({
+              visit_id: visitId,
+              item_name: item.item_name,
+              cghs_code: item.cghs_code,
+              cghs_rate: item.cghs_rate,
+              quantity: item.quantity,
+              amount: item.amount
+            }))
+          );
+
+        if (itemsError) {
+          console.error('Error inserting items:', itemsError);
+          throw itemsError;
+        }
+        console.log('Items saved successfully');
+      }
+
+      toast.success('Bill saved successfully!');
+    } catch (error) {
+      console.error('Error saving bill:', error);
+      toast.error('Failed to save bill');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -375,6 +471,14 @@ const PhysiotherapyBill = () => {
           Back to OPD
         </Button>
         <div className="flex gap-2">
+          <Button
+            onClick={handleSaveBill}
+            variant="default"
+            disabled={isSaving}
+          >
+            <Save className="h-4 w-4 mr-2" />
+            {isSaving ? 'Saving...' : 'Save Bill'}
+          </Button>
           <Button onClick={handlePrint} variant="outline">
             <Printer className="h-4 w-4 mr-2" />
             Print
@@ -383,13 +487,13 @@ const PhysiotherapyBill = () => {
       </div>
 
       {/* Bill Content - EXACT Printed Format */}
-      <div className="max-w-4xl mx-auto bg-white border border-gray-400 p-6">
-        {/* Hospital Header */}
-        <div className="text-center border-b border-gray-400 pb-2 mb-3">
-          <h1 className="text-base font-bold uppercase">
+      <div className="max-w-5xl mx-auto bg-white border border-gray-300 p-8">
+        {/* Header with Title and Date */}
+        <div className="text-center pb-3 mb-4" style={{ borderBottom: '1px solid #000' }}>
+          <h1 className="text-lg font-bold uppercase mb-1">
             <Popover open={isEditingTitle} onOpenChange={setIsEditingTitle}>
               <PopoverTrigger asChild>
-                <span className="cursor-pointer hover:bg-gray-100 px-1">
+                <span className="cursor-pointer hover:bg-gray-100 px-1 no-print">
                   {billTitle}
                 </span>
               </PopoverTrigger>
@@ -411,10 +515,11 @@ const PhysiotherapyBill = () => {
                 </div>
               </PopoverContent>
             </Popover>
+            <span className="print-only">{billTitle}</span>
           </h1>
           <Popover open={isEditingCorporate} onOpenChange={setIsEditingCorporate}>
             <PopoverTrigger asChild>
-              <p className="text-sm cursor-pointer hover:bg-gray-100 inline-block px-2">
+              <p className="text-sm cursor-pointer hover:bg-gray-100 inline-block px-2 no-print">
                 {corporateType}
               </p>
             </PopoverTrigger>
@@ -436,48 +541,55 @@ const PhysiotherapyBill = () => {
               </div>
             </PopoverContent>
           </Popover>
+          <p className="text-sm print-only">{corporateType}</p>
         </div>
 
         {/* Date at top right */}
-        <div className="text-right text-xs mb-3">
+        <div className="text-right text-sm mb-4">
           <span className="font-medium">DATE:- {new Date().toLocaleDateString('en-GB')}</span>
         </div>
 
-        {/* Patient Details - EXACT format from image */}
-        <div className="mb-3 text-xs space-y-0.5">
-          <div>
-            <span className="inline-block w-48">BILL NO</span>
-            <span>: {billNo}</span>
+        {/* Patient Details */}
+        <div className="mb-4 text-sm space-y-1">
+          <div className="flex">
+            <span className="w-40 font-medium text-blue-900">BILL NO</span>
+            <span className="mr-2">:</span>
+            <span>{billNo}</span>
           </div>
-          <div>
-            <span className="inline-block w-48">NAME OF PATIENT</span>
-            <span>: {patientData.patient_name}</span>
+          <div className="flex">
+            <span className="w-40 font-medium text-blue-900">NAME OF PATIENT</span>
+            <span className="mr-2">:</span>
+            <span>{patientData.patient_name}</span>
           </div>
-          <div>
-            <span className="inline-block w-48">ADDRESS</span>
-            <span>: {patientData.address}</span>
+          <div className="flex">
+            <span className="w-40 font-medium text-blue-900">ADDRESS</span>
+            <span className="mr-2">:</span>
+            <span>{patientData.address}</span>
           </div>
           <div className="h-2"></div>
-          <div>
-            <span className="inline-block w-48">AGE</span>
-            <span>: {patientData.age} Yrs.</span>
+          <div className="flex">
+            <span className="w-40 font-medium text-blue-900">AGE</span>
+            <span className="mr-2">:</span>
+            <span>{patientData.age} Yrs.</span>
           </div>
-          <div>
-            <span className="inline-block w-48">SEX</span>
-            <span>: {patientData.sex}</span>
+          <div className="flex">
+            <span className="w-40 font-medium text-blue-900">SEX</span>
+            <span className="mr-2">:</span>
+            <span>{patientData.sex}</span>
           </div>
-          <div>
-            <span className="inline-block w-48">DIAGNOSIS</span>
-            <span>: {patientData.diagnosis}</span>
+          <div className="flex">
+            <span className="w-40 font-medium text-blue-900">DIAGNOSIS</span>
+            <span className="mr-2">:</span>
+            <span>{patientData.diagnosis}</span>
           </div>
           <div className="flex items-center">
-            <span className="inline-block w-48">DATE OF OPD</span>
-            <span>: </span>
+            <span className="w-40 font-medium text-blue-900">DATE OF OPD</span>
+            <span className="mr-2">:</span>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" className="h-auto p-0 font-normal hover:bg-transparent no-print">
                   <span className="underline decoration-dotted">
-                    {new Date(patientData.opd_date).toLocaleDateString('en-GB').replace(/\//g, '-')}
+                    {new Date(patientData.opd_date).toLocaleDateString('en-GB')}
                   </span>
                   <CalendarIcon className="ml-1 h-3 w-3 opacity-50" />
                 </Button>
@@ -491,34 +603,35 @@ const PhysiotherapyBill = () => {
                 />
               </PopoverContent>
             </Popover>
-            <span className="print-only">{new Date(patientData.opd_date).toLocaleDateString('en-GB').replace(/\//g, '-')}</span>
+            <span className="print-only">{new Date(patientData.opd_date).toLocaleDateString('en-GB')}</span>
           </div>
         </div>
 
         {/* Items Table - EXACT format */}
-        <table className="w-full border border-gray-400 text-xs" style={{ backgroundColor: '#f5f5f5' }}>
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse', border: '1px solid #000' }}>
           <thead>
-            <tr className="border-b border-gray-400">
-              <th className="border-r border-gray-400 p-1.5 text-left font-medium w-12">SR.<br />NO.</th>
-              <th className="border-r border-gray-400 p-1.5 text-left font-medium">ITEM</th>
-              <th className="border-r border-gray-400 p-1.5 text-center font-medium w-24">CGHS<br />NABH<br />CODE No.</th>
-              <th className="border-r border-gray-400 p-1.5 text-center font-medium w-24">CGHS<br />NABH<br />RATE</th>
-              <th className="border-r border-gray-400 p-1.5 text-center font-medium w-16">QTY</th>
-              <th className="border-r border-gray-400 p-1.5 text-right font-medium w-24">AMOUNT</th>
-              <th className="p-1.5 text-center font-medium w-16 no-print">Actions</th>
+            <tr style={{ border: '1px solid #000' }}>
+              <th className="p-3 text-center font-semibold" style={{ border: '1px solid #000', width: '70px' }}>SR.<br />NO.</th>
+              <th className="p-3 text-center font-semibold" style={{ border: '1px solid #000', width: 'auto' }}>ITEM</th>
+              <th className="p-3 text-center font-semibold" style={{ border: '1px solid #000', width: '120px' }}>CGHS<br />NABH<br />CODE No.</th>
+              <th className="p-3 text-center font-semibold" style={{ border: '1px solid #000', width: '120px' }}>CGHS<br />NABH<br />RATE</th>
+              <th className="p-3 text-center font-semibold" style={{ border: '1px solid #000', width: '80px' }}>QTY</th>
+              <th className="p-3 text-center font-semibold" style={{ border: '1px solid #000', width: '120px' }}>AMOUNT</th>
+              <th className="p-3 text-center font-semibold no-print" style={{ border: '1px solid #000', width: '100px' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {/* DATE OF OPD Row */}
-            <tr className="border-b border-gray-400">
-              <td colSpan={7} className="p-1.5 font-medium">
+            <tr style={{ border: '1px solid #000' }}>
+              <td colSpan={6} className="p-2.5 font-semibold text-sm" style={{ border: '1px solid #000' }}>
                 DATE OF OPD
               </td>
+              <td className="no-print" style={{ border: '1px solid #000' }}></td>
             </tr>
 
             {/* Date Range Row */}
-            <tr className="border-b border-gray-400">
-              <td colSpan={7} className="p-1.5">
+            <tr style={{ border: '1px solid #000' }}>
+              <td colSpan={6} className="p-2.5 text-sm" style={{ border: '1px solid #000' }}>
                 <span className="no-print">
                   DL (
                   <Popover>
@@ -564,53 +677,54 @@ const PhysiotherapyBill = () => {
                   DL ({new Date(startDate).toLocaleDateString('en-GB')} to {new Date(endDate).toLocaleDateString('en-GB')})
                 </span>
               </td>
+              <td className="no-print" style={{ border: '1px solid #000' }}></td>
             </tr>
 
             {/* Item Rows */}
             {items.map((item, index) => (
-              <tr key={item.id} className="border-b border-gray-400">
-                <td className="border-r border-gray-400 p-1.5 text-center font-medium">{index + 1}</td>
-                <td className="border-r border-gray-400 p-0.5">
+              <tr key={item.id} style={{ border: '1px solid #000' }}>
+                <td className="p-3 text-center" style={{ border: '1px solid #000' }}>{index + 1}</td>
+                <td className="p-2" style={{ border: '1px solid #000' }}>
                   <Input
                     value={item.item_name}
                     onChange={(e) => updateItem(index, 'item_name', e.target.value)}
-                    className="border-0 bg-transparent h-auto p-1 text-xs no-print"
+                    className="border-0 bg-transparent h-auto p-1 text-sm no-print w-full"
                   />
-                  <span className="print-only">{item.item_name}</span>
+                  <span className="print-only text-sm">{item.item_name}</span>
                 </td>
-                <td className="border-r border-gray-400 p-0.5 text-center">
+                <td className="p-2 text-center" style={{ border: '1px solid #000' }}>
                   <Input
                     value={item.cghs_code}
                     onChange={(e) => updateItem(index, 'cghs_code', e.target.value)}
-                    className="border-0 bg-transparent h-auto p-1 text-xs text-center no-print"
+                    className="border-0 bg-transparent h-auto p-1 text-sm text-center no-print w-full"
                   />
-                  <span className="print-only">{item.cghs_code}</span>
+                  <span className="print-only text-sm">{item.cghs_code}</span>
                 </td>
-                <td className="border-r border-gray-400 p-0.5 text-center">
+                <td className="p-2 text-center" style={{ border: '1px solid #000' }}>
                   <Input
                     type="number"
                     value={item.cghs_rate}
                     onChange={(e) => updateItem(index, 'cghs_rate', parseFloat(e.target.value) || 0)}
-                    className="border-0 bg-transparent h-auto p-1 text-xs text-center no-print"
+                    className="border-0 bg-transparent h-auto p-1 text-sm text-center no-print w-full"
                   />
-                  <span className="print-only">{item.cghs_rate}</span>
+                  <span className="print-only text-sm">{item.cghs_rate}</span>
                 </td>
-                <td className="border-r border-gray-400 p-0.5 text-center">
+                <td className="p-2 text-center" style={{ border: '1px solid #000' }}>
                   <Input
                     type="number"
                     value={item.quantity}
                     onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 1)}
-                    className="border-0 bg-transparent h-auto p-1 text-xs text-center no-print"
+                    className="border-0 bg-transparent h-auto p-1 text-sm text-center no-print w-full"
                   />
-                  <span className="print-only">{item.quantity}</span>
+                  <span className="print-only text-sm">{item.quantity}</span>
                 </td>
-                <td className="border-r border-gray-400 p-1.5 text-right font-medium">{item.amount.toFixed(2)}</td>
-                <td className="p-1.5 text-center no-print">
+                <td className="p-3 text-right font-medium" style={{ border: '1px solid #000' }}>{item.amount.toFixed(2)}</td>
+                <td className="p-2 text-center no-print" style={{ border: '1px solid #000' }}>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={addNewRow}
-                    className="h-6 w-6 p-0"
+                    className="h-7 w-7 p-0"
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -619,13 +733,14 @@ const PhysiotherapyBill = () => {
             ))}
 
             {/* Total Row */}
-            <tr>
-              <td colSpan={5} className="p-2 text-center font-bold text-sm">
+            <tr style={{ border: '1px solid #000' }}>
+              <td colSpan={5} className="p-3 text-center font-bold text-base" style={{ border: '1px solid #000' }}>
                 TOTAL BILL AMOUNT
               </td>
-              <td className="p-2 text-right font-bold text-base" colSpan={2}>
+              <td className="p-3 text-right font-bold text-lg" style={{ border: '1px solid #000' }}>
                 {calculateTotal().toFixed(2)}
               </td>
+              <td className="no-print" style={{ border: '1px solid #000' }}></td>
             </tr>
           </tbody>
         </table>
@@ -646,56 +761,101 @@ const PhysiotherapyBill = () => {
           body {
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
-            font-size: 12px;
+            margin: 0;
+            padding: 0;
           }
           @page {
-            margin: 0.5in;
+            margin: 0.75in;
             size: A4;
           }
+          /* Ensure header border line is visible */
+          .text-center[style*="borderBottom"] {
+            border-bottom: 1px solid #000 !important;
+          }
           table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 11px;
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            font-size: 13px !important;
+            border: 1px solid #000 !important;
           }
-          table, th, td {
-            border: 1px solid #999 !important;
+          table tr {
+            border: 1px solid #000 !important;
+          }
+          table th, table td {
+            border: 1px solid #000 !important;
             page-break-inside: avoid;
+            padding: 10px !important;
+            vertical-align: middle !important;
+            line-height: 1.5;
           }
-          th, td {
-            padding: 6px !important;
-            vertical-align: middle;
+          thead th {
+            font-weight: 600 !important;
+            background-color: #fff !important;
+            text-align: center !important;
+            border: 1px solid #000 !important;
           }
-          th {
-            font-weight: 600;
-            text-align: center;
+          tbody td {
+            border: 1px solid #000 !important;
           }
-          /* SR NO column */
-          tbody tr td:nth-child(1) {
-            text-align: center;
-            font-weight: 500;
+          /* Hide 7th column (Actions) completely in print */
+          thead tr th:nth-child(7),
+          tbody tr td:nth-child(7) {
+            display: none !important;
+            visibility: collapse !important;
+            width: 0 !important;
+            max-width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
+            overflow: hidden !important;
+            opacity: 0 !important;
           }
-          /* ITEM column */
-          tbody tr td:nth-child(2) {
-            text-align: left;
-            padding-left: 8px !important;
+          /* Force table to only show 6 columns */
+          table {
+            table-layout: fixed !important;
           }
-          /* CGHS CODE column */
-          tbody tr td:nth-child(3) {
-            text-align: center;
+          thead tr,
+          tbody tr {
+            display: table-row !important;
           }
-          /* CGHS RATE column */
-          tbody tr td:nth-child(4) {
-            text-align: center;
+          /* Column widths */
+          thead th:nth-child(1),
+          tbody td:nth-child(1) {
+            width: 70px !important;
+            text-align: center !important;
           }
-          /* QTY column */
-          tbody tr td:nth-child(5) {
-            text-align: center;
+          thead th:nth-child(2),
+          tbody td:nth-child(2) {
+            width: auto !important;
+            text-align: left !important;
+            padding-left: 12px !important;
           }
-          /* AMOUNT column */
-          tbody tr td:nth-child(6) {
-            text-align: right;
-            padding-right: 8px !important;
-            font-weight: 500;
+          thead th:nth-child(3),
+          tbody td:nth-child(3) {
+            width: 120px !important;
+            text-align: center !important;
+          }
+          thead th:nth-child(4),
+          tbody td:nth-child(4) {
+            width: 120px !important;
+            text-align: center !important;
+          }
+          thead th:nth-child(5),
+          tbody td:nth-child(5) {
+            width: 80px !important;
+            text-align: center !important;
+          }
+          thead th:nth-child(6),
+          tbody td:nth-child(6) {
+            width: 120px !important;
+            text-align: right !important;
+            padding-right: 12px !important;
+          }
+          /* Patient details styling */
+          .text-blue-900 {
+            color: #1e3a8a !important;
           }
           input {
             border: none !important;
