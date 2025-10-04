@@ -52,75 +52,111 @@ export const useFinalBillData = (visitId: string) => {
   const { data: billData, isLoading, error } = useQuery({
     queryKey: ['final-bill', visitId],
     queryFn: async () => {
-      // First get patient ID and visit dates from visit
-      const { data: visitData, error: visitError } = await supabase
-        .from('visits')
-        .select('patient_id, admission_date, discharge_date, created_at, visit_date')
-        .eq('visit_id', visitId)
-        .single();
+      try {
+        console.log('🔍 Fetching bill data for visit ID:', visitId);
 
-      if (visitError) {
-        console.error('Error fetching visit:', visitError);
-        throw visitError;
-      }
+        // First get patient ID and visit dates from visit
+        const { data: visitData, error: visitError } = await supabase
+          .from('visits')
+          .select('patient_id, admission_date, discharge_date, created_at, visit_date')
+          .eq('visit_id', visitId)
+          .single();
 
-      if (!visitData?.patient_id) {
+        if (visitError) {
+          console.error('❌ Error fetching visit:', visitError);
+          console.error('Visit ID searched:', visitId);
+
+          // Check if it's a "not found" error vs other database error
+          if (visitError.code === 'PGRST116') {
+            console.warn(`⚠️ No visit found with visit_id: ${visitId}`);
+            return null;
+          }
+
+          // For other errors, still return null instead of throwing
+          console.error('Database error details:', {
+            code: visitError.code,
+            message: visitError.message,
+            details: visitError.details
+          });
+          return null;
+        }
+
+        if (!visitData?.patient_id) {
+          console.warn('⚠️ Visit found but patient_id is missing:', visitData);
+          return null;
+        }
+
+        console.log('✅ Visit data found:', {
+          patient_id: visitData.patient_id,
+          admission_date: visitData.admission_date,
+          visit_date: visitData.visit_date
+        });
+
+        // Then get the most recent bill for this patient
+        const { data: billsData, error: billsError } = await supabase
+          .from('bills')
+          .select('*')
+          .eq('patient_id', visitData.patient_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (billsError) {
+          console.error('❌ Error fetching bill:', billsError);
+          return null;
+        }
+
+        if (!billsData) {
+          console.log('ℹ️ No bill found for patient, returning null');
+          return null;
+        }
+
+        console.log('✅ Bill found:', billsData.bill_no);
+
+        // Get sections
+        const { data: sectionsData, error: sectionsError } = await supabase
+          .from('bill_sections')
+          .select('*')
+          .eq('bill_id', billsData.id)
+          .order('section_order');
+
+        if (sectionsError) {
+          console.error('❌ Error fetching sections:', sectionsError);
+          // Don't fail completely, just use empty sections
+        }
+
+        // Get line items
+        const { data: lineItemsData, error: lineItemsError } = await supabase
+          .from('bill_line_items')
+          .select('*')
+          .eq('bill_id', billsData.id)
+          .order('item_order');
+
+        if (lineItemsError) {
+          console.error('❌ Error fetching line items:', lineItemsError);
+          // Don't fail completely, just use empty line items
+        }
+
+        const result = {
+          ...billsData,
+          admission_date: visitData.admission_date,
+          discharge_date: visitData.discharge_date,
+          visit_date: visitData.visit_date,
+          visit_created_at: visitData.created_at,
+          sections: sectionsData || [],
+          line_items: lineItemsData || []
+        } as BillData;
+
+        console.log('✅ Successfully loaded bill data with', result.line_items.length, 'line items');
+        return result;
+      } catch (err) {
+        console.error('❌ Unexpected error in useFinalBillData:', err);
+        // Return null instead of throwing to prevent app crash
         return null;
       }
-
-      // Then get the most recent bill for this patient
-      const { data: billsData, error: billsError } = await supabase
-        .from('bills')
-        .select('*')
-        .eq('patient_id', visitData.patient_id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (billsError) {
-        console.error('Error fetching bill:', billsError);
-        throw billsError;
-      }
-
-      if (!billsData) {
-        return null;
-      }
-
-      // Get sections
-      const { data: sectionsData, error: sectionsError } = await supabase
-        .from('bill_sections')
-        .select('*')
-        .eq('bill_id', billsData.id)
-        .order('section_order');
-
-      if (sectionsError) {
-        console.error('Error fetching sections:', sectionsError);
-        throw sectionsError;
-      }
-
-      // Get line items
-      const { data: lineItemsData, error: lineItemsError } = await supabase
-        .from('bill_line_items')
-        .select('*')
-        .eq('bill_id', billsData.id)
-        .order('item_order');
-
-      if (lineItemsError) {
-        console.error('Error fetching line items:', lineItemsError);
-        throw lineItemsError;
-      }
-
-      return {
-        ...billsData,
-        admission_date: visitData.admission_date,
-        discharge_date: visitData.discharge_date,
-        visit_date: visitData.visit_date,
-        visit_created_at: visitData.created_at,
-        sections: sectionsData || [],
-        line_items: lineItemsData || []
-      } as BillData;
     },
     enabled: !!visitId,
+    retry: false, // Don't retry on error to avoid multiple failed requests
   });
 
   const saveBillMutation = useMutation({

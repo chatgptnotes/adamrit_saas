@@ -554,6 +554,10 @@ const FinalBill = () => {
   const [isSavingFinalPayment, setIsSavingFinalPayment] = useState(false);
   const [isPatientDischarged, setIsPatientDischarged] = useState(false);
 
+  // Patient Data and Invoice Items State (moved to top to prevent initialization errors)
+  const [patientData, setPatientData] = useState<PatientData>(initialPatientData);
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>(initialInvoiceItems);
+
   // Load existing final payment data when modal opens
   useEffect(() => {
     const loadExistingFinalPayment = async () => {
@@ -597,6 +601,23 @@ const FinalBill = () => {
 
     loadExistingFinalPayment();
   }, [isFinalPaymentModalOpen, visitId]);
+
+  // Generate default payment remark when modal opens or payment mode changes
+  useEffect(() => {
+    if (!isFinalPaymentModalOpen || isPatientDischarged) return;
+
+    // Only set default if remark is empty (don't override existing content or manual edits)
+    if (finalPaymentRemark) return;
+
+    // Generate default narration
+    const patientName = patientData?.name || billData?.name || 'Patient';
+    const registrationNo = patientData?.patients_id || billData?.patients_id || '';
+    const paymentModeLabel = finalPaymentMode || 'Cash';
+
+    const defaultRemark = `Being cash received towards ${paymentModeLabel} from pt. ${patientName} against R. No.: ${registrationNo}`;
+
+    setFinalPaymentRemark(defaultRemark);
+  }, [isFinalPaymentModalOpen, finalPaymentMode, patientData, billData, isPatientDischarged, finalPaymentRemark]);
 
   // Document Modal States - removed 4 document modals
 
@@ -894,11 +915,18 @@ const FinalBill = () => {
   } = useQuery({
     queryKey: ["finalBillData", visitId],
     queryFn: async () => {
-      if (!visitId) return null
-      const { data, error } = await supabase
-        .from("visits")
-        .select(
-          `
+      try {
+        if (!visitId) {
+          console.log('⚠️ No visitId provided to visitData query');
+          return null;
+        }
+
+        console.log('🔍 Fetching visit data for visitId:', visitId);
+
+        const { data, error } = await supabase
+          .from("visits")
+          .select(
+            `
                 *,
                 patients(*),
                 diagnosis:diagnosis_id (
@@ -906,17 +934,50 @@ const FinalBill = () => {
                   name
                 )
             `
-        )
-        .eq("visit_id", visitId)
-        .single()
+          )
+          .eq("visit_id", visitId)
+          .single()
 
-      if (error) {
-        console.error("Error fetching visit data:", error)
-        throw new Error(error.message)
+        if (error) {
+          console.error("❌ Error fetching visit data:", error);
+          console.error("Error details:", {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          });
+
+          // Check if it's a "not found" error
+          if (error.code === 'PGRST116') {
+            console.warn(`⚠️ No visit found with visit_id: ${visitId}`);
+            return null;
+          }
+
+          // For other errors, log but return null instead of throwing
+          console.error('Database error, returning null to prevent crash');
+          return null;
+        }
+
+        if (!data) {
+          console.warn('⚠️ Visit query returned no data');
+          return null;
+        }
+
+        console.log('✅ Visit data loaded successfully:', {
+          visit_id: data.visit_id,
+          patient_name: data.patients?.name,
+          admission_date: data.admission_date
+        });
+
+        return data;
+      } catch (err) {
+        console.error('❌ Unexpected error in visitData query:', err);
+        // Return null instead of throwing to prevent page crash
+        return null;
       }
-      return data
     },
     enabled: !!visitId,
+    retry: false, // Don't retry on error to avoid multiple failed requests
   })
 
   // Auto-create bill when visit data is available
@@ -1065,8 +1126,6 @@ const FinalBill = () => {
     fetchAllSavedData();
   }, [visitId]);
 
-  const [patientData, setPatientData] = useState<PatientData>(initialPatientData)
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>(initialInvoiceItems)
   // Draft: load from localStorage on mount/visit change
   useEffect(() => {
     const key = `final_bill_draft_${visitId}`;
@@ -2462,7 +2521,8 @@ const FinalBill = () => {
           discharge_date: new Date().toISOString().split('T')[0], // Set discharge date to today (YYYY-MM-DD format)
           discharge_mode: finalPaymentReason.toLowerCase().includes('death') ? 'death' :
                          finalPaymentReason.toLowerCase().includes('dama') ? 'dama' : 'recovery',
-          bill_paid: true
+          bill_paid: true,
+          is_discharged: true // Enable discharge summary button
         })
         .eq('visit_id', visitId);
 
@@ -4461,11 +4521,47 @@ INSTRUCTIONS:
   useEffect(() => {
     if (visitData) {
       const patient = visitData.patients;
+
+      // 🔍 DEBUG: Log available date values
+      console.log('═══════════════════════════════════════');
+      console.log('📅 DATE OF ADMISSION DEBUG:');
+      console.log('visitData.admission_date:', visitData.admission_date);
+      console.log('visitData.visit_date:', visitData.visit_date);
+      console.log('visitData.created_at:', visitData.created_at);
+      console.log('patient.created_at:', patient?.created_at);
+      console.log('═══════════════════════════════════════');
+
       setPatientData(prev => {
         const diagnosisCandidate = getDiagnosisText();
         const diagnosisValue = prev.diagnosis && prev.diagnosis.trim().length > 0
           ? prev.diagnosis
           : (diagnosisCandidate !== 'No diagnosis recorded' ? diagnosisCandidate : prev.diagnosis);
+
+        // Calculate dateOfAdmission with detailed logging
+        let calculatedDateOfAdmission = "";
+
+        if (prev.dateOfAdmission) {
+          calculatedDateOfAdmission = prev.dateOfAdmission;
+          console.log('✅ Using prev.dateOfAdmission:', calculatedDateOfAdmission);
+        } else if (visitData.admission_date) {
+          calculatedDateOfAdmission = format(new Date(visitData.admission_date), "yyyy-MM-dd");
+          console.log('✅ Using visitData.admission_date:', calculatedDateOfAdmission);
+        } else if (visitData.visit_date) {
+          calculatedDateOfAdmission = format(new Date(visitData.visit_date), "yyyy-MM-dd");
+          console.log('✅ Using visitData.visit_date:', calculatedDateOfAdmission);
+        } else if (visitData.created_at) {
+          calculatedDateOfAdmission = format(new Date(visitData.created_at), "yyyy-MM-dd");
+          console.log('✅ Using visitData.created_at:', calculatedDateOfAdmission);
+        } else if (patient.created_at) {
+          calculatedDateOfAdmission = format(new Date(patient.created_at), "yyyy-MM-dd");
+          console.log('✅ Using patient.created_at:', calculatedDateOfAdmission);
+        } else {
+          calculatedDateOfAdmission = "";
+          console.log('⚠️ No date available - using empty string');
+        }
+
+        console.log('🎯 Final dateOfAdmission value:', calculatedDateOfAdmission);
+
         return {
           ...prev,
           claimId: validateClaimId(visitData.claim_id || visitId || ""),
@@ -4482,9 +4578,7 @@ INSTRUCTIONS:
           serviceNo: cleanData(patient.insurance_person_no) || prev.serviceNo,
           category: billData?.category || prev.category || "GENERAL",
           diagnosis: diagnosisValue || '',
-          dateOfAdmission: prev.dateOfAdmission || (visitData.admission_date
-            ? format(new Date(visitData.admission_date), "yyyy-MM-dd")
-            : (patient.created_at ? format(new Date(patient.created_at), "yyyy-MM-dd") : "")),
+          dateOfAdmission: calculatedDateOfAdmission,
           dateOfDischarge: prev.dateOfDischarge || (visitData.discharge_date
             ? format(new Date(visitData.discharge_date), "yyyy-MM-dd")
             : ""),
@@ -12767,6 +12861,21 @@ Dr. Murali B K
     }
   };
 
+  // Check if visit ID is missing
+  if (!visitId) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-white">
+        <div className="text-center space-y-4">
+          <p className="text-xl text-red-500 mb-2">No Visit ID Provided</p>
+          <p className="text-sm text-gray-600">Please navigate from a valid patient visit.</p>
+          <Button onClick={() => navigate(-1)} variant="outline">
+            Go Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (isLoading || isBillLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
@@ -12783,12 +12892,38 @@ Dr. Murali B K
   if (isError) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
-        <div className="text-center">
+        <div className="text-center space-y-4">
           <p className="text-xl text-red-500 mb-2">
             Error loading bill: {(error as Error).message}
           </p>
           <p className="text-sm text-gray-600">Visit ID: {visitId}</p>
           <p className="text-sm text-gray-600">Please check if this visit ID exists in the database.</p>
+          <Button onClick={() => navigate(-1)} variant="outline">
+            Go Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if visit was not found (billData is null after loading)
+  if (!isLoading && !isBillLoading && !visitData) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-white">
+        <div className="text-center space-y-4">
+          <p className="text-xl text-red-500 mb-2">Visit Not Found</p>
+          <p className="text-sm text-gray-600">Visit ID: {visitId}</p>
+          <p className="text-sm text-gray-600">
+            This visit does not exist in the database or you may not have permission to access it.
+          </p>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => navigate(-1)} variant="outline">
+              Go Back
+            </Button>
+            <Button onClick={() => navigate('/')} variant="default">
+              Go to Dashboard
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -21033,4 +21168,112 @@ Dr. Murali B K
   );
 }
 
-export default FinalBill;
+// Error Boundary Component to catch and display errors
+class FinalBillErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null; errorInfo: React.ErrorInfo | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('🔴 FinalBill Error Boundary caught an error:', error);
+    console.error('🔴 Error Info:', errorInfo);
+    console.error('🔴 Component Stack:', errorInfo.componentStack);
+    this.setState({ error, errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-gray-50 p-4">
+          <div className="max-w-2xl w-full bg-white rounded-lg shadow-lg p-8">
+            <div className="text-center mb-6">
+              <h1 className="text-3xl font-bold text-red-600 mb-2">⚠️ Error Loading Bill Page</h1>
+              <p className="text-gray-600">The application encountered an error while loading the bill.</p>
+            </div>
+
+            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
+              <h2 className="text-lg font-semibold text-red-800 mb-2">Error Details:</h2>
+              <p className="text-red-700 font-mono text-sm mb-2">
+                {this.state.error?.toString()}
+              </p>
+              {this.state.error?.stack && (
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-red-600 hover:text-red-800 font-medium">
+                    Show Error Stack
+                  </summary>
+                  <pre className="mt-2 text-xs bg-red-100 p-2 rounded overflow-x-auto">
+                    {this.state.error.stack}
+                  </pre>
+                </details>
+              )}
+            </div>
+
+            {this.state.errorInfo && (
+              <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
+                <h2 className="text-lg font-semibold text-yellow-800 mb-2">Component Stack:</h2>
+                <pre className="text-xs text-yellow-700 overflow-x-auto">
+                  {this.state.errorInfo.componentStack}
+                </pre>
+              </div>
+            )}
+
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => window.history.back()}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+              >
+                ← Go Back
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                🔄 Reload Page
+              </button>
+              <button
+                onClick={() => {
+                  this.setState({ hasError: false, error: null, errorInfo: null });
+                }}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                ↺ Try Again
+              </button>
+            </div>
+
+            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+              <h3 className="font-semibold text-blue-900 mb-2">💡 Troubleshooting Tips:</h3>
+              <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                <li>Check the browser console (F12) for more details</li>
+                <li>Verify the Visit ID exists in the database</li>
+                <li>Ensure patient data is properly associated with the visit</li>
+                <li>Check if required database tables exist (visits, bills, patients)</li>
+                <li>Contact support if the issue persists</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Wrap FinalBill with Error Boundary
+const FinalBillWithErrorBoundary = () => {
+  return (
+    <FinalBillErrorBoundary>
+      <FinalBill />
+    </FinalBillErrorBoundary>
+  );
+};
+
+export default FinalBillWithErrorBoundary;

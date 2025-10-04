@@ -700,12 +700,21 @@ const Invoice = () => {
     age: patient?.date_of_birth ? calculateAge(patient.date_of_birth) : (patient?.age ? `${patient.age}Y 0M 0D` : 'N/A'),
     sex: patient?.gender || 'N/A',
     address: patient?.address || 'N/A',
-    registrationDate: visitData.admission_date ? format(new Date(visitData.admission_date), 'dd/MM/yyyy HH:mm:ss') : 'N/A',
+    registrationDate: visitData.admission_date
+      ? format(new Date(visitData.admission_date), 'dd/MM/yyyy HH:mm:ss')
+      : visitData.visit_date
+        ? format(new Date(visitData.visit_date), 'dd/MM/yyyy HH:mm:ss')
+        : visitData.created_at
+          ? format(new Date(visitData.created_at), 'dd/MM/yyyy HH:mm:ss')
+          : 'N/A',
     dischargeDate: visitData.discharge_date ? format(new Date(visitData.discharge_date), 'dd/MM/yyyy HH:mm:ss') : '',
     invoiceNo: billData?.bill_no || visitData.visit_id || 'N/A',
     registrationNo: patient?.patients_id || visitData.visit_id || 'N/A',
     category: billData?.category || 'Private',
-    primaryConsultant: visitData.consultant || 'N/A',
+    primaryConsultant: visitData.referring_doctor
+      || visitData.appointment_with
+      || visitData.consultant
+      || 'N/A',
     hospitalServiceTaxNo: 'ABUPK3997PSD001',
     hospitalPan: 'AAECD9144P',
     services: createServicesFromBillData(),

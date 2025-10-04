@@ -149,6 +149,26 @@ export const AdvancePaymentModal: React.FC<AdvancePaymentModalProps> = ({
     dateOfAdmission: ''
   });
 
+  // Generate default narration when modal opens or payment mode changes
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Generate default narration
+    const paymentModeLabel = paymentModes.find(pm => pm.value === formData.paymentMode)?.label || formData.paymentMode;
+    const patientName = patientInfo.name || patientData?.name || 'Patient';
+    const registrationNo = patientInfo.registrationNo || patientData?.registrationNo || '';
+
+    const defaultNarration = `Being cash received towards ${paymentModeLabel} from ${patientName} against R. No.: ${registrationNo}`;
+
+    // Only set default narration if remarks field is empty
+    if (!formData.remarks) {
+      setFormData(prev => ({
+        ...prev,
+        remarks: defaultNarration
+      }));
+    }
+  }, [isOpen, formData.paymentMode, patientInfo.name, patientInfo.registrationNo, patientData]);
+
   // Set patient info and fetch payment history when modal opens
   useEffect(() => {
     if (!isOpen) return;
