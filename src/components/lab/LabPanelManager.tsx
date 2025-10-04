@@ -776,13 +776,19 @@ const LabPanelManager: React.FC = () => {
   // Function to save sub-tests to lab_test_config table
   const saveSubTestsToDatabase = async (testName: string, subTests: SubTest[], labId: string) => {
     try {
+      console.log('🚀 SAVING TO DATABASE - NEW CODE');
+      console.log('Test Name:', testName);
+      console.log('Lab ID:', labId);
+      console.log('Sub-Tests:', JSON.stringify(subTests, null, 2));
+
       // First, delete existing entries for this test
       await supabase
         .from('lab_test_config')
         .delete()
-        .eq('test_name', testName);
+        .eq('test_name', testName)
+        .eq('lab_id', labId);
 
-      // Save each sub-test and their configurations
+      // Save each sub-test with JSONB structure
       for (const subTest of subTests) {
         // Skip sub-tests with empty names
         if (!subTest.name || subTest.name.trim() === '') {
@@ -790,86 +796,130 @@ const LabPanelManager: React.FC = () => {
           continue;
         }
 
-        // Save each normal range as a separate row in lab_test_config
-        for (const normalRange of subTest.normalRanges) {
-          // Parse age range
-          const ageRangeParts = normalRange.ageRange.split(' ');
-          const ageRange = ageRangeParts[0]; // e.g., "1-5" or "-"
-          const ageUnit = ageRangeParts[1] || 'Years'; // e.g., "Years"
+        console.log(`\n📝 Processing sub-test: ${subTest.name}`);
 
-          let minAge = 0, maxAge = 100;
+        // Get first values for backward compatibility
+        const firstAgeRange = subTest.ageRanges?.[0];
+        const firstNormalRange = subTest.normalRanges?.[0];
+
+        // Parse age range if exists
+        let minAge = 0, maxAge = 100, ageUnit = 'Years';
+        if (firstAgeRange) {
+          const ageRangeParts = firstAgeRange.ageRange?.split(' ') || [];
+          const ageRange = ageRangeParts[0] || '-';
+          ageUnit = ageRangeParts[1] || 'Years';
+
           if (ageRange !== '-') {
             const [min, max] = ageRange.split('-').map(a => parseInt(a.trim()) || 0);
             minAge = min;
             maxAge = max || min;
           }
-
-          // Convert age to years if needed
-          if (ageUnit === 'Days') {
-            minAge = Math.floor(minAge / 365);
-            maxAge = Math.floor(maxAge / 365);
-          } else if (ageUnit === 'Months') {
-            minAge = Math.floor(minAge / 12);
-            maxAge = Math.floor(maxAge / 12);
-          }
-
-          // Ensure all required fields have proper values, including lab_id
-          const configData = {
-            test_name: testName || 'Unknown Test',
-            sub_test_name: subTest.name || 'Unknown SubTest',
-            min_age: minAge || 0,
-            max_age: maxAge || 100,
-            gender: normalRange.gender || 'Both',
-            min_value: parseFloat(normalRange.minValue) || 0,
-            max_value: parseFloat(normalRange.maxValue) || 0,
-            normal_unit: normalRange.unit || subTest.unit || 'unit',
-            unit: subTest.unit || normalRange.unit || 'unit',
-            lab_id: labId // Use the provided lab_id from the lab table
-          }
-
-          console.log('Saving config data:', configData);
-
-          const { error } = await supabase
-            .from('lab_test_config')
-            .insert(configData);
-
-          if (error) {
-            console.error('Error saving sub-test config:', error);
-            console.error('Config data that failed:', configData);
-            throw error;
-          }
         }
 
-        // If no normal ranges, save basic sub-test info
-        if (subTest.normalRanges.length === 0) {
-          const basicConfig = {
-            test_name: testName || 'Unknown Test',
-            sub_test_name: subTest.name || 'Unknown SubTest',
-            min_age: 0,
-            max_age: 100,
-            gender: 'Both',
-            min_value: 0,
-            max_value: 0,
-            normal_unit: subTest.unit || 'unit',
-            unit: subTest.unit || 'unit',
-            lab_id: labId // Use the provided lab_id from the lab table
+        // Prepare age_ranges JSONB
+        const ageRangesData = subTest.ageRanges?.map(ar => {
+          const ageRangeParts = ar.ageRange?.split(' ') || [];
+          const ageRange = ageRangeParts[0] || '-';
+          const unit = ageRangeParts[1] || 'Years';
+          let min = 0, max = 100;
+          if (ageRange !== '-') {
+            const [minVal, maxVal] = ageRange.split('-').map(a => parseInt(a.trim()) || 0);
+            min = minVal;
+            max = maxVal || minVal;
           }
+          return {
+            min_age: min,
+            max_age: max,
+            unit: unit,
+            description: ar.description || null,
+            gender: 'Both'
+          };
+        }) || [];
 
-          console.log('Saving basic config data:', basicConfig);
+        // Prepare normal_ranges JSONB
+        const normalRangesData = subTest.normalRanges?.map(nr => ({
+          age_range: nr.ageRange || '- Years',
+          gender: nr.gender || 'Both',
+          min_value: parseFloat(nr.minValue) || 0,
+          max_value: parseFloat(nr.maxValue) || 0,
+          unit: nr.unit || subTest.unit || 'unit'
+        })) || [];
 
-          const { error } = await supabase
-            .from('lab_test_config')
-            .insert(basicConfig);
+        // Prepare nested_sub_tests JSONB
+        const nestedSubTestsData = subTest.subTests?.map(nst => {
+          console.log(`  🔹 Nested sub-test: ${nst.name}`);
 
-          if (error) {
-            console.error('Error saving basic sub-test:', error);
-            console.error('Basic config data that failed:', basicConfig);
-            throw error;
-          }
+          return {
+            name: nst.name,
+            unit: nst.unit || null,
+            age_ranges: nst.ageRanges?.map(ar => {
+              const ageRangeParts = ar.ageRange?.split(' ') || [];
+              const ageRange = ageRangeParts[0] || '-';
+              const unit = ageRangeParts[1] || 'Years';
+              let min = 0, max = 100;
+              if (ageRange !== '-') {
+                const [minVal, maxVal] = ageRange.split('-').map(a => parseInt(a.trim()) || 0);
+                min = minVal;
+                max = maxVal || minVal;
+              }
+              return {
+                min_age: min,
+                max_age: max,
+                unit: unit,
+                description: ar.description || null,
+                gender: 'Both'
+              };
+            }) || [],
+            normal_ranges: nst.normalRanges?.map(nr => ({
+              age_range: nr.ageRange || '- Years',
+              gender: nr.gender || 'Both',
+              min_value: parseFloat(nr.minValue) || 0,
+              max_value: parseFloat(nr.maxValue) || 0,
+              unit: nr.unit || nst.unit || null
+            })) || []
+          };
+        }) || [];
+
+        // Build config data
+        const configData = {
+          test_name: testName || 'Unknown Test',
+          sub_test_name: subTest.name || 'Unknown SubTest',
+          unit: subTest.unit || 'unit',
+          min_age: minAge,
+          max_age: maxAge,
+          age_unit: ageUnit,
+          age_description: firstAgeRange?.description || null,
+          gender: firstNormalRange?.gender || 'Both',
+          min_value: firstNormalRange ? parseFloat(firstNormalRange.minValue) || 0 : 0,
+          max_value: firstNormalRange ? parseFloat(firstNormalRange.maxValue) || 0 : 0,
+          normal_unit: subTest.unit || 'unit',
+          test_level: 1,
+          display_order: 0,
+          is_active: true,
+          lab_id: labId,
+          age_ranges: ageRangesData,
+          normal_ranges: normalRangesData,
+          nested_sub_tests: nestedSubTestsData
+        };
+
+        console.log('✅ Final config data:', JSON.stringify(configData, null, 2));
+
+        const { error } = await supabase
+          .from('lab_test_config')
+          .insert(configData);
+
+        if (error) {
+          console.error('❌ Error saving sub-test config:', error);
+          console.error('Config data that failed:', configData);
+          throw error;
         }
+
+        console.log(`✅ Saved sub-test: ${subTest.name} with ${nestedSubTestsData.length} nested sub-tests`);
       }
+
+      console.log('🎉 All sub-tests saved successfully!');
     } catch (error) {
-      console.error('Error in saveSubTestsToDatabase:', error);
+      console.error('❌ Error in saveSubTestsToDatabase:', error);
       throw error;
     }
   };

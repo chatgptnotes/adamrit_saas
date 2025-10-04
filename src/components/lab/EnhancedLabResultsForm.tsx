@@ -60,16 +60,40 @@ const EnhancedLabResultsForm: React.FC<EnhancedLabResultsFormProps> = ({
 
   useEffect(() => {
     console.log('SubTests updated:', subTests);
-    const results: TestResult[] = subTests.map(subTest => ({
-      subTestId: subTest.id,
-      subTestName: subTest.sub_test_name,
-      observedValue: '',
-      normalRange: `Consult reference values ${subTest.unit}`,
-      status: '',
-      comments: '',
-      abnormal: false
-    }));
-    console.log('Generated test results:', results);
+    const results: TestResult[] = [];
+
+    subTests.forEach(subTest => {
+      // Add parent sub-test
+      results.push({
+        subTestId: subTest.id,
+        subTestName: subTest.sub_test_name,
+        observedValue: '',
+        normalRange: `Consult reference values ${subTest.unit}`,
+        status: '',
+        comments: '',
+        abnormal: false
+      });
+
+      // Add nested sub-tests if they exist
+      if (subTest.nested_sub_tests && subTest.nested_sub_tests.length > 0) {
+        console.log(`  📦 Adding ${subTest.nested_sub_tests.length} nested sub-tests for ${subTest.sub_test_name}`);
+        subTest.nested_sub_tests.forEach((nested, idx) => {
+          results.push({
+            subTestId: `${subTest.id}_nested_${idx}`,
+            subTestName: `  ${nested.name}`, // Indent nested sub-tests
+            observedValue: '',
+            normalRange: nested.normal_ranges && nested.normal_ranges.length > 0
+              ? `${nested.normal_ranges[0].min_value} - ${nested.normal_ranges[0].max_value} ${nested.unit}`
+              : `Consult reference values ${nested.unit}`,
+            status: '',
+            comments: '',
+            abnormal: false
+          });
+        });
+      }
+    });
+
+    console.log('Generated test results with nested:', results);
     setTestResults(results);
   }, [subTests, patient.age, patient.gender]);
 

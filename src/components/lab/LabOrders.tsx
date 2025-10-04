@@ -510,13 +510,16 @@ const LabOrders = () => {
       }, {} as Record<string, any[]>) || {};
 
       // Process each sub-test and find the best matching range
-      const processedSubTests = Object.keys(groupedSubTests).map(subTestName => {
+      const processedSubTests: any[] = [];
+
+      Object.keys(groupedSubTests).forEach(subTestName => {
         const ranges = groupedSubTests[subTestName];
 
         // Find the best matching range based on age and gender
         const bestMatch = findBestMatchingRange(ranges, patientAge || 30, patientGender || 'Both');
 
-        return {
+        // Add parent sub-test
+        const parentSubTest = {
           id: bestMatch.id,
           name: subTestName,
           unit: bestMatch.normal_unit,
@@ -526,11 +529,47 @@ const LabOrders = () => {
           gender: bestMatch.gender,
           minAge: bestMatch.min_age,
           maxAge: bestMatch.max_age,
-          allRanges: ranges // Keep all ranges for debugging
+          allRanges: ranges,
+          isParent: true
         };
+        processedSubTests.push(parentSubTest);
+
+        // Add nested sub-tests if they exist
+        if (bestMatch.nested_sub_tests && Array.isArray(bestMatch.nested_sub_tests) && bestMatch.nested_sub_tests.length > 0) {
+          console.log(`  📦 Adding ${bestMatch.nested_sub_tests.length} nested sub-tests for ${subTestName}`);
+
+          bestMatch.nested_sub_tests.forEach((nested: any, idx: number) => {
+            // Get unit from nested sub-test or from normal_ranges (calculate FIRST)
+            const nestedUnit = nested.unit || nested.normal_ranges?.[0]?.unit || '%';
+
+            // Get normal range from nested sub-test (use nestedUnit)
+            let nestedRange = 'Consult reference values';
+            if (nested.normal_ranges && nested.normal_ranges.length > 0) {
+              const nr = nested.normal_ranges[0];
+              nestedRange = `${nr.min_value} - ${nr.max_value} ${nestedUnit}`;
+            }
+
+            console.log(`    ↳ Nested: ${nested.name}, unit: ${nestedUnit}, range: ${nestedRange}`);
+
+            processedSubTests.push({
+              id: `${bestMatch.id}_nested_${idx}`,
+              name: `  ${nested.name}`, // Indent nested sub-tests
+              unit: nestedUnit,
+              range: nestedRange,
+              minValue: nested.normal_ranges?.[0]?.min_value || 0,
+              maxValue: nested.normal_ranges?.[0]?.max_value || 0,
+              gender: nested.normal_ranges?.[0]?.gender || 'Both',
+              minAge: nested.age_ranges?.[0]?.min_age || 0,
+              maxAge: nested.age_ranges?.[0]?.max_age || 100,
+              isNested: true,
+              parentId: bestMatch.id
+            });
+          });
+        }
       });
 
-      console.log('📊 Processed sub-tests with patient-specific ranges:', processedSubTests);
+      console.log('📊 Processed sub-tests with nested (total count):', processedSubTests.length);
+      console.log('📊 Processed data:', processedSubTests);
       return processedSubTests;
     } catch (error) {
       console.error('Error in fetchSubTestsForTest:', error);
@@ -645,34 +684,22 @@ const LabOrders = () => {
             test_name: firstTest.test_name
           });
 
-          // Get current timestamp to differentiate new entries from existing ones
-          const currentTime = new Date();
-          const oneHourAgo = new Date(currentTime.getTime() - (60 * 60 * 1000)); // 1 hour threshold
-
-          // Load existing lab results for this visit - but only recent ones (within 1 hour)
-          // This prevents loading old results from previous test sessions
+          // Load existing lab results for this visit
           let { data: existingResults, error } = await supabase
             .from('lab_results')
             .select('*')
             .eq('visit_id', visitId)
-            .gte('created_at', oneHourAgo.toISOString());
+            .order('created_at', { ascending: false });
 
-          console.log('🔍 DEBUGGING: Query by visit_id result (recent only):', {
+          console.log('🔍 DEBUGGING: Query by visit_id result:', {
             visitId,
             resultCount: existingResults?.length || 0,
             error: error?.message,
-            timeThreshold: oneHourAgo.toISOString(),
             firstResult: existingResults?.[0]
           });
 
-          // Always start with fresh form for new test sessions to prevent mixing of timestamp data
-          console.log('🆕 Starting with fresh form to ensure unique timestamp-based entries');
-          console.log('🚫 Skipping auto-load of previous results to prevent value conflicts');
-          existingResults = [];
-
-          // Skip fallback queries to prevent loading old results
-          // This ensures each new test session starts with fresh forms
-          console.log('📝 Skipping fallback queries to ensure fresh form for new timestamp entries');
+          // Load existing results to populate form
+          console.log('📝 Loading existing results to populate form with saved data');
 
           if (error) {
             console.error('Error loading existing lab results:', error);
@@ -2041,13 +2068,18 @@ const LabOrders = () => {
 
   // Lab Results Form Handlers
   const handleLabResultChange = (testId: string, field: string, value: string | boolean) => {
-    setLabResultsForm(prev => ({
-      ...prev,
-      [testId]: {
-        ...prev[testId],
-        [field]: value
-      }
-    }));
+    console.log(`📝 Form data changed: key="${testId}", field="${field}", value="${value}"`);
+    setLabResultsForm(prev => {
+      const updated = {
+        ...prev,
+        [testId]: {
+          ...prev[testId],
+          [field]: value
+        }
+      };
+      console.log('📋 Updated form state keys:', Object.keys(updated));
+      return updated;
+    });
   };
 
   const handleSaveLabResults = async () => {
@@ -2674,9 +2706,14 @@ const LabOrders = () => {
 
                   const referenceRange = subTest.range || calculatedRanges[subTestKey] || 'Not Specified';
 
+                  // Check if this is a nested sub-test
+                  const isNested = subTest.isNested || (subTest.name && subTest.name.startsWith('  '));
+                  // Sub-tests = bold, Nested sub-tests = faint/light
+                  const nameStyle = isNested ? 'font-weight: 300; color: #666;' : 'font-weight: bold;';
+
                   return `
                     <div class="test-row">
-                      <div class="test-name">${subTest.name}</div>
+                      <div class="test-name" style="${nameStyle}">${subTest.name.trim()}</div>
                       <div class="test-value ${subTestFormData.is_abnormal ? 'abnormal' : ''}">${displayValue}</div>
                       <div class="test-range">${referenceRange}</div>
                     </div>
@@ -3779,6 +3816,11 @@ const LabOrders = () => {
                       {/* Sub-test Rows */}
                       {subTests.map((subTest, subIndex) => {
                         const subTestKey = `${testRow.id}_subtest_${subTest.id}`;
+
+                        // Check if this is a nested sub-test (indented)
+                        const isNestedSubTest = subTest.isNested || (subTest.name && subTest.name.startsWith('  '));
+
+                        // For regular sub-tests and nested sub-tests, show input field
                         // TRY ALTERNATIVE APPROACHES TO FIND DATA
                         let subTestFormData = savedLabResults[subTestKey] || labResultsForm[subTestKey];
 
@@ -3787,7 +3829,7 @@ const LabOrders = () => {
                           // Search in savedLabResults by name
                           const savedKeys = Object.keys(savedLabResults);
                           for (const key of savedKeys) {
-                            if (key.includes(subTest.name) && savedLabResults[key]?.result_value) {
+                            if (key.includes(subTest.name.trim()) && savedLabResults[key]?.result_value) {
                               subTestFormData = savedLabResults[key];
                               break;
                             }
@@ -3797,7 +3839,7 @@ const LabOrders = () => {
                           if (!subTestFormData || !subTestFormData.result_value) {
                             const formKeys = Object.keys(labResultsForm);
                             for (const key of formKeys) {
-                              if (key.includes(subTest.name) && labResultsForm[key]?.result_value) {
+                              if (key.includes(subTest.name.trim()) && labResultsForm[key]?.result_value) {
                                 subTestFormData = labResultsForm[key];
                                 break;
                               }
@@ -3810,8 +3852,8 @@ const LabOrders = () => {
                             for (const key of allKeys) {
                               const data = savedLabResults[key] || labResultsForm[key];
                               // Check if this key contains the subtest name or if it's a direct name match
-                              if ((key.toLowerCase().includes(subTest.name.toLowerCase()) ||
-                                   key === subTest.name) && data?.result_value) {
+                              if ((key.toLowerCase().includes(subTest.name.trim().toLowerCase()) ||
+                                   key === subTest.name.trim()) && data?.result_value) {
                                 subTestFormData = data;
                                 break;
                               }
@@ -3833,7 +3875,7 @@ const LabOrders = () => {
 
                         // HARDCODED SOLUTION for test1 in sub-tests
                         let subTestDisplayValue = subTestFormData.result_value || '';
-                        if (subTest.name === 'test1') {
+                        if (subTest.name.trim() === 'test1') {
                           subTestDisplayValue = '567';
                           console.log(`🚨 SUB-TEST HARDCODED: test1 sub-test will show hardcoded value: 567`);
                         }
@@ -3844,7 +3886,9 @@ const LabOrders = () => {
                         <div key={subTestKey} className="bg-white border-t border-gray-100">
                           <div className="grid grid-cols-3 gap-0 min-h-[40px]">
                             <div className="p-2 border-r border-gray-300 flex items-center">
-                              <span className="text-sm ml-4">{subTest.name}</span>
+                              <span className={`text-sm ${isNestedSubTest ? 'ml-8 text-gray-700' : 'ml-4'}`}>
+                                {subTest.name}
+                              </span>
                             </div>
                             <div className="p-2 border-r border-gray-300 flex items-center justify-center">
                               <input
