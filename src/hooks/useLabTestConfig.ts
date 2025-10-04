@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
+export interface NestedSubTest {
+  name: string;
+  unit: string;
+  age_ranges?: any[];
+  normal_ranges?: any[];
+}
+
 export interface SubTest {
   id: string;
   lab_id: string;
@@ -10,6 +17,8 @@ export interface SubTest {
   min_age: number;
   max_age: number;
   age_unit: string;
+  nested_sub_tests?: NestedSubTest[];
+  normal_ranges?: any[];
 }
 
 export interface TestResult {
@@ -49,25 +58,32 @@ export const useLabTestConfig = () => {
   };
 
   const fetchSubTestsForTest = async (testName: string) => {
-    console.log('Fetching sub-tests for:', testName);
+    console.log('🔍 Fetching sub-tests for:', testName);
     setLoadingSubTests(true);
     try {
       const { data, error } = await supabase
         .from('lab_test_config')
-        .select('*')
+        .select('id, lab_id, test_name, sub_test_name, unit, min_age, max_age, age_unit, nested_sub_tests, normal_ranges')
         .eq('test_name', testName)
         .order('sub_test_name');
 
-      console.log('Fetched sub-tests data:', data);
+      console.log('✅ Fetched sub-tests data:', data);
       if (error) {
-        console.error('Sub-tests fetch error:', error);
+        console.error('❌ Sub-tests fetch error:', error);
         throw error;
       }
 
+      // Log nested sub-tests for debugging
+      data?.forEach(subTest => {
+        if (subTest.nested_sub_tests && subTest.nested_sub_tests.length > 0) {
+          console.log(`  📦 ${subTest.sub_test_name} has ${subTest.nested_sub_tests.length} nested sub-tests:`, subTest.nested_sub_tests);
+        }
+      });
+
       setSubTests(data || []);
-      console.log('Sub-tests set to:', data || []);
+      console.log('✅ Sub-tests set to state');
     } catch (error) {
-      console.error('Error fetching sub tests:', error);
+      console.error('❌ Error fetching sub tests:', error);
     } finally {
       setLoadingSubTests(false);
     }

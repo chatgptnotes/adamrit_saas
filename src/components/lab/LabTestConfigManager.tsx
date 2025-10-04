@@ -14,20 +14,72 @@ export default function LabTestConfigManager() {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
-  // Function to recursively save nested sub-tests
-  const saveSubTestRecursive = async (
-    subTest: SubTest,
-    parentId: string | null,
-    level: number
-  ): Promise<void> => {
+  // Function to save sub-tests (now saves nested sub-tests in JSONB)
+  const saveSubTest = async (subTest: SubTest): Promise<void> => {
     try {
-      console.log(`Saving ${subTest.name} at level ${level}`);
+      console.log('=== SAVING SUB-TEST ===');
+      console.log('Sub-test name:', subTest.name);
+      console.log('Sub-test unit:', subTest.unit);
+      console.log('Sub-test ageRanges:', subTest.ageRanges);
+      console.log('Sub-test normalRanges:', subTest.normalRanges);
+      console.log('Sub-test subTests:', subTest.subTests);
 
       // Get first values for backward compatibility
       const firstAgeRange = subTest.ageRanges?.[0];
       const firstNormalRange = subTest.normalRanges?.[0];
 
-      // Insert this sub-test
+      // Prepare age_ranges JSONB data
+      const ageRangesData = subTest.ageRanges?.map(ar => ({
+        min_age: parseInt(ar.minAge) || 0,
+        max_age: parseInt(ar.maxAge) || 100,
+        unit: ar.unit || 'Years',
+        description: ar.description || null,
+        gender: 'Both'
+      })) || [];
+
+      // Prepare normal_ranges JSONB data
+      const normalRangesData = subTest.normalRanges?.map(nr => ({
+        age_range: nr.ageRange,
+        gender: nr.gender || 'Both',
+        min_value: parseFloat(nr.minValue) || 0,
+        max_value: parseFloat(nr.maxValue) || 0,
+        unit: nr.unit || subTest.unit || null
+      })) || [];
+
+      // Prepare nested_sub_tests JSONB data
+      const nestedSubTestsData = subTest.subTests?.map(nst => {
+        console.log('=== NESTED SUB-TEST ===');
+        console.log('Nested name:', nst.name);
+        console.log('Nested unit:', nst.unit);
+        console.log('Nested ageRanges:', nst.ageRanges);
+        console.log('Nested normalRanges:', nst.normalRanges);
+
+        return {
+          name: nst.name,
+          unit: nst.unit || null,
+          age_ranges: nst.ageRanges?.map(ar => ({
+            min_age: parseInt(ar.minAge) || 0,
+            max_age: parseInt(ar.maxAge) || 100,
+            unit: ar.unit || 'Years',
+            description: ar.description || null,
+            gender: 'Both'
+          })) || [],
+          normal_ranges: nst.normalRanges?.map(nr => ({
+            age_range: nr.ageRange,
+            gender: nr.gender || 'Both',
+            min_value: parseFloat(nr.minValue) || 0,
+            max_value: parseFloat(nr.maxValue) || 0,
+            unit: nr.unit || nst.unit || null
+          })) || []
+        };
+      }) || [];
+
+      console.log('=== FINAL DATA TO SAVE ===');
+      console.log('ageRangesData:', JSON.stringify(ageRangesData, null, 2));
+      console.log('normalRangesData:', JSON.stringify(normalRangesData, null, 2));
+      console.log('nestedSubTestsData:', JSON.stringify(nestedSubTestsData, null, 2));
+
+      // Insert this sub-test with nested sub-tests in JSONB
       const { data, error } = await supabase
         .from('lab_test_config')
         .insert({
@@ -43,10 +95,12 @@ export default function LabTestConfigManager() {
           min_value: firstNormalRange ? parseFloat(firstNormalRange.minValue) || 0 : 0,
           max_value: firstNormalRange ? parseFloat(firstNormalRange.maxValue) || 0 : 0,
           normal_unit: subTest.unit || null,
-          parent_config_id: parentId,
-          test_level: level,
+          test_level: 1,
           display_order: 0,
-          is_active: true
+          is_active: true,
+          age_ranges: ageRangesData,
+          normal_ranges: normalRangesData,
+          nested_sub_tests: nestedSubTestsData
         })
         .select('id')
         .single();
@@ -56,15 +110,8 @@ export default function LabTestConfigManager() {
       }
 
       console.log(`✅ Saved ${subTest.name} with ID: ${data.id}`);
-
-      // Recursively save nested sub-tests
-      if (subTest.subTests && subTest.subTests.length > 0) {
-        console.log(`Saving ${subTest.subTests.length} nested sub-tests under ${subTest.name}`);
-
-        for (const nestedSubTest of subTest.subTests) {
-          await saveSubTestRecursive(nestedSubTest, data.id, level + 1);
-        }
-      }
+      console.log(`   Age Ranges: ${ageRangesData.length}, Normal Ranges: ${normalRangesData.length}`);
+      console.log(`   Nested Sub-Tests: ${nestedSubTestsData.length}`);
     } catch (error) {
       console.error(`Error saving ${subTest.name}:`, error);
       throw error;
@@ -73,7 +120,13 @@ export default function LabTestConfigManager() {
 
   // Main save function
   const handleSave = async () => {
+    console.log('🚀 HANDLE SAVE CLICKED!');
+    console.log('testName:', testName);
+    console.log('labId:', labId);
+    console.log('subTests:', subTests);
+
     if (!testName.trim()) {
+      console.log('❌ Test name is empty');
       toast({
         title: 'Error',
         description: 'Please enter test name',
@@ -83,6 +136,7 @@ export default function LabTestConfigManager() {
     }
 
     if (!labId.trim()) {
+      console.log('❌ Lab ID is empty');
       toast({
         title: 'Error',
         description: 'Please enter lab ID',
@@ -92,6 +146,7 @@ export default function LabTestConfigManager() {
     }
 
     if (subTests.length === 0) {
+      console.log('❌ No sub-tests added');
       toast({
         title: 'Error',
         description: 'Please add at least one sub-test',
@@ -100,57 +155,49 @@ export default function LabTestConfigManager() {
       return;
     }
 
+    console.log('✅ Validation passed, starting save...');
     setIsLoading(true);
 
     try {
       console.log('Starting save process...');
       console.log('Test Name:', testName);
       console.log('Lab ID:', labId);
-      console.log('Sub-Tests:', subTests);
+      console.log('Sub-Tests:', JSON.stringify(subTests, null, 2));
 
       let totalSaved = 0;
+      let totalNested = 0;
 
-      // Save each sub-test and its nested sub-tests
+      // Save each sub-test with nested sub-tests in JSONB
       for (const subTest of subTests) {
-        await saveSubTestRecursive(subTest, null, 1);
+        await saveSubTest(subTest);
         totalSaved++;
+        if (subTest.subTests && subTest.subTests.length > 0) {
+          totalNested += subTest.subTests.length;
+        }
       }
-
-      // Count nested tests
-      const countNested = (tests: SubTest[]): number => {
-        let count = 0;
-        tests.forEach(test => {
-          if (test.subTests && test.subTests.length > 0) {
-            count += test.subTests.length;
-            count += countNested(test.subTests);
-          }
-        });
-        return count;
-      };
-
-      const nestedCount = countNested(subTests);
 
       toast({
         title: 'Success!',
-        description: `Saved ${totalSaved} sub-tests and ${nestedCount} nested sub-tests`,
+        description: `Saved ${totalSaved} sub-tests with ${totalNested} nested sub-tests`,
       });
 
       // Verify saved data
       const { data: verifyData, error: verifyError } = await supabase
         .from('lab_test_config')
-        .select('sub_test_name, test_level, parent_config_id')
+        .select('sub_test_name, nested_sub_tests, age_ranges, normal_ranges')
         .eq('lab_id', labId)
-        .eq('test_name', testName)
-        .order('test_level');
+        .eq('test_name', testName);
 
       if (!verifyError && verifyData) {
         console.log('Verification - Saved data:');
         console.table(verifyData);
-
-        const level2Count = verifyData.filter(d => d.test_level === 2).length;
-        if (level2Count > 0) {
-          console.log(`✅ SUCCESS! ${level2Count} nested sub-tests saved!`);
-        }
+        verifyData.forEach(row => {
+          console.log(`${row.sub_test_name}:`, {
+            nested_count: row.nested_sub_tests?.length || 0,
+            age_ranges: row.age_ranges?.length || 0,
+            normal_ranges: row.normal_ranges?.length || 0
+          });
+        });
       }
 
     } catch (error: any) {
@@ -184,7 +231,7 @@ export default function LabTestConfigManager() {
         .select('*')
         .eq('lab_id', labId)
         .eq('test_name', testName)
-        .order('test_level')
+        .eq('test_level', 1) // Only get top-level sub-tests
         .order('display_order');
 
       if (error) throw error;
@@ -198,53 +245,84 @@ export default function LabTestConfigManager() {
         return;
       }
 
-      // Build hierarchy
-      const configsMap = new Map();
-      const rootConfigs: SubTest[] = [];
+      // Transform data to SubTest format
+      const loadedSubTests: SubTest[] = data.map((config, idx) => {
+        // Load age ranges from JSONB or fallback to individual fields
+        const ageRanges = (config.age_ranges && config.age_ranges.length > 0)
+          ? config.age_ranges.map((ar: any, arIdx: number) => ({
+              id: `ar_${idx}_${arIdx}`,
+              minAge: ar.min_age?.toString() || '0',
+              maxAge: ar.max_age?.toString() || '100',
+              unit: ar.unit || 'Years',
+              description: ar.description || ''
+            }))
+          : [{
+              id: `ar_${idx}_0`,
+              minAge: config.min_age?.toString() || '0',
+              maxAge: config.max_age?.toString() || '100',
+              unit: config.age_unit || 'Years',
+              description: config.age_description || ''
+            }];
 
-      // Create map
-      data.forEach(config => {
-        configsMap.set(config.id, {
+        // Load normal ranges from JSONB or fallback to individual fields
+        const normalRanges = (config.normal_ranges && config.normal_ranges.length > 0)
+          ? config.normal_ranges.map((nr: any, nrIdx: number) => ({
+              id: `nr_${idx}_${nrIdx}`,
+              ageRange: nr.age_range || '- Years',
+              gender: nr.gender || 'Both',
+              minValue: nr.min_value?.toString() || '0',
+              maxValue: nr.max_value?.toString() || '0',
+              unit: nr.unit || ''
+            }))
+          : [{
+              id: `nr_${idx}_0`,
+              ageRange: `${config.min_age}-${config.max_age} ${config.age_unit}`,
+              gender: config.gender || 'Both',
+              minValue: config.min_value?.toString() || '0',
+              maxValue: config.max_value?.toString() || '0',
+              unit: config.normal_unit || ''
+            }];
+
+        // Load nested sub-tests from JSONB
+        const nestedSubTests = (config.nested_sub_tests && config.nested_sub_tests.length > 0)
+          ? config.nested_sub_tests.map((nst: any, nstIdx: number) => ({
+              id: `nst_${idx}_${nstIdx}`,
+              name: nst.name || '',
+              unit: nst.unit || '',
+              ageRanges: (nst.age_ranges || []).map((ar: any, arIdx: number) => ({
+                id: `nst_${idx}_${nstIdx}_ar_${arIdx}`,
+                minAge: ar.min_age?.toString() || '0',
+                maxAge: ar.max_age?.toString() || '100',
+                unit: ar.unit || 'Years',
+                description: ar.description || ''
+              })),
+              normalRanges: (nst.normal_ranges || []).map((nr: any, nrIdx: number) => ({
+                id: `nst_${idx}_${nstIdx}_nr_${nrIdx}`,
+                ageRange: nr.age_range || '- Years',
+                gender: nr.gender || 'Both',
+                minValue: nr.min_value?.toString() || '0',
+                maxValue: nr.max_value?.toString() || '0',
+                unit: nr.unit || ''
+              })),
+              subTests: []
+            }))
+          : [];
+
+        return {
           id: config.id,
           name: config.sub_test_name,
           unit: config.unit || '',
-          ageRanges: [{
-            id: 'ar1',
-            minAge: config.min_age.toString(),
-            maxAge: config.max_age.toString(),
-            unit: config.age_unit,
-            description: config.age_description || ''
-          }],
-          normalRanges: [{
-            id: 'nr1',
-            ageRange: `${config.min_age}-${config.max_age} ${config.age_unit}`,
-            gender: config.gender,
-            minValue: config.min_value.toString(),
-            maxValue: config.max_value.toString(),
-            unit: config.normal_unit || ''
-          }],
-          subTests: []
-        });
+          ageRanges,
+          normalRanges,
+          subTests: nestedSubTests
+        };
       });
 
-      // Build hierarchy
-      data.forEach(config => {
-        const node = configsMap.get(config.id);
-        if (config.parent_config_id) {
-          const parent = configsMap.get(config.parent_config_id);
-          if (parent) {
-            parent.subTests.push(node);
-          }
-        } else {
-          rootConfigs.push(node);
-        }
-      });
-
-      setSubTests(rootConfigs);
+      setSubTests(loadedSubTests);
 
       toast({
         title: 'Loaded',
-        description: `Loaded ${data.length} configurations`,
+        description: `Loaded ${loadedSubTests.length} sub-tests`,
       });
 
     } catch (error: any) {
