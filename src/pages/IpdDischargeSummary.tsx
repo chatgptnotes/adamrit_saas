@@ -33,6 +33,94 @@ interface MedicationRow {
   isSos: boolean;
 }
 
+// Helper function to extract value from JSON or return as-is
+const extractValueFromJSON = (data: any): string => {
+  // If null/undefined, return 'N/A'
+  if (data === null || data === undefined) {
+    return 'N/A';
+  }
+
+  // If it's already a plain string without JSON, return it
+  if (typeof data === 'string' && !data.includes('{') && !data.includes('"value"')) {
+    return data.trim();
+  }
+
+  // If it's an object, extract the value field
+  if (typeof data === 'object' && !Array.isArray(data)) {
+    return String(data.value || data.val || 'N/A');
+  }
+
+  // If it's a string that looks like JSON, parse it
+  if (typeof data === 'string') {
+    const trimmed = data.trim();
+
+    // Try to parse as JSON
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+          return String(parsed.value || parsed.val || 'N/A');
+        }
+      } catch (e) {
+        // If JSON parse fails, try regex extraction
+        const match = trimmed.match(/"value"\s*:\s*"?([^",}]+)"?/);
+        if (match) {
+          return match[1].trim();
+        }
+      }
+    }
+
+    return trimmed;
+  }
+
+  // Fallback: convert to string
+  return String(data);
+};
+
+// Helper function to clean JSON from text
+const cleanJSONFromText = (text: string): string => {
+  if (!text) return text;
+
+  console.log('🧹 Cleaning JSON from text, length:', text.length);
+  console.log('🔍 First 200 chars:', text.substring(0, 200));
+
+  let cleaned = text;
+
+  // Pattern 1: Match complete JSON objects with "value" field
+  // Handles: {"value":"15","timestamp":"2025-10-03T11:47:36.408Z","entry_time":"...","session_id":"..."}
+  // This pattern captures the entire JSON object and replaces it with just the value
+  const pattern1 = /\{[^}]*?"value"\s*:\s*"?([^",}]+)"?[^}]*?\}/gi;
+  let count1 = 0;
+  cleaned = cleaned.replace(pattern1, (match, value) => {
+    count1++;
+    console.log(`✂️ Pattern 1 Match ${count1}:`, match.substring(0, 100) + '...');
+    console.log(`   Extracted value: "${value}"`);
+    return value.trim();
+  });
+
+  // Pattern 2: Handle any remaining JSON-like structures with curly braces
+  const pattern2 = /\{[^}]*?"timestamp"[^}]*?\}/gi;
+  let count2 = 0;
+  cleaned = cleaned.replace(pattern2, (match) => {
+    count2++;
+    console.log(`✂️ Pattern 2 Match ${count2}: Removing remaining JSON object`);
+    return '';
+  });
+
+  // Pattern 3: Clean up any double commas or spaces left behind
+  cleaned = cleaned.replace(/,\s*,/g, ',');
+  cleaned = cleaned.replace(/:\s*,/g, ':');
+  cleaned = cleaned.replace(/,\s*\)/g, ')');
+
+  console.log('✅ Cleaning complete.');
+  console.log(`   Original length: ${text.length}`);
+  console.log(`   New length: ${cleaned.length}`);
+  console.log(`   Pattern 1 matches: ${count1}, Pattern 2 matches: ${count2}`);
+  console.log('🔍 First 200 chars after cleaning:', cleaned.substring(0, 200));
+
+  return cleaned;
+};
+
 const IpdDischargeSummary = () => {
   const { visitId } = useParams();
   const navigate = useNavigate();
@@ -1076,7 +1164,14 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
         // Populate main fields
         if (summary) {
           setDiagnosis(summary.primary_diagnosis || '');
-          setInvestigations(summary.lab_investigations?.investigations_text || '');
+
+          // Clean any JSON data from investigations text - AUTO CLEAN ON LOAD
+          const investigationsText = summary.lab_investigations?.investigations_text || '';
+          console.log('📥 Loading investigations from database, length:', investigationsText.length);
+          const cleanedInvestigations = cleanJSONFromText(investigationsText);
+          console.log('🧹 After auto-clean, length:', cleanedInvestigations.length);
+          setInvestigations(cleanedInvestigations);
+
           setStayNotes(summary.ot_notes || '');
           setCaseSummaryPresentingComplaints(summary.chief_complaints || '');
           setAdvice(summary.discharge_advice || '');
@@ -1484,19 +1579,42 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
       console.log('🖨️ Fetching data for print preview...');
 
       // Get visit UUID
-      const { data: visitData } = await supabase
+      const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id')
+        .select('id, visit_id, patient_id')
         .eq('visit_id', visitId)
         .single();
 
-      if (!visitData?.id) {
+      console.log('🔍 Visit data fetch result:', { visitData, visitError });
+
+      if (visitError || !visitData?.id) {
+        console.error('❌ Visit not found:', visitError);
         toast({
           title: "Error",
-          description: "Visit not found",
+          description: `Visit not found for ID: ${visitId}. ${visitError?.message || ''}`,
           variant: "destructive"
         });
         return;
+      }
+
+      // Fetch patient details separately using visit's patient_id
+      let patientDetails = null;
+      if (visitData.patient_id) {
+        console.log('🔍 Fetching patient with ID:', visitData.patient_id);
+        const { data: patientData, error: patientError } = await supabase
+          .from('patients')
+          .select('patients_id, mobile, phone')
+          .eq('id', visitData.patient_id)
+          .single();
+
+        if (patientError) {
+          console.error('❌ Error fetching patient:', patientError);
+        }
+
+        patientDetails = patientData;
+        console.log('👤 Patient details:', patientDetails);
+      } else {
+        console.warn('⚠️ No patient_id in visitData');
       }
 
       // Fetch discharge summary
@@ -1517,8 +1635,134 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
 
       console.log('✅ Summary data loaded for print:', summaryData);
 
+      // Add patient_id and mobile to summaryData for print
+      if (patientDetails) {
+        console.log('📝 Adding patient details to summary:', patientDetails);
+        summaryData.patient_id = patientDetails.patients_id;
+        summaryData.mobile_no = patientDetails.mobile;
+        console.log('✅ Updated summaryData.patient_id:', summaryData.patient_id);
+        console.log('✅ Updated summaryData.mobile_no:', summaryData.mobile_no);
+      } else {
+        console.warn('⚠️ No patient details found to add to summary');
+      }
+
+      // Fetch lab results for this visit
+      const { data: labTestResults } = await supabase
+        .from('lab_results')
+        .select(`
+          id,
+          visit_id,
+          test_name,
+          test_category,
+          result_value,
+          result_unit,
+          main_test_name,
+          created_at
+        `)
+        .eq('visit_id', visitData.id)
+        .order('created_at', { ascending: false });
+
+      console.log('🧪 Lab results fetched:', labTestResults?.length || 0);
+
+      // Format lab results
+      let formattedLabResults = null;
+      if (labTestResults && labTestResults.length > 0) {
+        const groupedResults = labTestResults.reduce((acc, result) => {
+          const date = result.created_at;
+          const formattedDate = date ? format(new Date(date), 'dd/MM/yyyy') : 'Unknown Date';
+
+          if (!acc[formattedDate]) {
+            acc[formattedDate] = {};
+          }
+
+          const category = result.main_test_name || result.test_category || 'General Tests';
+          if (!acc[formattedDate][category]) {
+            acc[formattedDate][category] = [];
+          }
+
+          acc[formattedDate][category].push(result);
+          return acc;
+        }, {});
+
+        const formattedResults = Object.entries(groupedResults)
+          .map(([date, categories]) => {
+            return Object.entries(categories)
+              .map(([categoryName, results]: [string, any]) => {
+                const resultString = results
+                  .map((result: any) => {
+                    // Parse result_value - AGGRESSIVE parsing to extract value
+                    let value = result.result_value;
+
+                    // Step 1: Handle null/undefined
+                    if (value === null || value === undefined) {
+                      return null; // Skip this result
+                    }
+
+                    // Step 2: If it's already an object (Supabase JSONB auto-parse)
+                    if (typeof value === 'object' && !Array.isArray(value)) {
+                      value = value.value || value.val || 'N/A';
+                    }
+                    // Step 3: If it's a string, try to parse
+                    else if (typeof value === 'string') {
+                      const trimmedValue = value.trim();
+
+                      // Try to parse JSON string
+                      if (trimmedValue.startsWith('{') || trimmedValue.startsWith('[')) {
+                        try {
+                          const parsed = JSON.parse(trimmedValue);
+                          if (typeof parsed === 'object' && parsed !== null) {
+                            value = parsed.value || parsed.val || trimmedValue;
+                          }
+                        } catch (e) {
+                          // Not valid JSON, keep as string
+                        }
+                      }
+                    }
+                    // Step 4: Convert numbers to string
+                    else {
+                      value = String(value);
+                    }
+
+                    // Step 5: Final safety check - if value is still an object or looks like JSON, extract the number
+                    if (typeof value === 'object' && value !== null) {
+                      value = value.value || value.val || JSON.stringify(value);
+                    }
+
+                    // If final value is still a JSON string, do regex extraction
+                    if (typeof value === 'string' && value.includes('"value"')) {
+                      const match = value.match(/"value"\s*:\s*"?(\d+)"?/);
+                      if (match) {
+                        value = match[1];
+                      }
+                    }
+
+                    const unit = result.result_unit ? ` ${result.result_unit}` : '';
+
+                    // Only include test_name if it's different from category name
+                    if (result.test_name && result.test_name !== categoryName) {
+                      return `${result.test_name}:${value}${unit}`;
+                    } else {
+                      return `${value}${unit}`;
+                    }
+                  })
+                  .filter((item: any) => item !== null) // Remove null entries
+                  .join(', ');
+
+                return `${date}:-${categoryName}: ${resultString}`;
+              })
+              .join('\n');
+          })
+          .join('\n\n');
+
+        formattedLabResults = {
+          rawData: labTestResults,
+          groupedResults,
+          formattedResults
+        };
+      }
+
       // Generate print HTML
-      const printHTML = generatePrintHTML(summaryData, patientInfo, visitId);
+      const printHTML = generatePrintHTML(summaryData, patientInfo, visitId, formattedLabResults);
 
       // Open print preview in new window
       const printWindow = window.open('', '_blank');
@@ -1642,8 +1886,23 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
   };
 
   // Function to generate formatted print HTML
-  const generatePrintHTML = (summaryData: any, patientInfo: any, visitIdString: string) => {
+  const generatePrintHTML = (summaryData: any, patientInfo: any, visitIdString: string, labResults?: any) => {
     const currentDate = format(new Date(), 'dd/MM/yyyy');
+
+    console.log('🖨️ Generating print HTML with summaryData:', summaryData);
+    console.log('🧪 Lab results data:', labResults);
+
+    // Format medications for table - use correct field name from database
+    const medications = summaryData.discharge_medications || summaryData.medications_on_discharge || [];
+    const medicationsHTML = medications.map((med: any) => `
+      <tr>
+        <td>${med.name || ''}</td>
+        <td>${med.unit || ''}</td>
+        <td>${med.route || 'P.O'}</td>
+        <td>${med.dose || ''}</td>
+        <td>${med.days || ''} DAYS</td>
+      </tr>
+    `).join('');
 
     return `
 <!DOCTYPE html>
@@ -1654,7 +1913,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
   <style>
     @page {
       size: A4;
-      margin: 10mm;
+      margin: 20mm 15mm;
     }
 
     * {
@@ -1665,75 +1924,98 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
 
     body {
       font-family: Arial, sans-serif;
-      font-size: 11pt;
+      font-size: 10pt;
       line-height: 1.3;
       color: #000;
+      background: white;
       padding: 0;
-      margin: 0;
     }
 
     .header {
       text-align: center;
-      border-bottom: 2px solid #000;
-      padding-bottom: 8px;
+      border-bottom: 1.5px solid #000;
+      padding-bottom: 5px;
       margin-bottom: 10px;
     }
 
     .header h1 {
-      font-size: 18pt;
+      font-size: 16pt;
       font-weight: bold;
-      margin-bottom: 3px;
+      color: #000;
+      margin: 0;
     }
 
-    .patient-grid {
+    .patient-info {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 6px;
-      border: 1px solid #000;
-      padding: 6px;
-      margin-bottom: 0;
+      gap: 4px 15px;
+      padding: 10px;
+      border-bottom: 1.5px solid #000;
+      margin-bottom: 10px;
+      background: white;
     }
 
-    .patient-grid-item {
+    .info-row {
       display: flex;
-      font-size: 10pt;
-      line-height: 1.2;
+      align-items: baseline;
+      font-size: 9pt;
+      line-height: 1.4;
     }
 
-    .patient-grid-item strong {
-      min-width: 120px;
+    .info-label {
       font-weight: bold;
+      min-width: 140px;
+      margin-right: 5px;
+    }
+
+    .info-value {
+      flex: 1;
     }
 
     .section {
-      margin-top: 0;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
+      background: white;
       page-break-inside: avoid;
     }
 
     .section-title {
       font-weight: bold;
-      font-size: 12pt;
-      background-color: #f0f0f0;
-      padding: 4px 10px;
-      border-left: 4px solid #333;
-      margin-top: 0;
+      font-size: 11pt;
+      text-align: center;
+      margin-bottom: 8px;
+      text-decoration: underline;
+    }
+
+    .section-subtitle {
+      font-weight: bold;
+      font-size: 10pt;
+      margin-top: 8px;
       margin-bottom: 4px;
+      text-decoration: underline;
     }
 
     .section-content {
-      padding-left: 10px;
       text-align: justify;
-      line-height: 1.3;
-      margin-top: 0;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      font-size: 9pt;
+    }
+
+    .diagnosis-list {
+      list-style-position: inside;
+      padding-left: 0;
+      margin: 0;
+    }
+
+    .diagnosis-list li {
+      margin-bottom: 2px;
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      margin: 0;
-      margin-top: 0;
-      font-size: 10pt;
+      margin: 8px 0;
+      font-size: 9pt;
     }
 
     table, th, td {
@@ -1741,41 +2023,65 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
 
     th {
-      background-color: transparent;
+      background-color: #d0d0d0;
       font-weight: bold;
-      padding: 5px;
-      text-align: left;
+      padding: 5px 4px;
+      text-align: center;
+      font-size: 9pt;
     }
 
     td {
-      padding: 5px;
+      padding: 4px 6px;
+      text-align: left;
+      vertical-align: top;
     }
 
-    .footer {
-      margin-top: 30px;
-      border-top: 1px solid #000;
-      padding-top: 15px;
-      display: flex;
-      justify-content: space-between;
+    .review-table {
+      width: 100%;
+      margin-top: 15px;
+      border: 1px solid #000;
+    }
+
+    .review-table td {
+      padding: 5px 8px;
+      border: 1px solid #000;
+    }
+
+    .signature-section {
+      margin-top: 20px;
+      text-align: right;
+      font-weight: bold;
     }
 
     .emergency-note {
       text-align: center;
       font-weight: bold;
-      margin-top: 40px;
+      margin-top: 20px;
       padding: 8px;
-      border: 2px solid #000;
-      background-color: #fff3cd;
+      border: 1px solid #000;
+      background-color: white;
+      font-size: 10pt;
     }
 
     @media print {
       body {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
+        background: white;
+        padding: 0;
+      }
+
+      .section {
+        background: white;
+        padding: 0;
       }
 
       .no-print {
         display: none;
+      }
+
+      @page {
+        margin: 15mm 10mm;
       }
     }
   </style>
@@ -1785,93 +2091,184 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     <h1>Discharge Summary</h1>
   </div>
 
-  <div class="patient-grid">
-    <div class="patient-grid-item">
-      <strong>Name:</strong>
-      <span>${patientInfo.name}</span>
+  <div class="patient-info">
+    <div class="info-row">
+      <span class="info-label">Name</span>
+      <span class="info-value">: ${summaryData.patient_name || patientInfo.name || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Visit ID:</strong>
-      <span>${visitIdString}</span>
+    <div class="info-row">
+      <span class="info-label">Patient ID</span>
+      <span class="info-value">: ${summaryData.patient_id || summaryData.reg_id || patientInfo.regId || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Primary Care Provider:</strong>
-      <span>${summaryData.treating_consultant || patientInfo.treatingConsultant}</span>
+    <div class="info-row">
+      <span class="info-label">Primary Care Provider</span>
+      <span class="info-value">: ${summaryData.treating_consultant || patientInfo.treatingConsultant || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Registration ID:</strong>
-      <span>${summaryData.reg_id || patientInfo.regId}</span>
+    <div class="info-row">
+      <span class="info-label">Registration ID</span>
+      <span class="info-value">: ${visitIdString || summaryData.reg_id || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Age/Gender:</strong>
-      <span>${patientInfo.ageSex}</span>
+    <div class="info-row">
+      <span class="info-label">Sex / Age</span>
+      <span class="info-value">: ${summaryData.age_sex || patientInfo.ageSex || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Address:</strong>
-      <span>${summaryData.address || patientInfo.address}</span>
+    <div class="info-row">
+      <span class="info-label">Mobile No</span>
+      <span class="info-value">: ${summaryData.mobile_no || summaryData.phone || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Tariff:</strong>
-      <span>${summaryData.corporate_type || patientInfo.corporateType || 'Private'}</span>
+    <div class="info-row">
+      <span class="info-label">Tariff</span>
+      <span class="info-value">: ${summaryData.corporate_type || patientInfo.corporateType || 'Private'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Discharge Date:</strong>
-      <span>${summaryData.date_of_discharge ? format(new Date(summaryData.date_of_discharge), 'dd/MM/yyyy') : currentDate}</span>
+    <div class="info-row">
+      <span class="info-label">Address</span>
+      <span class="info-value">: ${summaryData.address || patientInfo.address || 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Admission Date:</strong>
-      <span>${summaryData.admission_date ? format(new Date(summaryData.admission_date), 'dd/MM/yyyy') : ''}</span>
+    <div class="info-row">
+      <span class="info-label">Admission Date</span>
+      <span class="info-value">: ${summaryData.admission_date ? format(new Date(summaryData.admission_date), 'dd/MM/yyyy') : 'N/A'}</span>
     </div>
-    <div class="patient-grid-item">
-      <strong>Discharge Protocol:</strong>
-      <span>${summaryData.reason_of_discharge || 'GAMA'}</span>
+    <div class="info-row">
+      <span class="info-label">Discharge Date</span>
+      <span class="info-value">: ${summaryData.date_of_discharge ? format(new Date(summaryData.date_of_discharge), 'dd/MM/yyyy') : currentDate}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Discharge Reason</span>
+      <span class="info-value">: ${summaryData.reason_of_discharge || 'Recovered'}</span>
     </div>
   </div>
-  ${summaryData.ot_notes ? `
+
+  ${summaryData.primary_diagnosis ? `
   <div class="section">
-    <div class="section-content">${formatOtNotesHTML(summaryData.ot_notes)}</div>
+    <div class="section-title">Present Condition</div>
+    <div class="section-subtitle">DIAGNOSIS:</div>
+    <div class="section-content">${summaryData.primary_diagnosis.replace(/\n/g, '<br>')}</div>
   </div>
   ` : ''}
-  ${summaryData.lab_investigations?.investigations_text ? `
+
+  ${medications.length > 0 ? `
   <div class="section">
-    <div class="section-title">INVESTIGATIONS:</div>
-    <div class="section-content">${summaryData.lab_investigations.investigations_text.replace(/\n/g, '<br>')}</div>
+    <div class="section-subtitle">**MEDICATIONS (TREATMENT ON DISCHARGE):**</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Medication Name</th>
+          <th>Strength</th>
+          <th>Route</th>
+          <th>Dosage</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${medicationsHTML}
+      </tbody>
+    </table>
   </div>
   ` : ''}
-  ${summaryData.review_on_date ? `
+
+  ${summaryData.chief_complaints ? `
   <div class="section">
-    <div class="section-title">Review on:</div>
+    <div class="section-subtitle">CLINICAL HISTORY:</div>
+    <div class="section-content">${summaryData.chief_complaints.replace(/\n/g, '<br>')}</div>
+  </div>
+  ` : ''}
+
+  ${summaryData.vital_signs ? `
+  <div class="section">
+    <div class="section-subtitle">EXAMINATION:</div>
     <div class="section-content">
-      <strong>Reviewed On Discharge:</strong> ${format(new Date(summaryData.review_on_date), 'dd/MM/yyyy')}
+      On physical examination, patient was found to be stably maintaining vitals.
+      ${summaryData.vital_signs.temperature ? `Temperature of ${summaryData.vital_signs.temperature}°F, ` : ''}
+      ${summaryData.vital_signs.pulse_rate ? `pulse rate of ${summaryData.vital_signs.pulse_rate}/min, ` : ''}
+      ${summaryData.vital_signs.blood_pressure ? `blood pressure of ${summaryData.vital_signs.blood_pressure} were recorded. ` : ''}
+      ${summaryData.vital_signs.spo2 ? `Oxygen saturation was at ${summaryData.vital_signs.spo2}% in room air.` : ''}
+      ${summaryData.vital_signs.examination_details ? `<br><br>${summaryData.vital_signs.examination_details}` : ''}
     </div>
   </div>
   ` : ''}
 
-  <div class="footer">
-    <div>
-      <strong>Date:</strong> ${currentDate}
+  ${summaryData.procedures_performed && (summaryData.procedures_performed.surgery_date || summaryData.procedures_performed.procedure_performed) ? `
+  <div class="section">
+    <div class="section-subtitle">**Operation Notes**</div>
+    <table>
+      <tbody>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">Date & Time</td>
+          <td>${summaryData.procedures_performed.surgery_date ? format(new Date(summaryData.procedures_performed.surgery_date), 'dd/MM/yyyy, HH:mm') + ' hours' : ''}</td>
+        </tr>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">Procedure</td>
+          <td>${summaryData.procedures_performed.procedure_performed || ''}</td>
+        </tr>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">Surgeon</td>
+          <td>${summaryData.procedures_performed.surgeon || ''}</td>
+        </tr>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">Anaesthetist</td>
+          <td>${summaryData.procedures_performed.anesthetist || ''}</td>
+        </tr>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">Anaesthesia Type</td>
+          <td>${summaryData.procedures_performed.anesthesia_type || ''}</td>
+        </tr>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">Description</td>
+          <td>${summaryData.procedures_performed.description || ''}</td>
+        </tr>
+        <tr>
+          <td style="width: 30%; font-weight: bold; background-color: #f0f0f0;">IMPLANT:</td>
+          <td>${summaryData.procedures_performed.implant || ''}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  ` : ''}
+
+  ${summaryData.discharge_advice ? `
+  <div class="section">
+    <div class="section-subtitle">**ADVICE:**</div>
+    <div class="section-content">${summaryData.discharge_advice.replace(/\n/g, '<br>')}</div>
+  </div>
+  ` : ''}
+
+  ${labResults?.formattedResults || summaryData.lab_investigations?.investigations_text ? `
+  <div class="section">
+    <div class="section-subtitle">INVESTIGATIONS</div>
+    <div class="section-content">
+      ${labResults?.formattedResults ? labResults.formattedResults.replace(/\n/g, '<br>') : (summaryData.lab_investigations?.investigations_text ? cleanJSONFromText(summaryData.lab_investigations.investigations_text).replace(/\n/g, '<br>') : '')}
     </div>
-    <div style="text-align: right;">
-      <strong>${summaryData.treating_consultant || 'Dr. Amod Shirode (IMS Residence)'}</strong>
-    </div>
+  </div>
+  ` : ''}
+
+  ${summaryData.review_on_date || summaryData.resident_on_discharge ? `
+  <table class="review-table">
+    <tbody>
+      ${summaryData.review_on_date ? `
+      <tr>
+        <td style="width: 30%; font-weight: bold;">Review on</td>
+        <td style="width: 5%;">:</td>
+        <td style="text-align: left;">${format(new Date(summaryData.review_on_date), 'dd/MM/yyyy')}</td>
+      </tr>
+      ` : ''}
+      ${summaryData.resident_on_discharge ? `
+      <tr>
+        <td style="width: 30%; font-weight: bold;">Resident On Discharge</td>
+        <td style="width: 5%;">:</td>
+        <td style="text-align: left;">${summaryData.resident_on_discharge}</td>
+      </tr>
+      ` : ''}
+    </tbody>
+  </table>
+  ` : ''}
+
+  <div class="signature-section">
+    <strong>${summaryData.treating_consultant || 'Dr. Amod Shirode (IMS Residence)'}</strong>
   </div>
 
   <div class="emergency-note">
     <strong>Note: URGENT CARE/ EMERGENCY CARE IS AVAILABLE 24 X 7. PLEASE CONTACT: 7030974619, 9373111709.</strong>
   </div>
-
-  <script>
-    // Helper function to format medication timing
-    function formatMedicationTiming(timing) {
-      if (!timing) return '';
-      const times = [];
-      if (timing.morning) times.push('सुबह (Morning)');
-      if (timing.afternoon) times.push('दोपहर (Afternoon)');
-      if (timing.evening) times.push('शाम (Evening)');
-      if (timing.night) times.push('रात (Night)');
-      return times.join(', ') || '';
-    }
-  </script>
 </body>
 </html>
     `;
@@ -2038,7 +2435,7 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
     }
   };
 
-  // Function to manually fetch investigations data (lab + radiology)
+
   const handleFetchInvestigations = async () => {
     try {
       toast({
@@ -2049,35 +2446,24 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
       console.log('🔍 Searching investigations for visit_id:', visitId);
       let combinedResults = [];
 
-      // Search for lab results using the visit_id directly (same as dashboard)
-      console.log('🧪 Searching lab results for visit_id:', visitId);
+      // First, get the visit UUID from the visit_id string
+      const { data: visitData } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
 
-      // Try with visit_id_string first, fallback to visit_id if column doesn't exist
+      const visitUUID = visitData?.id;
+      console.log('🔍 Visit UUID found:', visitUUID);
+
+      // Search for lab results using the UUID
+      console.log('🧪 Searching lab results for visit UUID:', visitUUID);
+
       let data, error;
 
-      try {
-        const result = await supabase
-          .from('lab_results')
-          .select(`
-            id,
-            visit_id,
-            visit_id_string,
-            test_name,
-            test_category,
-            result_value,
-            result_unit,
-            main_test_name,
-            created_at
-          `)
-          .or(`visit_id_string.eq.${visitId},visit_id.eq.${visitId}`)
-          .order('created_at', { ascending: false });
+      if (visitUUID) {
+        console.log('🧪 Fetching LATEST lab results for visit UUID:', visitUUID);
 
-        data = result.data;
-        error = result.error;
-      } catch (columnError) {
-        console.log('🔄 visit_id_string column not found, using visit_id fallback');
-
-        // Fallback: query without visit_id_string column
         const result = await supabase
           .from('lab_results')
           .select(`
@@ -2088,13 +2474,29 @@ ${surgeryInfo?.description || surgery?.notes || 'Standard surgical procedure per
             result_value,
             result_unit,
             main_test_name,
-            created_at
+            created_at,
+            updated_at
           `)
-          .eq('visit_id', visitId)
-          .order('created_at', { ascending: false });
+          .eq('visit_id', visitUUID)
+          .order('created_at', { ascending: false })
+          .order('updated_at', { ascending: false });
 
         data = result.data;
         error = result.error;
+
+        console.log('✅ Lab results fetched:', {
+          count: data?.length,
+          firstResult: data?.[0],
+          error
+        });
+
+        // Log first few results to see what we got
+        if (data && data.length > 0) {
+          console.log('📋 First 3 results:', data.slice(0, 3));
+        }
+      } else {
+        console.log('⚠️ No visit UUID found, cannot fetch lab results');
+        data = [];
       }
 
       // If no results for this visit ID, try to get any recent lab results to show example format
@@ -2167,10 +2569,29 @@ Example:
               .map(([categoryName, results]) => {
                 const resultString = results
                   .map(result => {
-                    const value = result.result_value || 'N/A';
+                    // Use the new extractValueFromJSON function
+                    const value = extractValueFromJSON(result.result_value);
+
+                    console.log(`🔬 ${categoryName} - ${result.test_name}:`, {
+                      raw: result.result_value,
+                      extracted: value
+                    });
+
+                    // Skip if no value
+                    if (value === 'N/A' && !result.result_value) {
+                      return null;
+                    }
+
                     const unit = result.result_unit ? ` ${result.result_unit}` : '';
-                    return `${result.test_name}:${value}${unit}`;
+
+                    // Only include test_name if it's different from category name
+                    if (result.test_name && result.test_name !== categoryName) {
+                      return `${result.test_name}:${value}${unit}`;
+                    } else {
+                      return `${value}${unit}`;
+                    }
                   })
+                  .filter(item => item !== null) // Remove null entries
                   .join(', ');
 
                 return `${date}:-${categoryName}: ${resultString}`;
@@ -2262,7 +2683,13 @@ Example:
       // Combine all results
       if (combinedResults.length > 0) {
         const finalResults = combinedResults.join('\n\n--- RADIOLOGY ---\n\n');
-        setInvestigations(finalResults);
+
+        // IMPORTANT: Clean any JSON that might still be in the text
+        console.log('🧹 Auto-cleaning fetched data before displaying...');
+        const cleanedResults = cleanJSONFromText(finalResults);
+        console.log('✅ Auto-clean complete, setting investigations');
+
+        setInvestigations(cleanedResults);
 
         const labCount = data?.length || 0;
         const radiologyCount = radiologyResults.length;
@@ -3015,19 +3442,7 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
       {/* Investigations */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>Investigations:</span>
-            <div className="flex space-x-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleFetchInvestigations}
-                disabled={isInvestigationsLoading}
-              >
-                {isInvestigationsLoading ? 'Loading...' : 'Fetch Lab & Radiology Data'}
-              </Button>
-            </div>
-          </CardTitle>
+          <CardTitle>Investigations:</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center space-x-2">
