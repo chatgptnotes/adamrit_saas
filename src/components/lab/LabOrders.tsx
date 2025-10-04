@@ -2631,7 +2631,7 @@ const LabOrders = () => {
               const gender = savedResult?.patient_info?.actual_gender || patientInfo?.patient_gender || 'N/A';
               return `${age}Y ${gender}`;
             })()}</div>
-            <div><strong>MRN NO :</strong> ${actualVisitId}</div>
+            <div><strong>Visit ID :</strong> ${actualVisitId}</div>
             <div><strong>Report Date :</strong> ${reportDate} ${reportTime}</div>
             <div><strong>Consultant Name :</strong> ${(() => {
               const savedResult = savedLabResults[firstTestId];
