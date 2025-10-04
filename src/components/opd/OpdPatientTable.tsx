@@ -31,6 +31,8 @@ interface Patient {
   status?: string;
   comments?: string;
   discharge_summary?: string;
+  is_discharged?: boolean;
+  discharge_date?: string;
 }
 
 interface OpdPatientTableProps {
@@ -393,13 +395,103 @@ export const OpdPatientTable = ({ patients, refetch }: OpdPatientTableProps) => 
         labOrders = [];
       }
 
-      // 7. Lab results are now included in visit_labs with additional fields
-      // We can fetch additional result data if needed, but for now skip this
-      const labResults = null;
-      const labResultsError = null;
+      // 7. Fetch actual lab results from lab_results table
+      let labResults = null;
+      let labResultsError = null;
+
+      try {
+        console.log('🔬 Fetching lab results for visit:', patient.id);
+        console.log('📝 Visit ID:', patient.visit_id);
+        console.log('👤 Patient:', patient.patients?.name);
+
+        // Step 1: Get visit_lab IDs from the labOrders we already fetched
+        const visitLabIds = labOrders?.map(l => l.id).filter(Boolean) || [];
+
+        console.log('═══════════════════════════════════════');
+        console.log('🔍 DEBUG: Lab Orders Data:', labOrders);
+        console.log('📋 Extracted visit_lab IDs:', visitLabIds);
+        console.log('═══════════════════════════════════════');
+
+        if (visitLabIds.length === 0) {
+          console.warn('⚠️ No visit_labs found, cannot fetch lab results');
+          alert(`⚠️ No lab tests ordered for this visit.\nVisit ID: ${patient.visit_id}\nPatient: ${patient.patients?.name}`);
+          labResults = [];
+        } else {
+          console.log(`✅ Found ${visitLabIds.length} visit_lab IDs`);
+          alert(`🔍 Searching lab results...\n\nFound ${visitLabIds.length} lab tests ordered.\nSearching for results in lab_results table...`);
+
+          // Step 2: Fetch lab_results using visit_lab_id
+          const { data: resultsData, error: resultsErr } = await supabase
+            .from('lab_results')
+            .select(`
+              id,
+              test_category,
+              result_value,
+              result_unit,
+              reference_range,
+              visit_lab_id,
+              created_at
+            `)
+            .in('visit_lab_id', visitLabIds)
+            .order('created_at', { ascending: true });
+
+          console.log('═══════════════════════════════════════');
+          console.log('🧪 RAW Lab Results Query Response:');
+          console.log('Data:', resultsData);
+          console.log('Error:', resultsErr);
+          console.log('═══════════════════════════════════════');
+
+          labResultsError = resultsErr;
+
+          if (resultsErr) {
+            console.error('❌ Error fetching lab results:', resultsErr);
+            alert(`❌ Error fetching lab results:\n${resultsErr.message}\n\nCode: ${resultsErr.code}`);
+            labResults = [];
+          } else if (resultsData && resultsData.length > 0) {
+            console.log(`✅ SUCCESS! Found ${resultsData.length} lab results from lab_results table`);
+
+            // Show raw data in alert for debugging
+            const rawDataPreview = resultsData.slice(0, 2).map(r =>
+              `Test ID: ${r.visit_lab_id}\nValue: ${r.result_value}\nUnit: ${r.result_unit}`
+            ).join('\n\n');
+
+            alert(`✅ Found ${resultsData.length} lab results!\n\nSample data:\n${rawDataPreview}`);
+
+            // Step 3: Map results with test names from labOrders
+            labResults = resultsData.map(result => {
+              // Find the corresponding lab order to get the test name
+              const labOrder = labOrders?.find(l => l.id === result.visit_lab_id);
+
+              console.log('🔗 Mapping result:', {
+                visit_lab_id: result.visit_lab_id,
+                found_lab_order: !!labOrder,
+                test_name: labOrder?.lab?.name,
+                result_value: result.result_value
+              });
+
+              return {
+                ...result,
+                test_name: labOrder?.lab?.name || 'Unknown Test'
+              };
+            });
+
+            console.log('📊 Final mapped lab results with test names:', labResults);
+          } else {
+            console.warn('⚠️ No lab results found in lab_results table');
+            console.warn('Searched for visit_lab_ids:', visitLabIds);
+            alert(`⚠️ No results found in lab_results table!\n\nSearched for ${visitLabIds.length} lab tests but found 0 results.\n\nThis means:\n- Tests were ordered\n- But results not yet entered in lab_results table`);
+            labResults = [];
+          }
+        }
+      } catch (error) {
+        console.error('⚠️ Exception while fetching lab results:', error);
+        alert(`⚠️ Exception occurred:\n${error.message}\n\nCheck console for details.`);
+        labResults = [];
+      }
 
       if (labResultsError && labResultsError.code !== 'PGRST116') {
-        console.error('Error fetching lab results:', labResultsError);
+        console.error('❌ Error fetching lab results:', labResultsError);
+        labResults = [];
       }
 
       // 8. Fetch radiology orders for the visit (with error handling)
@@ -452,7 +544,50 @@ export const OpdPatientTable = ({ patients, refetch }: OpdPatientTableProps) => 
 
       // Process lab tests with fallback data
       let labTests = labOrders?.map(l => l.lab?.name).filter(Boolean) || [];
-      let labResultsList = labOrders?.filter(l => l.result_value).map(l => `${l.lab?.name}: ${l.result_value}`) || [];
+
+      // Process lab results from lab_results table
+      let labResultsList = [];
+      if (labResults && labResults.length > 0) {
+        labResultsList = labResults.map(r => {
+          try {
+            // Get test name from the mapped data (we added this in the fetch step)
+            const testName = r.test_name || 'Unknown Test';
+
+            // Parse the JSON result_value to extract the actual value
+            let actualValue = 'N/A';
+            if (r.result_value) {
+              try {
+                const parsedResult = JSON.parse(r.result_value);
+                actualValue = parsedResult.value || r.result_value;
+              } catch (parseError) {
+                // If not JSON, use as-is (might be plain text)
+                actualValue = r.result_value;
+              }
+            }
+
+            // Format the result with unit and reference range
+            const unit = r.result_unit || '';
+            const refRange = r.reference_range || 'N/A';
+
+            console.log(`📊 Formatted result for ${testName}:`, {
+              actualValue,
+              unit,
+              refRange
+            });
+
+            return `${testName}: ${actualValue} ${unit} (Reference: ${refRange})`;
+          } catch (err) {
+            console.error('❌ Error processing lab result:', err, r);
+            return 'Error processing result';
+          }
+        }).filter(Boolean);
+
+        console.log('✅ All formatted lab results:', labResultsList);
+      } else {
+        // Fallback to visit_labs result_value if lab_results table has no data
+        console.log('⚠️ No lab_results found, using visit_labs data as fallback');
+        labResultsList = labOrders?.filter(l => l.result_value).map(l => `${l.lab?.name}: ${l.result_value}`) || [];
+      }
 
       // Process radiology tests with fallback data
       let radiologyTests = radiologyOrders?.map(r => r.radiology?.name).filter(Boolean) || [];
@@ -582,12 +717,21 @@ ${complications.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}
                      CLINICAL SUMMARY
 ═══════════════════════════════════════════════════════════════════
 
-${labTests.length > 0 ? `LAB TESTS PERFORMED:
-${labTests.map((t, i) => `  ${i + 1}. ${t}`).join('\n')}
-
-${labResultsList.length > 0 ? `LAB RESULTS:
-${labResultsList.map((r, i) => `  ${i + 1}. ${r}`).join('\n')}
-` : ''}` : 'LAB TESTS: None performed'}
+${labTests.length > 0 || labResultsList.length > 0 ? `LABORATORY INVESTIGATIONS:
+═══════════════════════════════════════════════════════════════════════════════
+Test Name                                Result              Reference Range          Status
+──────────────────────────────────────────────────────────────────────────────────────
+${labResultsList.length > 0 ? labResultsList.map(r => {
+  // Parse the formatted result string to extract components
+  const match = r.match(/^(.+?):\s*(.+?)\s*\(Reference:\s*(.+?)\)$/);
+  if (match) {
+    const [, testName, result, refRange] = match;
+    return `${testName.padEnd(40)} ${result.padEnd(20)} ${refRange.padEnd(25)} Completed`;
+  }
+  return r;
+}).join('\n') : labTests.map(t => `${t.padEnd(40)} ${'Ordered'.padEnd(20)} ${'-'.padEnd(25)} Pending`).join('\n')}
+═══════════════════════════════════════════════════════════════════════════════
+` : 'LAB TESTS: None performed'}
 
 ${radiologyTests.length > 0 ? `RADIOLOGY TESTS:
 ${radiologyTests.map((t, i) => `  ${i + 1}. ${t}`).join('\n')}` : 'RADIOLOGY: None performed'}
@@ -784,9 +928,28 @@ Verified by: [To be verified by doctor]`;
   };
 
   const handleBillClick = (patient: Patient) => {
-    if (patient.visit_id) {
-      navigate(`/final-bill/${patient.visit_id}`);
+    console.log('💰 Bill icon clicked for patient:', {
+      visit_id: patient.visit_id,
+      patient_id: patient.patient_id || patient.patients?.id,
+      patient_name: patient.patients?.name,
+      payment_received: patient.payment_received
+    });
+
+    if (!patient.visit_id) {
+      console.error('❌ Cannot navigate to bill: visit_id is missing');
+      alert('Error: Visit ID is missing. Please contact support.');
+      return;
     }
+
+    // Validate visit_id format (should not be empty or just whitespace)
+    if (patient.visit_id.trim() === '') {
+      console.error('❌ Cannot navigate to bill: visit_id is empty');
+      alert('Error: Invalid visit ID. Please contact support.');
+      return;
+    }
+
+    console.log('✅ Navigating to final bill page:', `/final-bill/${patient.visit_id}`);
+    navigate(`/final-bill/${patient.visit_id}`);
   };
 
   const handleDeleteClick = async (patient: Patient) => {
@@ -977,9 +1140,10 @@ Verified by: [To be verified by doctor]`;
                   size="sm"
                   className="h-8 w-8 p-0"
                   onClick={() => handleDischargeSummaryClick(patient)}
-                  title="View/Add Discharge Summary"
+                  disabled={!patient.is_discharged}
+                  title={patient.is_discharged ? "View/Add Discharge Summary" : "Complete final payment to enable"}
                 >
-                  <FileTextIcon className="h-4 w-4 text-purple-600" />
+                  <FileTextIcon className={`h-4 w-4 ${patient.is_discharged ? 'text-purple-600' : 'text-gray-400'}`} />
                 </Button>
               </TableCell>
               <TableCell>
