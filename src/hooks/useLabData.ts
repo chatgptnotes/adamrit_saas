@@ -450,6 +450,8 @@ export function useTestPanels() {
     'Non-NABH_rates_in_rupee'?: number; // Added Non-NABH rates field
     'NABH_rates_in_rupee'?: number; // Added NABH rates field
     private?: number; // Added private rates field
+    bhopal_nabh_rate?: number; // Bhopal NABH rate
+    bhopal_non_nabh_rate?: number; // Bhopal Non-NABH rate
     attributes?: any; // JSON field for test attributes
   }) => {
     try {
@@ -500,6 +502,8 @@ export function useTestPanels() {
           'Non-NABH_rates_in_rupee': panelData['Non-NABH_rates_in_rupee'], // Save Non-NABH rates
           'NABH_rates_in_rupee': panelData['NABH_rates_in_rupee'], // Save NABH rates
           private: panelData.private, // Save private rates
+          bhopal_nabh_rate: panelData.bhopal_nabh_rate, // Save Bhopal NABH rates
+          bhopal_non_nabh_rate: panelData.bhopal_non_nabh_rate, // Save Bhopal Non-NABH rates
           attributes: panelData.attributes // Save attributes to database
         })
         .select()
@@ -541,6 +545,8 @@ export function useTestPanels() {
               non_nabh_rates_in_rupee: panelData.non_nabh_rates_in_rupee, // Save Non-NABH rates
               nabh_rates_in_rupee: panelData.nabh_rates_in_rupee, // Save NABH rates
               private: panelData.private, // Save private rates
+              bhopal_nabh_rate: panelData.bhopal_nabh_rate, // Save Bhopal NABH rates
+              bhopal_non_nabh_rate: panelData.bhopal_non_nabh_rate, // Save Bhopal Non-NABH rates
               attributes: panelData.attributes // Save attributes to database
             })
             .select()
@@ -593,6 +599,8 @@ export function useTestPanels() {
     'Non-NABH_rates_in_rupee'?: number; // Added Non-NABH rates field
     'NABH_rates_in_rupee'?: number; // Added NABH rates field
     private?: number; // Added private rates field
+    bhopal_nabh_rate?: number; // Bhopal NABH rate
+    bhopal_non_nabh_rate?: number; // Bhopal Non-NABH rate
     attributes?: any; // JSON field for test attributes
   }) => {
     try {
