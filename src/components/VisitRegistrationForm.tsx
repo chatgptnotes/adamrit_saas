@@ -42,6 +42,8 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
     referringDoctor: '',
     claimId: '',
     patientType: '',
+    wardAllotted: '',
+    roomAllotted: '',
   });
 
   // Keep track of selected IDs for foreign keys
@@ -65,6 +67,8 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
         referringDoctor: existingVisit.referring_doctor || '',
         claimId: existingVisit.claim_id || '',
         patientType: existingVisit.patient_type || 'OPD',
+        wardAllotted: existingVisit.ward_allotted || '',
+        roomAllotted: existingVisit.room_allotted || '',
       };
 
       console.log('Populated Form Data:', populatedData);
@@ -169,6 +173,16 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
     if (!formData.reasonForVisit || formData.reasonForVisit.trim() === '') missingFields.push('Reason for Visit');
     if (!formData.patientType || formData.patientType.trim() === '') missingFields.push('Patient Type');
 
+    // Validate ward and room only for IPD/Emergency patients
+    const requiresWardRoom = formData.patientType === 'IPD' ||
+                             formData.patientType === 'IPD (Inpatient)' ||
+                             formData.patientType === 'Emergency';
+
+    if (requiresWardRoom) {
+      if (!formData.wardAllotted || formData.wardAllotted.trim() === '') missingFields.push('Ward Allotted');
+      if (!formData.roomAllotted || formData.roomAllotted.trim() === '') missingFields.push('Room Allotted');
+    }
+
     if (missingFields.length > 0) {
       console.error('Missing required fields:', missingFields);
       toast({
@@ -184,6 +198,16 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
     try {
       if (editMode && existingVisit?.visit_id) {
         // Update existing visit
+        // For IPD/Emergency patients, set admission_date if not already set
+        const isIPDOrEmergency = formData.patientType === 'IPD' ||
+                                  formData.patientType === 'IPD (Inpatient)' ||
+                                  formData.patientType === 'Emergency';
+
+        // Only set admission_date if it's IPD/Emergency and not already set
+        const admissionDate = isIPDOrEmergency && !existingVisit.admission_date
+          ? format(visitDate, 'yyyy-MM-dd')
+          : existingVisit.admission_date;
+
         console.log('Updating visit with ID:', existingVisit.visit_id);
         console.log('Update data:', {
           visit_date: format(visitDate, 'yyyy-MM-dd'),
@@ -194,7 +218,8 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
           status: formData.status || 'scheduled',
           patient_type: formData.patientType,
           referring_doctor_id: selectedIds.referringDoctorId || null,
-          claim_id: formData.claimId
+          claim_id: formData.claimId,
+          admission_date: admissionDate
         });
 
         const { data: updateData, error: updateError } = await supabase
@@ -208,7 +233,10 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
             status: formData.status || 'scheduled',
             patient_type: formData.patientType,
             referring_doctor_id: selectedIds.referringDoctorId || null,
-            claim_id: formData.claimId || null
+            claim_id: formData.claimId || null,
+            ward_allotted: formData.wardAllotted || null,
+            room_allotted: formData.roomAllotted || null,
+            admission_date: admissionDate
           })
           .eq('visit_id', existingVisit.visit_id)
           .select();
@@ -256,6 +284,11 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
         const visitId = await generateVisitId(visitDate);
         console.log('Generated visit ID (TEXT):', visitId);
 
+        // For IPD/Emergency patients, set admission_date to visit_date
+        const isIPDOrEmergency = formData.patientType === 'IPD' ||
+                                  formData.patientType === 'IPD (Inpatient)' ||
+                                  formData.patientType === 'Emergency';
+
         // Insert the visit record
         const { data: visitData, error: visitError } = await supabase
           .from('visits')
@@ -270,7 +303,10 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
             status: formData.status || 'scheduled',
             patient_type: formData.patientType,
             referring_doctor_id: selectedIds.referringDoctorId || null,
-            claim_id: formData.claimId
+            claim_id: formData.claimId,
+            ward_allotted: formData.wardAllotted || null,
+            room_allotted: formData.roomAllotted || null,
+            admission_date: isIPDOrEmergency ? format(visitDate, 'yyyy-MM-dd') : null
           })
           .select('id, visit_id')
           .single();
@@ -468,6 +504,8 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
       referringDoctor: '',
       claimId: '',
       patientType: '',
+      wardAllotted: '',
+      roomAllotted: '',
     });
     setSelectedIds({
       referringDoctorId: ''
@@ -494,6 +532,7 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
             setVisitDate={setVisitDate}
             formData={formData}
             handleInputChange={handleInputChange}
+            existingVisit={existingVisit}
           />
 
           <VisitFormActions
