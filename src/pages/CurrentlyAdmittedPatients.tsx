@@ -51,6 +51,11 @@ interface Visit {
   condonation_delay_intimation: string | null;
   extension_of_stay: string | null;
   additional_approvals: string | null;
+  ward_allotted: string | null;
+  room_allotted: string | null;
+  room_management?: {
+    ward_type: string;
+  } | null;
   patients: {
     id: string;
     name: string;
@@ -656,7 +661,7 @@ const CurrentlyAdmittedPatients = () => {
       console.log('🏥 CurrentlyAdmittedPatients: Fetching visits for hospital:', hospitalConfig?.name);
 
 
-      // First get all visits with admission but that are not fully discharged
+      // Get all IPD patients who are not discharged yet
       let query = supabase
         .from('visits')
         .select(`
@@ -681,8 +686,9 @@ const CurrentlyAdmittedPatients = () => {
             )
           )
         `)
-        .not('admission_date', 'is', null) // Only get visits with admission date
-        .order('admission_date', { ascending: false });
+        .eq('patient_type', 'IPD') // Only get IPD patients
+        .is('discharge_date', null) // Only get patients who are not discharged
+        .order('visit_date', { ascending: false });
       
       // Apply hospital filter if hospitalConfig exists
       if (hospitalConfig?.name) {
@@ -716,17 +722,43 @@ const CurrentlyAdmittedPatients = () => {
         // Continue without checklists if there's an error
       }
 
-      // Filter visits to show only truly undischarged patients
-      const currentlyAdmittedVisits = visitsData.filter(visit => {
-        // Only show patients who don't have a discharge date
-        // This means they are still admitted and not discharged
-        return !visit.discharge_date;
-      });
+      // Fetch room_management data for ward types
+      const wardIds = visitsData
+        .map(visit => visit.ward_allotted)
+        .filter((id): id is string => id !== null && id !== undefined);
 
-      console.log('🔍 Total visits with admission date:', visitsData?.length);
-      console.log('🔍 Undischarged patients (no discharge_date):', currentlyAdmittedVisits?.length);
-      console.log('🔍 Filter applied: discharge_date is null');
-      return currentlyAdmittedVisits || [];
+      const uniqueWardIds = Array.from(new Set(wardIds));
+
+      let wardMapping: Record<string, string> = {};
+
+      if (uniqueWardIds.length > 0) {
+        const { data: wardData, error: wardError } = await supabase
+          .from('room_management')
+          .select('ward_id, ward_type')
+          .in('ward_id', uniqueWardIds);
+
+        if (wardError) {
+          console.error('Error fetching ward data:', wardError);
+        } else if (wardData) {
+          // Create a mapping of ward_id to ward_type
+          wardMapping = wardData.reduce((acc, ward) => {
+            acc[ward.ward_id] = ward.ward_type;
+            return acc;
+          }, {} as Record<string, string>);
+        }
+      }
+
+      // Merge ward data with visits
+      const visitsWithRoomInfo = visitsData.map(visit => ({
+        ...visit,
+        room_management: visit.ward_allotted && wardMapping[visit.ward_allotted]
+          ? { ward_type: wardMapping[visit.ward_allotted] }
+          : null
+      }));
+
+      console.log('🔍 Total IPD visits (not discharged):', visitsWithRoomInfo?.length);
+      console.log('🔍 Filter applied: patient_type=IPD AND discharge_date IS NULL');
+      return visitsWithRoomInfo || [];
     },
   });
 
@@ -943,6 +975,7 @@ const CurrentlyAdmittedPatients = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="font-semibold">RM/BED</TableHead>
                     <TableHead className="font-semibold">Visit ID</TableHead>
                     <TableHead className="font-semibold">Patient Name</TableHead>
                     <TableHead className="font-semibold">Discharge Workflow</TableHead>
@@ -964,6 +997,7 @@ const CurrentlyAdmittedPatients = () => {
                     <TableHead className="font-semibold">Actions</TableHead>
                   </TableRow>
                   <TableRow>
+                    <TableHead></TableHead>
                     <TableHead></TableHead>
                     <TableHead></TableHead>
                     <TableHead></TableHead>
@@ -998,6 +1032,16 @@ const CurrentlyAdmittedPatients = () => {
                 <TableBody>
                   {filteredVisits.map((visit) => (
                     <TableRow key={visit.id}>
+                      <TableCell className="font-medium">
+                        {visit.room_management?.ward_type && visit.room_allotted ? (
+                          <div className="text-sm">
+                            <div className="font-semibold text-blue-700">{visit.room_management.ward_type}</div>
+                            <div className="text-gray-600">Room {visit.room_allotted}</div>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">{visit.visit_id}</TableCell>
                       <TableCell>
                         <div>
