@@ -1153,7 +1153,7 @@ const TodaysIpdDashboard = () => {
     queryKey: ['todays-visits', hospitalConfig?.name],
     queryFn: async () => {
       console.log('🏥 TodaysIpdDashboard: Fetching visits for hospital:', hospitalConfig?.name);
-      
+
       let query = supabase
         .from('visits')
         .select(`
@@ -1169,13 +1169,13 @@ const TodaysIpdDashboard = () => {
         .eq('patient_type', 'IPD')
         .order('sr_no', { ascending: true, nullsFirst: false })
         .order('visit_date', { ascending: true });
-      
+
       // Apply hospital filter if hospitalConfig exists
       if (hospitalConfig?.name) {
         query = query.eq('patients.hospital_name', hospitalConfig.name);
         console.log('🏥 TodaysIpdDashboard: Applied hospital filter for:', hospitalConfig.name);
       }
-      
+
       const { data, error } = await query;
 
       if (error) {
@@ -1201,8 +1201,21 @@ const TodaysIpdDashboard = () => {
         })));
       }
 
+      // Fetch final_payments for these visits
+      const visitIds = data?.map(v => v.visit_id) || [];
+      const { data: finalPayments } = await supabase
+        .from('final_payments')
+        .select('visit_id, id')
+        .in('visit_id', visitIds);
+
+      // Add final_payment status to each visit
+      const visitsWithPaymentStatus = (data || []).map(visit => ({
+        ...visit,
+        has_final_payment: finalPayments?.some(fp => fp.visit_id === visit.visit_id) || false
+      }));
+
       // Sort manually to ensure patients with sr_no come first, then patients without sr_no
-      const sortedData = (data || []).sort((a, b) => {
+      const sortedData = visitsWithPaymentStatus.sort((a, b) => {
         // If both have sr_no, sort numerically
         if (a.sr_no && b.sr_no) {
           return parseInt(a.sr_no) - parseInt(b.sr_no);
@@ -2289,9 +2302,10 @@ const TodaysIpdDashboard = () => {
                       size="sm"
                       className="h-8 w-8 p-0 hover:bg-blue-50"
                       onClick={() => navigate(`/ipd-discharge-summary/${visit.visit_id}`)}
-                      title="IPD Discharge Summary"
+                      title={visit.has_final_payment ? "IPD Discharge Summary" : "Complete final payment to enable"}
+                      disabled={!visit.has_final_payment}
                     >
-                      <ClipboardList className="h-4 w-4 text-blue-600" />
+                      <ClipboardList className={`h-4 w-4 ${visit.has_final_payment ? 'text-blue-600' : 'text-gray-400'}`} />
                     </Button>
                   </TableCell>
                   {isAdmin && (

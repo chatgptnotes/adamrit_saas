@@ -5,6 +5,7 @@ import { lazy, Suspense } from "react";
 import Index from "../pages/Index";
 import NotFound from "../pages/NotFound";
 import PatientDashboard from "../pages/PatientDashboard";
+import PatientOverview from "../pages/PatientOverview";
 import TodaysIpdDashboard from "../pages/TodaysIpdDashboard";
 import TodaysOpd from "../pages/TodaysOpd";
 import AdvanceStatementReport from "../pages/AdvanceStatementReport";
@@ -99,6 +100,7 @@ export const AppRoutes = () => {
         <Route path="/signup-simple" element={<SimpleSignup />} />
         <Route path="/test" element={<TestSignup />} />
         <Route path="/patient-dashboard" element={<PatientDashboard />} />
+        <Route path="/patient-overview" element={<PatientOverview />} />
         <Route path="/patient-profile" element={<Suspense fallback={<PageLoader />}><PatientProfile /></Suspense>} />
         <Route path="/todays-ipd" element={<TodaysIpdDashboard />} />
         <Route path="/todays-opd" element={<TodaysOpd />} />

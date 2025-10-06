@@ -15,19 +15,19 @@ export const SidebarMenuItem = ({ item }: SidebarMenuItemProps) => {
     // Check if Ctrl (Windows/Linux) or Cmd (Mac) is held
     if (event.ctrlKey || event.metaKey) {
       // Open in new tab with keyboard modifier
+      event.preventDefault();
       window.open(route, '_blank');
     } else {
-      // Default: Open in new tab
-      window.open(route, '_blank');
-      // If you want to navigate in the same tab instead, use:
-      // navigate(route);
+      // Default: Navigate in the same tab
+      navigate(route);
     }
   };
 
   return (
     <SidebarMenuItemBase key={item.title}>
       <SidebarMenuButton asChild>
-        <div 
+        <a
+          href={item.route}
           className={`flex items-center justify-between w-full p-2 cursor-pointer hover:bg-accent rounded-md transition-colors gap-2 ${
             location.pathname === item.route ? 'bg-accent' : ''
           }`}
@@ -45,7 +45,7 @@ export const SidebarMenuItem = ({ item }: SidebarMenuItemProps) => {
           <div className="bg-primary/10 text-primary px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 min-w-[2rem] text-center">
             {item.count}
           </div>
-        </div>
+        </a>
       </SidebarMenuButton>
     </SidebarMenuItemBase>
   );
