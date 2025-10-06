@@ -345,7 +345,9 @@ const RadiologyManagement: React.FC = () => {
         created_at: item.created_at,
         nabhNablRate: item.NABH_NABL_Rate || 0,
         nonNabhNablRate: item.Non_NABH_NABL_Rate || 0,
-        private: item.private || 0
+        private: item.private || 0,
+        bhopal_nabh: item.bhopal_nabh || 0,
+        bhopal_non_nabh: item.bhopal_non_nabh || 0
       })) || [];
 
       setRadiologyTests(transformedData);
@@ -405,10 +407,12 @@ const RadiologyManagement: React.FC = () => {
         created_at: data.created_at,
         nabhNablRate: data.NABH_NABL_Rate || 0,
         nonNabhNablRate: data.Non_NABH_NABL_Rate || 0,
-        private: data.private || 0
+        private: data.private || 0,
+        bhopal_nabh: data.bhopal_nabh || 0,
+        bhopal_non_nabh: data.bhopal_non_nabh || 0
       };
 
-      setRadiologyTests(prev => prev.map(test => 
+      setRadiologyTests(prev => prev.map(test =>
         test.id === editingTest.id ? transformedData : test
       ));
       
@@ -482,7 +486,9 @@ const RadiologyManagement: React.FC = () => {
         created_at: data.created_at,
         nabhNablRate: data.NABH_NABL_Rate || 0,
         nonNabhNablRate: data.Non_NABH_NABL_Rate || 0,
-        private: data.private || 0
+        private: data.private || 0,
+        bhopal_nabh: data.bhopal_nabh || 0,
+        bhopal_non_nabh: data.bhopal_non_nabh || 0
       };
 
       setRadiologyTests(prev => [transformedData, ...prev]);
