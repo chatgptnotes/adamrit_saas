@@ -138,6 +138,8 @@ interface LabPanel {
   nonNabhRates: number; // Added Non-NABH rates field
   nabhRates: number; // Added NABH rates field
   private: number; // Added private rates field
+  bhopalNabhRates: number; // Added Bhopal NABH rates field
+  bhopalNonNabhRates: number; // Added Bhopal Non-NABH rates field
   attributes: TestAttribute[];
   subTests: SubTest[]; // Added sub-tests configuration
   isActive: boolean;
@@ -634,6 +636,8 @@ const LabPanelManager: React.FC = () => {
     nonNabhRates: panel['Non-NABH_rates_in_rupee'] || 0, // Added Non-NABH rates from database
     nabhRates: panel['NABH_rates_in_rupee'] || 0, // Added NABH rates from database
     private: panel.private || 0, // Added private rates from database
+    bhopalNabhRates: panel.bhopal_nabh_rate || 0, // Added Bhopal NABH rates from database
+    bhopalNonNabhRates: panel.bhopal_non_nabh_rate || 0, // Added Bhopal Non-NABH rates from database
     attributes: panel.attributes ? JSON.parse(JSON.stringify(panel.attributes)) : [], // Load attributes from database
     subTests: [], // Sub-tests will be loaded separately when editing
     isActive: true  // 'lab' table doesn't have is_active, so defaulting to true
@@ -996,6 +1000,8 @@ const LabPanelManager: React.FC = () => {
           'Non-NABH_rates_in_rupee': newPanel.nonNabhRates, // Save Non-NABH rates
           'NABH_rates_in_rupee': newPanel.nabhRates, // Save NABH rates
           private: newPanel.private, // Save private rates
+          bhopal_nabh_rate: newPanel.bhopalNabhRates, // Save Bhopal NABH rates
+          bhopal_non_nabh_rate: newPanel.bhopalNonNabhRates, // Save Bhopal Non-NABH rates
           attributes: newPanel.attributes // Save attributes to database
         });
 
@@ -1073,6 +1079,8 @@ const LabPanelManager: React.FC = () => {
         'Non-NABH_rates_in_rupee': updatedPanel.nonNabhRates, // Update Non-NABH rates
         'NABH_rates_in_rupee': updatedPanel.nabhRates, // Update NABH rates
         private: updatedPanel.private, // Update private rates
+        bhopal_nabh_rate: updatedPanel.bhopalNabhRates, // Update Bhopal NABH rates
+        bhopal_non_nabh_rate: updatedPanel.bhopalNonNabhRates, // Update Bhopal Non-NABH rates
         attributes: updatedPanel.attributes // Save attributes to database
       });
   
@@ -1382,6 +1390,8 @@ const AddPanelForm: React.FC<AddPanelFormProps> = ({ onSubmit }) => {
     nonNabhRates: 0, // Added Non-NABH rates field
     nabhRates: 0, // Added NABH rates field
     private: 0, // Added private rates field
+    bhopalNabhRates: 0, // Added Bhopal NABH rates field
+    bhopalNonNabhRates: 0, // Added Bhopal Non-NABH rates field
     attributes: [],
     subTests: [], // Added sub-tests configuration
     isActive: true
@@ -1852,7 +1862,7 @@ const AddPanelForm: React.FC<AddPanelFormProps> = ({ onSubmit }) => {
       </div>
 
       {/* Rates Configuration Section */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-5 gap-6">
         <div>
           <Label>Non-NABH Rates (₹)</Label>
           <Input
@@ -1885,6 +1895,30 @@ const AddPanelForm: React.FC<AddPanelFormProps> = ({ onSubmit }) => {
             min="0"
             value={formData.private}
             onChange={(e) => setFormData({...formData, private: parseFloat(e.target.value) || 0})}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div>
+          <Label>Bhopal NABH Rates (₹)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formData.bhopalNabhRates}
+            onChange={(e) => setFormData({...formData, bhopalNabhRates: parseFloat(e.target.value) || 0})}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div>
+          <Label>Bhopal Non-NABH Rates (₹)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formData.bhopalNonNabhRates}
+            onChange={(e) => setFormData({...formData, bhopalNonNabhRates: parseFloat(e.target.value) || 0})}
             placeholder="0.00"
           />
         </div>
@@ -2537,7 +2571,7 @@ const EditPanelForm: React.FC<EditPanelFormProps> = ({ panel, onSubmit }) => {
       </div>
 
       {/* Rates Configuration Section */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-5 gap-6">
         <div>
           <Label>Non-NABH Rates (₹)</Label>
           <Input
@@ -2570,6 +2604,30 @@ const EditPanelForm: React.FC<EditPanelFormProps> = ({ panel, onSubmit }) => {
             min="0"
             value={formData.private}
             onChange={(e) => setFormData({...formData, private: parseFloat(e.target.value) || 0})}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div>
+          <Label>Bhopal NABH Rates (₹)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formData.bhopalNabhRates}
+            onChange={(e) => setFormData({...formData, bhopalNabhRates: parseFloat(e.target.value) || 0})}
+            placeholder="0.00"
+          />
+        </div>
+
+        <div>
+          <Label>Bhopal Non-NABH Rates (₹)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            value={formData.bhopalNonNabhRates}
+            onChange={(e) => setFormData({...formData, bhopalNonNabhRates: parseFloat(e.target.value) || 0})}
             placeholder="0.00"
           />
         </div>

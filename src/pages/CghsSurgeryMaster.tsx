@@ -26,6 +26,8 @@ interface CghsSurgery {
   Revised_Date: string | null;
   category: string | null;
   private: string | null;
+  bhopal_nabh_rate: string | null;
+  bhopal_non_nabh_rate: string | null;
 }
 
 const CghsSurgeryMaster = () => {
@@ -56,7 +58,9 @@ const CghsSurgeryMaster = () => {
     Non_NABH_NABL_Rate: '',
     NABH_NABL_Rate: '',
     category: '',
-    private: ''
+    private: '',
+    bhopal_nabh_rate: '',
+    bhopal_non_nabh_rate: ''
   });
 
   // Edit form state
@@ -122,6 +126,8 @@ const CghsSurgeryMaster = () => {
           NABH_NABL_Rate: formData.NABH_NABL_Rate || null,
           category: formData.category || null,
           private: formData.private || null,
+          bhopal_nabh_rate: formData.bhopal_nabh_rate || null,
+          bhopal_non_nabh_rate: formData.bhopal_non_nabh_rate || null,
           created_at: new Date().toISOString().split('T')[0]
         })
         .select()
@@ -146,7 +152,9 @@ const CghsSurgeryMaster = () => {
         Non_NABH_NABL_Rate: '',
         NABH_NABL_Rate: '',
         category: '',
-        private: ''
+        private: '',
+        bhopal_nabh_rate: '',
+        bhopal_non_nabh_rate: ''
       });
     },
     onError: (error) => {
@@ -209,6 +217,8 @@ const CghsSurgeryMaster = () => {
           NABH_NABL_Rate: editFormData.NABH_NABL_Rate,
           category: editFormData.category,
           private: editFormData.private,
+          bhopal_nabh_rate: editFormData.bhopal_nabh_rate,
+          bhopal_non_nabh_rate: editFormData.bhopal_non_nabh_rate,
           updated_at: new Date().toISOString().split('T')[0]
         })
         .eq('id', editingSurgery.id);
@@ -337,6 +347,8 @@ const CghsSurgeryMaster = () => {
                     <th className="text-left p-3 font-semibold text-gray-700">NABH Rate</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Non-NABH Rate</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Private Rate</th>
+                    <th className="text-left p-3 font-semibold text-gray-700">Bhopal NABH Rate</th>
+                    <th className="text-left p-3 font-semibold text-gray-700">Bhopal Non-NABH Rate</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Created</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Actions</th>
                   </tr>
@@ -350,6 +362,8 @@ const CghsSurgeryMaster = () => {
                       <td className="p-3 text-gray-600">{surgery.NABH_NABL_Rate || '-'}</td>
                       <td className="p-3 text-gray-600">{surgery.Non_NABH_NABL_Rate || '-'}</td>
                       <td className="p-3 text-gray-600">{surgery.private || '-'}</td>
+                      <td className="p-3 text-gray-600">{surgery.bhopal_nabh_rate || '-'}</td>
+                      <td className="p-3 text-gray-600">{surgery.bhopal_non_nabh_rate || '-'}</td>
                       <td className="p-3 text-gray-600 text-sm">
                         {surgery.created_at ? new Date(surgery.created_at).toLocaleDateString() : '-'}
                       </td>
@@ -564,6 +578,28 @@ const CghsSurgeryMaster = () => {
                 </div>
                 <div>
                   <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bhopal NABH Rate
+                  </Label>
+                  <Input
+                    type="text"
+                    value={createFormData.bhopal_nabh_rate}
+                    onChange={(e) => setCreateFormData(prev => ({ ...prev, bhopal_nabh_rate: e.target.value }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bhopal Non-NABH Rate
+                  </Label>
+                  <Input
+                    type="text"
+                    value={createFormData.bhopal_non_nabh_rate}
+                    onChange={(e) => setCreateFormData(prev => ({ ...prev, bhopal_non_nabh_rate: e.target.value }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
                     Cost
                   </Label>
                   <Input
@@ -647,6 +683,14 @@ const CghsSurgeryMaster = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700">Private Rate</label>
                 <p className="mt-1 text-sm text-gray-900">{viewingSurgery.private || '-'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Bhopal NABH Rate</label>
+                <p className="mt-1 text-sm text-gray-900">{viewingSurgery.bhopal_nabh_rate || '-'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Bhopal Non-NABH Rate</label>
+                <p className="mt-1 text-sm text-gray-900">{viewingSurgery.bhopal_non_nabh_rate || '-'}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Cost</label>
@@ -782,6 +826,28 @@ const CghsSurgeryMaster = () => {
                     type="text"
                     value={editFormData.private || ''}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, private: e.target.value }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bhopal NABH Rate
+                  </Label>
+                  <Input
+                    type="text"
+                    value={editFormData.bhopal_nabh_rate || ''}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, bhopal_nabh_rate: e.target.value }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <Label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bhopal Non-NABH Rate
+                  </Label>
+                  <Input
+                    type="text"
+                    value={editFormData.bhopal_non_nabh_rate || ''}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, bhopal_non_nabh_rate: e.target.value }))}
                     className="w-full"
                   />
                 </div>

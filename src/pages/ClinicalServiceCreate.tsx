@@ -16,7 +16,9 @@ const ClinicalServiceCreate = () => {
     tpaRate: '',
     privateRate: '',
     nabhRate: '',
-    nonNabhRate: ''
+    nabhBhopal: '',
+    nonNabhRate: '',
+    nonNabhBhopal: ''
   });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -44,8 +46,9 @@ const ClinicalServiceCreate = () => {
         tpa_rate: formData.tpaRate ? parseFloat(formData.tpaRate) : null,
         private_rate: formData.privateRate ? parseFloat(formData.privateRate) : null,
         nabh_rate: formData.nabhRate ? parseFloat(formData.nabhRate) : null,
+        nabh_bhopal: formData.nabhBhopal ? parseFloat(formData.nabhBhopal) : null,
         non_nabh_rate: formData.nonNabhRate ? parseFloat(formData.nonNabhRate) : null,
-        hospital_name: hospitalConfig.name,
+        non_nabh_bhopal: formData.nonNabhBhopal ? parseFloat(formData.nonNabhBhopal) : null,
         created_by: null // Explicitly set to null to bypass RLS
       };
 
@@ -186,6 +189,22 @@ const ClinicalServiceCreate = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    NABH Bhopal (₹)
+                  </label>
+                  <input
+                    type="number"
+                    name="nabhBhopal"
+                    value={formData.nabhBhopal}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter NABH Bhopal rate"
+                    min="0"
+                    step="1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Non-NABH Rate (₹)
                   </label>
                   <input
@@ -195,6 +214,22 @@ const ClinicalServiceCreate = () => {
                     onChange={handleInputChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter non-NABH rate"
+                    min="0"
+                    step="1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Non-NABH Bhopal (₹)
+                  </label>
+                  <input
+                    type="number"
+                    name="nonNabhBhopal"
+                    value={formData.nonNabhBhopal}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter Non-NABH Bhopal rate"
                     min="0"
                     step="1"
                   />

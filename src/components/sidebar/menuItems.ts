@@ -1,5 +1,4 @@
-
-import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake, ExternalLink, UserCheck, Bed, DoorOpen } from 'lucide-react';
+import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake, ExternalLink, UserCheck, Bed, DoorOpen, LayoutDashboard } from 'lucide-react';
 
 export const menuItems = [
   {
@@ -11,6 +10,11 @@ export const menuItems = [
     title: "Patient Dashboard",
     url: "/patient-dashboard",
     icon: Users,
+  },
+  {
+    title: "Patient Overview",
+    url: "/patient-overview",
+    icon: LayoutDashboard,
   },
   {
     title: "Today's IPD",

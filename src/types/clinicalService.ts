@@ -4,9 +4,10 @@ export interface ClinicalService {
   tpa_rate?: number | null;
   private_rate?: number | null;
   nabh_rate?: number | null;
+  nabh_bhopal?: number | null;
   non_nabh_rate?: number | null;
+  non_nabh_bhopal?: number | null;
   status: string;
-  hospital_name: string;
   created_at: string;
   updated_at: string;
   created_by?: string | null;
@@ -17,6 +18,7 @@ export interface CreateClinicalServiceData {
   tpa_rate?: number;
   private_rate?: number;
   nabh_rate?: number;
+  nabh_bhopal?: number;
   non_nabh_rate?: number;
-  hospital_name: string;
+  non_nabh_bhopal?: number;
 }

@@ -23,18 +23,19 @@ const MandatoryService = () => {
     tpaRate: '',
     privateRate: '',
     nabhRate: '',
+    nabhBhopal: '',
     nonNabhRate: '',
+    nonNabhBhopal: '',
     status: 'Active'
   });
 
-  // Fetch mandatory services from database filtered by hospital
+  // Fetch mandatory services from database
   const { data: mandatoryServices, isLoading, error } = useQuery({
-    queryKey: ['mandatory-services', hospitalConfig.name],
+    queryKey: ['mandatory-services'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('mandatory_services')
         .select('*')
-        .eq('hospital_name', hospitalConfig.name)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -42,8 +43,7 @@ const MandatoryService = () => {
       }
 
       return data as MandatoryServiceType[];
-    },
-    enabled: !!hospitalConfig.name
+    }
   });
 
   // Handler functions for actions
@@ -58,7 +58,9 @@ const MandatoryService = () => {
       tpaRate: service.tpa_rate?.toString() || '',
       privateRate: service.private_rate?.toString() || '',
       nabhRate: service.nabh_rate?.toString() || '',
+      nabhBhopal: service.nabh_bhopal?.toString() || '',
       nonNabhRate: service.non_nabh_rate?.toString() || '',
+      nonNabhBhopal: service.non_nabh_bhopal?.toString() || '',
       status: service.status
     });
   };
@@ -102,7 +104,9 @@ const MandatoryService = () => {
           tpa_rate: editFormData.tpaRate ? parseFloat(editFormData.tpaRate) : null,
           private_rate: editFormData.privateRate ? parseFloat(editFormData.privateRate) : null,
           nabh_rate: editFormData.nabhRate ? parseFloat(editFormData.nabhRate) : null,
+          nabh_bhopal: editFormData.nabhBhopal ? parseFloat(editFormData.nabhBhopal) : null,
           non_nabh_rate: editFormData.nonNabhRate ? parseFloat(editFormData.nonNabhRate) : null,
+          non_nabh_bhopal: editFormData.nonNabhBhopal ? parseFloat(editFormData.nonNabhBhopal) : null,
           status: editFormData.status,
           updated_at: new Date().toISOString()
         })
@@ -176,7 +180,9 @@ const MandatoryService = () => {
                     <th className="text-left p-3 font-semibold text-gray-700">TPA Rate</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Private Rate</th>
                     <th className="text-left p-3 font-semibold text-gray-700">NABH Rate</th>
+                    <th className="text-left p-3 font-semibold text-gray-700">NABH Bhopal</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Non-NABH Rate</th>
+                    <th className="text-left p-3 font-semibold text-gray-700">Non-NABH Bhopal</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Created</th>
                     <th className="text-left p-3 font-semibold text-gray-700">Actions</th>
                   </tr>
@@ -205,8 +211,14 @@ const MandatoryService = () => {
                       <td className="p-3 font-medium text-purple-600">
                         {service.nabh_rate ? `₹${service.nabh_rate.toLocaleString()}` : '-'}
                       </td>
+                      <td className="p-3 font-medium text-indigo-600">
+                        {service.nabh_bhopal ? `₹${service.nabh_bhopal.toLocaleString()}` : '-'}
+                      </td>
                       <td className="p-3 font-medium text-orange-600">
                         {service.non_nabh_rate ? `₹${service.non_nabh_rate.toLocaleString()}` : '-'}
+                      </td>
+                      <td className="p-3 font-medium text-pink-600">
+                        {service.non_nabh_bhopal ? `₹${service.non_nabh_bhopal.toLocaleString()}` : '-'}
                       </td>
                       <td className="p-3 text-gray-600 text-sm">
                         {new Date(service.created_at).toLocaleDateString()}
@@ -297,9 +309,21 @@ const MandatoryService = () => {
                   </p>
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-gray-700">NABH Bhopal</label>
+                  <p className="mt-1 text-sm text-gray-900">
+                    {viewingService.nabh_bhopal ? `₹${viewingService.nabh_bhopal.toLocaleString()}` : 'Not set'}
+                  </p>
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700">Non-NABH Rate</label>
                   <p className="mt-1 text-sm text-gray-900">
                     {viewingService.non_nabh_rate ? `₹${viewingService.non_nabh_rate.toLocaleString()}` : 'Not set'}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Non-NABH Bhopal</label>
+                  <p className="mt-1 text-sm text-gray-900">
+                    {viewingService.non_nabh_bhopal ? `₹${viewingService.non_nabh_bhopal.toLocaleString()}` : 'Not set'}
                   </p>
                 </div>
               </div>
@@ -408,12 +432,38 @@ const MandatoryService = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
+                    NABH Bhopal (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={editFormData.nabhBhopal}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, nabhBhopal: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Non-NABH Rate (₹)
                   </label>
                   <input
                     type="number"
                     value={editFormData.nonNabhRate}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, nonNabhRate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Non-NABH Bhopal (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={editFormData.nonNabhBhopal}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, nonNabhBhopal: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     min="0"
                     step="1"
