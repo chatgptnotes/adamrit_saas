@@ -158,6 +158,8 @@ interface RadiologyTest {
   nabhNablRate?: number;
   nonNabhNablRate?: number;
   private?: number;
+  bhopal_nabh?: number;
+  bhopal_non_nabh?: number;
 }
 
 const RadiologyManagement: React.FC = () => {
@@ -197,7 +199,9 @@ const RadiologyManagement: React.FC = () => {
     useAsDefault: false,
     nabhNablRate: '',
     nonNabhNablRate: '',
-    private: ''
+    private: '',
+    bhopalNabh: '',
+    bhopalNonNabh: ''
   });
   const [showSubSpecialityForm, setShowSubSpecialityForm] = useState(false);
 
@@ -375,7 +379,9 @@ const RadiologyManagement: React.FC = () => {
           description: formData.note || `${formData.testingMethod} examination`,
           NABH_NABL_Rate: parseFloat(formData.nabhNablRate) || 0,
           Non_NABH_NABL_Rate: parseFloat(formData.nonNabhNablRate) || 0,
-          private: parseFloat(formData.private) || 0
+          private: parseFloat(formData.private) || 0,
+          bhopal_nabh: parseFloat(formData.bhopalNabh) || 0,
+          bhopal_non_nabh: parseFloat(formData.bhopalNonNabh) || 0
           // 🏥 Radiology tests are shared across hospitals
         })
         .eq('id', editingTest.id)
@@ -416,7 +422,9 @@ const RadiologyManagement: React.FC = () => {
         useAsDefault: false,
         nabhNablRate: '',
         nonNabhNablRate: '',
-        private: ''
+        private: '',
+        bhopalNabh: '',
+        bhopalNonNabh: ''
       });
       
       setEditingTest(null);
@@ -449,7 +457,9 @@ const RadiologyManagement: React.FC = () => {
           cost: '₹500', // Default cost
           NABH_NABL_Rate: parseFloat(formData.nabhNablRate) || 0,
           Non_NABH_NABL_Rate: parseFloat(formData.nonNabhNablRate) || 0,
-          private: parseFloat(formData.private) || 0
+          private: parseFloat(formData.private) || 0,
+          bhopal_nabh: parseFloat(formData.bhopalNabh) || 0,
+          bhopal_non_nabh: parseFloat(formData.bhopalNonNabh) || 0
           // 🏥 Radiology tests are shared across hospitals
         }])
         .select()
@@ -487,7 +497,9 @@ const RadiologyManagement: React.FC = () => {
         useAsDefault: false,
         nabhNablRate: '',
         nonNabhNablRate: '',
-        private: ''
+        private: '',
+        bhopalNabh: '',
+        bhopalNonNabh: ''
       });
 
       // Go back to list view
@@ -813,6 +825,38 @@ const RadiologyManagement: React.FC = () => {
                 />
               </div>
 
+              {/* Bhopal NABH Rate */}
+              <div className="flex items-center gap-4">
+                <label className="w-48 text-sm font-medium text-gray-700">
+                  Bhopal NABH (₹):
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.bhopalNabh}
+                  onChange={(e) => setFormData(prev => ({ ...prev, bhopalNabh: e.target.value }))}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter Bhopal NABH rate"
+                />
+              </div>
+
+              {/* Bhopal non-NABH Rate */}
+              <div className="flex items-center gap-4">
+                <label className="w-48 text-sm font-medium text-gray-700">
+                  Bhopal non-NABH (₹):
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.bhopalNonNabh}
+                  onChange={(e) => setFormData(prev => ({ ...prev, bhopalNonNabh: e.target.value }))}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter Bhopal non-NABH rate"
+                />
+              </div>
+
               {/* Use as default */}
               <div className="flex items-center gap-4">
                 <label className="w-48 text-sm font-medium text-gray-700">
@@ -959,7 +1003,9 @@ const RadiologyManagement: React.FC = () => {
                                 useAsDefault: false,
                                 nabhNablRate: test.nabhNablRate?.toString() || '',
                                 nonNabhNablRate: test.nonNabhNablRate?.toString() || '',
-                                private: test.private?.toString() || ''
+                                private: test.private?.toString() || '',
+                                bhopalNabh: test.bhopal_nabh?.toString() || '',
+                                bhopalNonNabh: test.bhopal_non_nabh?.toString() || ''
                               });
                               setActiveView('editTestForm');
                             }}
@@ -1189,19 +1235,12 @@ const RadiologyManagement: React.FC = () => {
               <p className="text-muted-foreground">Manage imaging orders and track their progress</p>
             </div>
           </div>
-          <Button 
-            className="flex items-center gap-2"
-            onClick={() => setActiveView('addTestForm')}
-          >
-            <Plus className="h-4 w-4" />
-            Add Test
-          </Button>
         </div>
 
         {/* Navigation Tabs */}
         <div className="flex space-x-6 mb-6 border-b">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="border-b-2 border-blue-600 text-blue-600 rounded-none pb-3"
           >
             <Activity className="h-4 w-4 mr-2" />
@@ -1211,8 +1250,8 @@ const RadiologyManagement: React.FC = () => {
             <Monitor className="h-4 w-4 mr-2" />
             Modalities
           </Button>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="pb-3 rounded-none"
             onClick={() => setActiveView('orders')}
           >
@@ -1220,34 +1259,13 @@ const RadiologyManagement: React.FC = () => {
             Orders
             <Badge className="ml-2 bg-blue-100 text-blue-800">23</Badge>
           </Button>
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="pb-3 rounded-none"
-            onClick={() => setActiveView('scheduling')}
+            onClick={() => setActiveView('addTest')}
           >
-            <Calendar className="h-4 w-4 mr-2" />
-            Scheduling
-          </Button>
-          <Button variant="ghost" className="pb-3 rounded-none">
-            <Camera className="h-4 w-4 mr-2" />
-            PACS
-          </Button>
-          <Button 
-            variant="ghost" 
-            className="pb-3 rounded-none"
-            onClick={() => setActiveView('reports')}
-          >
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Reporting
-            <Badge className="ml-2 bg-red-100 text-red-800">5</Badge>
-          </Button>
-          <Button variant="ghost" className="pb-3 rounded-none">
-            <TrendingUp className="h-4 w-4 mr-2" />
-            Analytics
-          </Button>
-          <Button variant="ghost" className="pb-3 rounded-none">
-            <CheckCircle className="h-4 w-4 mr-2" />
-            QA & Safety
+            <Settings className="h-4 w-4 mr-2" />
+            Rad Management
           </Button>
         </div>
 
