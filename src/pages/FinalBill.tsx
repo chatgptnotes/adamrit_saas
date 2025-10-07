@@ -2514,15 +2514,16 @@ const FinalBill = () => {
         return;
       }
 
-      // Update visit discharge status and discharge date
+      // Update visit discharge status and discharge date with timestamp
       await supabase
         .from('visits')
         .update({
-          discharge_date: new Date().toISOString().split('T')[0], // Set discharge date to today (YYYY-MM-DD format)
+          discharge_date: new Date().toISOString(), // Set discharge date and time (full timestamp)
           discharge_mode: finalPaymentReason.toLowerCase().includes('death') ? 'death' :
                          finalPaymentReason.toLowerCase().includes('dama') ? 'dama' : 'recovery',
           bill_paid: true,
-          is_discharged: true // Enable discharge summary button
+          is_discharged: true, // Enable discharge summary button
+          status: 'discharged' // Set status to discharged so patient appears in Discharged Patients dashboard
         })
         .eq('visit_id', visitId);
 
@@ -8272,15 +8273,21 @@ INSTRUCTIONS:
 
   // Search queries for service selection based on search term and active tab
   const { data: searchedLabServices = [], isLoading: isSearchingLabServices } = useQuery({
-    queryKey: ['lab-services-search', serviceSearchTerm, visitId],
+    queryKey: ['lab-services-search', serviceSearchTerm, visitId, patientInfo?.corporate],
     queryFn: async () => {
-      console.log('🔍 Lab search triggered:', { serviceSearchTerm, activeServiceTab, visitId });
+      console.log('🔍 Lab search triggered:', {
+        serviceSearchTerm,
+        activeServiceTab,
+        visitId,
+        patientCorporate: patientInfo?.corporate,
+        patientInfoLoaded: !!patientInfo
+      });
       if (!serviceSearchTerm || serviceSearchTerm.length < 2) return [];
 
       try {
         const { data, error } = await supabase
           .from('lab')
-          .select(`id, name, "CGHS_code", description, private`)
+          .select(`id, name, "CGHS_code", description, private, bhopal_nabh_rate`)
           .or(`name.ilike.%${serviceSearchTerm}%,description.ilike.%${serviceSearchTerm}%`)
           .order('name')
           .limit(20);
@@ -8309,17 +8316,38 @@ INSTRUCTIONS:
 
         console.log('✅ Lab search results:', data?.length || 0, 'records');
 
-        // Map the field names to expected format using private rates
+        // Map the field names to expected format - use bhopal_nabh_rate for specific corporates
         const mappedData = data?.map(item => {
-          // Use private rate, fallback to 100 if null/0 (temporary until DB updated)
-          const cost = (item.private && item.private > 0) ? item.private : 100;
+          // Check if corporate qualifies for Bhopal NABH rates (case-insensitive partial match)
+          const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+          const usesBhopaliNABHRate =
+            corporate.includes('mp police') ||
+            corporate.includes('ordnance factory') ||
+            corporate.includes('ordnance factory itarsi');
+
+          // Select appropriate rate based on corporate
+          let cost = 100; // Default fallback
+          let rateSource = 'fallback';
+
+          if (usesBhopaliNABHRate && item.bhopal_nabh_rate && item.bhopal_nabh_rate > 0) {
+            cost = item.bhopal_nabh_rate;
+            rateSource = 'bhopal_nabh';
+          } else if (item.private && item.private > 0) {
+            cost = item.private;
+            rateSource = 'private';
+          }
+
           console.log('🔍 Lab search mapping:', {
             service: item.name,
+            patientCorporate: patientInfo?.corporate || 'NOT SET',
+            corporateLower: corporate || 'EMPTY',
+            usesBhopaliNABHRate: usesBhopaliNABHRate,
+            bhopaliNABHRate: item.bhopal_nabh_rate,
             privateRate: item.private,
             finalCost: cost,
-            usingFallback: !item.private || item.private === 0
+            rateSource: rateSource
           });
-          
+
           return {
             id: item.id,
             name: item.name,
@@ -8339,14 +8367,19 @@ INSTRUCTIONS:
   });
 
   const { data: searchedRadiologyServices = [], isLoading: isSearchingRadiologyServices } = useQuery({
-    queryKey: ['radiology-services-search', serviceSearchTerm],
+    queryKey: ['radiology-services-search', serviceSearchTerm, patientInfo?.corporate],
     queryFn: async () => {
-      console.log('🔍 Radiology search query triggered:', { serviceSearchTerm, activeServiceTab });
+      console.log('🔍 Radiology search query triggered:', {
+        serviceSearchTerm,
+        activeServiceTab,
+        patientCorporate: patientInfo?.corporate,
+        patientInfoLoaded: !!patientInfo
+      });
       if (!serviceSearchTerm || serviceSearchTerm.length < 2) return [];
 
       const { data, error } = await supabase
         .from('radiology')
-        .select('id, name, cost, category, description')
+        .select('id, name, cost, category, description, bhopal_nabh')
         .or(`name.ilike.%${serviceSearchTerm}%,description.ilike.%${serviceSearchTerm}%`)
         .order('name')
         .limit(20);
@@ -8358,11 +8391,41 @@ INSTRUCTIONS:
 
       console.log('✅ Radiology search results:', data?.length || 0, 'records found');
       console.log('📋 Sample radiology results:', data?.slice(0, 2));
-      // Transform data to ensure cost field is available as amount for compatibility
-      const transformedData = data?.map(item => ({
-        ...item,
-        amount: item.cost // Add amount field for backward compatibility
-      })) || [];
+
+      // Transform data - use bhopal_nabh for specific corporates
+      const transformedData = data?.map(item => {
+        // Check if corporate qualifies for Bhopal NABH rates (case-insensitive partial match)
+        const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+        const usesBhopaliNABHRate =
+          corporate.includes('mp police') ||
+          corporate.includes('ordnance factory') ||
+          corporate.includes('ordnance factory itarsi');
+
+        // Select appropriate rate based on corporate
+        let finalCost = item.cost || 0; // Default to regular cost
+        let rateSource = 'regular_cost';
+
+        if (usesBhopaliNABHRate && item.bhopal_nabh && item.bhopal_nabh > 0) {
+          finalCost = item.bhopal_nabh;
+          rateSource = 'bhopal_nabh';
+        }
+
+        console.log('🔍 Radiology mapping:', {
+          service: item.name,
+          patientCorporate: patientInfo?.corporate || 'NOT SET',
+          corporateLower: corporate || 'EMPTY',
+          usesBhopaliNABHRate: usesBhopaliNABHRate,
+          bhopaliNABH: item.bhopal_nabh,
+          regularCost: item.cost,
+          finalCost: finalCost,
+          rateSource: rateSource
+        });
+
+        return {
+          ...item,
+          amount: finalCost // Use selected rate as amount
+        };
+      }) || [];
       return transformedData;
     },
     enabled: serviceSearchTerm.length >= 2 && activeServiceTab === "Radiology",
@@ -9059,13 +9122,18 @@ INSTRUCTIONS:
 
   // CGHS Surgery search query
   const { data: availableSurgeries = [] } = useQuery({
-    queryKey: ['cghs_surgery', surgerySearchTerm],
+    queryKey: ['cghs_surgery', surgerySearchTerm, patientInfo?.corporate],
     queryFn: async () => {
+      console.log('🔍 Fetching CGHS surgeries in FinalBill:', {
+        surgerySearchTerm,
+        patientCorporate: patientInfo?.corporate || 'NOT SET'
+      });
+
       if (!surgerySearchTerm || surgerySearchTerm.length < 2) return [];
 
       const { data, error } = await supabase
         .from('cghs_surgery')
-        .select('id, name, code, category, NABH_NABL_Rate, description')
+        .select('id, name, code, category, NABH_NABL_Rate, bhopal_nabh_rate, private, description')
         .or(`name.ilike.%${surgerySearchTerm}%,code.ilike.%${surgerySearchTerm}%,category.ilike.%${surgerySearchTerm}%`)
         .order('name')
         .limit(10);
@@ -9075,7 +9143,43 @@ INSTRUCTIONS:
         return [];
       }
 
-      return data || [];
+      // Apply corporate-based rate selection
+      const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+      const usesBhopaliRate =
+        corporate.includes('mp police') ||
+        corporate.includes('ordnance factory') ||
+        corporate.includes('ordnance factory itarsi');
+
+      const surgeriesWithSelectedRate = data?.map(surgery => {
+        // Select appropriate rate based on corporate
+        let selectedRate = surgery.NABH_NABL_Rate || surgery.private || 0;
+        let rateSource = 'nabh_nabl/private';
+
+        if (usesBhopaliRate && surgery.bhopal_nabh_rate && surgery.bhopal_nabh_rate > 0) {
+          selectedRate = surgery.bhopal_nabh_rate;
+          rateSource = 'bhopal_nabh';
+        }
+
+        console.log('🔍 Surgery rate mapping in FinalBill:', {
+          surgeryName: surgery.name,
+          patientCorporate: patientInfo?.corporate || 'NOT SET',
+          corporateLower: corporate || 'EMPTY',
+          usesBhopaliRate: usesBhopaliRate,
+          bhopaliNABHRate: surgery.bhopal_nabh_rate,
+          nabhNablRate: surgery.NABH_NABL_Rate,
+          selectedRate: selectedRate,
+          rateSource: rateSource
+        });
+
+        return {
+          ...surgery,
+          NABH_NABL_Rate: selectedRate, // Override with selected rate
+          selectedRate, // Add selectedRate field
+          rateSource // Add rate source for debugging
+        };
+      }) || [];
+
+      return surgeriesWithSelectedRate;
     },
     enabled: surgerySearchTerm.length >= 2
   });
@@ -14371,7 +14475,10 @@ Dr. Murali B K
                             <div className="font-medium text-sm text-green-800">{surgery.name}</div>
                             <div className="text-xs text-green-600">Code: {surgery.code}</div>
                             {surgery.NABH_NABL_Rate && (
-                              <div className="text-xs text-green-600">NABH Rate: ₹{surgery.NABH_NABL_Rate}</div>
+                              <div className="text-xs text-green-600">
+                                NABH Rate: ₹{surgery.NABH_NABL_Rate}
+                                {surgery.rateSource === 'bhopal_nabh' && <span className="ml-1 text-purple-600 font-semibold">(Bhopal NABH)</span>}
+                              </div>
                             )}
                           </div>
                           <Button
@@ -14444,7 +14551,10 @@ Dr. Murali B K
                           <div className="font-medium text-sm">{surgery.name}</div>
                           <div className="text-xs text-gray-500">Code: {surgery.code}</div>
                           {surgery.NABH_NABL_Rate && (
-                            <div className="text-xs text-green-600">NABH Rate: ₹{surgery.NABH_NABL_Rate}</div>
+                            <div className="text-xs text-green-600">
+                              NABH Rate: ₹{surgery.NABH_NABL_Rate}
+                              {surgery.rateSource === 'bhopal_nabh' && <span className="ml-1 text-purple-600 font-semibold">(Bhopal NABH)</span>}
+                            </div>
                           )}
                         </div>
                       ))}

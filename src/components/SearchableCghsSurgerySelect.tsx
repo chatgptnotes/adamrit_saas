@@ -13,13 +13,15 @@ interface SelectedSurgery {
 interface SearchableCghsSurgerySelectProps {
   selectedSurgeries: SelectedSurgery[];
   onAddSurgery: (surgery: { id: string; name: string; code?: string }) => void;
+  patientCorporate?: string;
 }
 
-const SearchableCghsSurgerySelect = ({ 
-  selectedSurgeries, 
-  onAddSurgery 
+const SearchableCghsSurgerySelect = ({
+  selectedSurgeries,
+  onAddSurgery,
+  patientCorporate
 }: SearchableCghsSurgerySelectProps) => {
-  const { surgeries, isLoading, searchTerm, setSearchTerm } = useSearchableCghsSurgery();
+  const { surgeries, isLoading, searchTerm, setSearchTerm } = useSearchableCghsSurgery(patientCorporate);
   const [showResults, setShowResults] = useState(false);
 
   const handleSurgerySelect = (surgery: { id: string; name: string; code?: string | null }) => {
@@ -66,6 +68,12 @@ const SearchableCghsSurgerySelect = ({
                 )}
                 {surgery.category && (
                   <div className="text-blue-600 text-xs font-medium">Category: {surgery.category}</div>
+                )}
+                {surgery.selectedRate !== undefined && (
+                  <div className="text-green-600 text-xs font-semibold">
+                    Rate: ₹{surgery.selectedRate}
+                    {surgery.rateSource === 'bhopal_nabh' && <span className="ml-1 text-purple-600">(Bhopal NABH)</span>}
+                  </div>
                 )}
                 {surgery.description && (
                   <div className="text-gray-500 text-xs">{surgery.description}</div>
