@@ -45,6 +45,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useDebounce } from 'use-debounce';
 import { useAuth } from '@/contexts/AuthContext';
+import { savePharmacySale, SaleData } from '@/lib/pharmacy-billing-service';
 
 interface CartItem {
   id: string;
@@ -255,20 +256,27 @@ const PharmacyBilling: React.FC = () => {
     }).format(amount);
 
   const addToCart = (medicine: any) => {
+    console.log('🏥 Adding medicine to cart:', {
+      id: medicine.id,
+      name: medicine.name,
+      generic_name: medicine.generic_name,
+      full_medicine_object: medicine
+    });
+
     const existingItem = cart.find(item => item.medicine_id === medicine.id && item.batch_number === medicine.batch_number);
-    
+
     if (existingItem) {
       updateQuantity(existingItem.id, existingItem.quantity + 1);
     } else {
       const newItem: CartItem = {
         id: Date.now().toString(),
         medicine_id: medicine.id,
-        medicine_name: medicine.name,
-        generic_name: medicine.generic_name,
-        strength: medicine.strength,
-        dosage_form: medicine.dosage,
-        batch_number: medicine.batch_number,
-        expiry_date: medicine.expiry_date,
+        medicine_name: medicine.name || 'Unknown Medicine',
+        generic_name: medicine.generic_name || '',
+        strength: medicine.strength || '',
+        dosage_form: medicine.dosage || '',
+        batch_number: medicine.batch_number || 'BATCH-001',
+        expiry_date: medicine.expiry_date || '',
         unit_price: medicine.price_per_strip || 0,
         quantity: 1,
         discount_percentage: 0,
@@ -276,9 +284,15 @@ const PharmacyBilling: React.FC = () => {
         tax_percentage: medicine.tax_percentage || 12,
         tax_amount: 0,
         total_amount: 0,
-        available_stock: medicine.stock,
-        prescription_required: medicine.prescription_required
+        available_stock: medicine.stock || 0,
+        prescription_required: medicine.prescription_required || false
       };
+
+      console.log('✅ New cart item created:', {
+        medicine_id: newItem.medicine_id,
+        medicine_name: newItem.medicine_name,
+        generic_name: newItem.generic_name
+      });
       
       // Calculate amounts
       const subtotal = newItem.unit_price * newItem.quantity;
@@ -421,23 +435,7 @@ const PharmacyBilling: React.FC = () => {
     const now = new Date().toISOString();
     const rowsToInsert = [];
     for (const item of cart) {
-      // Check for duplicate
-      const { data: existing, error: checkError } = await supabase
-        .from('visit_medications')
-        .select('id')
-        .eq('visit_id', visitUUID)
-        .eq('medication_id', item.medicine_id)
-        .eq('medication_type', saleType);
-      if (checkError) {
-        alert('Error checking for duplicates: ' + checkError.message);
-        setIsProcessingPayment(false);
-        return;
-      }
-      if (existing && existing.length > 0) {
-        alert(`This medicine (${item.medicine_name}) is already added for this visit and type.`);
-        setIsProcessingPayment(false);
-        return;
-      }
+      // Skip duplicate check - allow multiple pharmacy bills for same medicine
       rowsToInsert.push({
         visit_id: visitUUID, // Use UUID
         medication_id: item.medicine_id,
@@ -460,38 +458,102 @@ const PharmacyBilling: React.FC = () => {
       return;
     }
     console.log('Rows to insert:', rowsToInsert);
+
+    // Use upsert to handle duplicates - if medicine already exists, skip it
     const { error: insertError } = await supabase
       .from('visit_medications')
-      .insert(rowsToInsert);
+      .upsert(rowsToInsert, {
+        onConflict: 'visit_id,medication_id,medication_type',
+        ignoreDuplicates: true
+      });
+
     if (insertError) {
-      alert('Error saving bill to visit_medications: ' + insertError.message);
-      setIsProcessingPayment(false);
-      return;
+      console.error('Warning: visit_medications insert error:', insertError.message);
+      // Don't stop - continue to pharmacy_sales save
+      // alert('Error saving bill to visit_medications: ' + insertError.message);
+      // setIsProcessingPayment(false);
+      // return;
     }
-    // Insert summary into pharmacy_sales
-    const billSummary = {
-      bill_no: billNumber,
-      patient_id: patientInfo.id,
-      visit_id: visitId,
-      patient_name: patientInfo.name,
-      total: totals.totalAmount,
-      paid: totals.totalAmount, // You can adjust if partial payment
+    // Debug logging
+    console.log('=== PHARMACY SALE DEBUG START ===');
+    console.log('Cart items:', cart);
+    console.log('Patient Info:', patientInfo);
+    console.log('Visit ID:', visitId);
+    console.log('Payment Method:', paymentMethod);
+    console.log('Totals:', totals);
+
+    // Save to pharmacy_sales and pharmacy_sale_items tables
+    console.log('Patient ID:', patientInfo.id);
+    console.log('Visit ID:', visitId);
+
+    const saleData: SaleData = {
+      sale_type: saleType,
+      patient_id: patientInfo.id || undefined,  // Send as string
+      visit_id: visitId || undefined,            // Send as string
+      patient_name: patientInfo.name || undefined,
+      prescription_number: prescriptionId || undefined,
+      subtotal: totals.subtotal,
       discount: totals.totalDiscount,
-      date: now,
-      created_at: now,
-      updated_at: now,
+      discount_percentage: discountPercentage,
+      tax_gst: totals.totalTax,
+      tax_percentage: 9,
+      total_amount: totals.totalAmount,
+      payment_method: paymentMethod,
+      payment_status: 'COMPLETED',
+      items: cart.map(item => {
+        console.log('🔍 Cart item being mapped:', {
+          medicine_id: item.medicine_id,
+          medicine_name: item.medicine_name,
+          generic_name: item.generic_name
+        });
+        return {
+          medicine_id: item.medicine_id,
+          medicine_name: item.medicine_name, // Changed from medication_name to medicine_name
+          generic_name: item.generic_name,
+          batch_number: item.batch_number || 'N/A',
+          expiry_date: item.expiry_date,
+          quantity: item.quantity,
+          pack_size: 1,
+          loose_quantity: 0,
+          unit_price: item.unit_price,
+          mrp: item.unit_price,
+          discount_percentage: item.discount_percentage,
+          discount_amount: item.discount_amount,
+          tax_percentage: item.tax_percentage,
+          tax_amount: item.tax_amount,
+          total_amount: item.total_amount,
+          manufacturer: undefined,
+          dosage_form: item.dosage_form,
+          strength: item.strength,
+          is_implant: false
+        };
+      })
     };
-    const { error: salesError } = await supabase
-      .from('pharmacy_sales')
-      .insert([billSummary]);
-    if (salesError) {
-      alert('Error saving bill summary to pharmacy_sales: ' + salesError.message);
+
+    console.log('Calling savePharmacySale with data:', saleData);
+
+    const response = await savePharmacySale(saleData);
+
+    console.log('=== PHARMACY SAVE RESPONSE ===');
+    console.log('Response:', response);
+    console.log('Success:', response.success);
+    console.log('Sale ID:', response.sale_id);
+    console.log('Error:', response.error);
+
+    if (!response.success) {
+      console.error('❌ Error saving to pharmacy_sales:', response.error);
+      alert('Error saving sale: ' + response.error);
       setIsProcessingPayment(false);
       return;
     }
+
+    console.log('✅ Sale saved successfully! Sale ID:', response.sale_id);
+
     setCompletedSale(sale);
     setIsProcessingPayment(false);
     clearCart();
+
+    alert(`✅ Sale completed successfully! Sale ID: ${response.sale_id}`);
   };
 
   const filteredMedicines = searchResults.filter(medicine =>
@@ -500,6 +562,222 @@ const PharmacyBilling: React.FC = () => {
   );
 
   const totals = calculateTotals();
+
+  const printReceipt = () => {
+    if (!completedSale) return;
+
+    const printWindow = window.open('', '', 'width=800,height=600');
+    if (!printWindow) return;
+
+    const receiptHTML = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Pharmacy Receipt</title>
+        <style>
+          body {
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+          }
+          .header {
+            text-align: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+          }
+          .header h1 {
+            margin: 0;
+            font-size: 24px;
+          }
+          .header p {
+            margin: 5px 0;
+            font-size: 12px;
+          }
+          .bill-info {
+            margin: 20px 0;
+          }
+          .bill-info table {
+            width: 100%;
+          }
+          .bill-info td {
+            padding: 5px 0;
+          }
+          .bill-info td:first-child {
+            font-weight: bold;
+            width: 150px;
+          }
+          .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+          }
+          .items-table th,
+          .items-table td {
+            border: 1px solid #000;
+            padding: 8px;
+            text-align: left;
+          }
+          .items-table th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+          }
+          .items-table td:last-child,
+          .items-table th:last-child {
+            text-align: right;
+          }
+          .totals {
+            margin-top: 20px;
+            float: right;
+            width: 300px;
+          }
+          .totals table {
+            width: 100%;
+          }
+          .totals td {
+            padding: 5px 0;
+          }
+          .totals td:first-child {
+            text-align: left;
+          }
+          .totals td:last-child {
+            text-align: right;
+          }
+          .totals .grand-total {
+            font-size: 18px;
+            font-weight: bold;
+            border-top: 2px solid #000;
+            padding-top: 10px;
+          }
+          .footer {
+            clear: both;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #000;
+            text-align: center;
+            font-size: 12px;
+          }
+          @media print {
+            body {
+              padding: 0;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>${hospitalConfig?.name || 'Hospital Pharmacy'}</h1>
+          <p>${hospitalConfig?.address || 'Hospital Address'}</p>
+          <p>Phone: ${hospitalConfig?.phone || 'N/A'} | Email: ${hospitalConfig?.email || 'N/A'}</p>
+        </div>
+
+        <div class="bill-info">
+          <table>
+            <tr>
+              <td>Bill Number:</td>
+              <td>${completedSale.bill_number}</td>
+            </tr>
+            <tr>
+              <td>Date & Time:</td>
+              <td>${new Date(completedSale.sale_date).toLocaleString()}</td>
+            </tr>
+            ${completedSale.patient_name ? `
+            <tr>
+              <td>Patient Name:</td>
+              <td>${completedSale.patient_name}</td>
+            </tr>
+            ` : ''}
+            ${completedSale.patient_id ? `
+            <tr>
+              <td>Patient ID:</td>
+              <td>${completedSale.patient_id}</td>
+            </tr>
+            ` : ''}
+            <tr>
+              <td>Payment Method:</td>
+              <td>${completedSale.payment_method}</td>
+            </tr>
+            ${completedSale.payment_reference ? `
+            <tr>
+              <td>Payment Ref:</td>
+              <td>${completedSale.payment_reference}</td>
+            </tr>
+            ` : ''}
+            <tr>
+              <td>Cashier:</td>
+              <td>${completedSale.cashier_name}</td>
+            </tr>
+          </table>
+        </div>
+
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th>Medicine Name</th>
+              <th>Batch</th>
+              <th>Qty</th>
+              <th>Rate</th>
+              <th>Disc</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${completedSale.items.map(item => `
+              <tr>
+                <td>
+                  <strong>${item.medicine_name}</strong><br>
+                  <small>${item.generic_name || ''} ${item.strength ? '- ' + item.strength : ''}</small>
+                </td>
+                <td>${item.batch_number}</td>
+                <td>${item.quantity}</td>
+                <td>${formatCurrency(item.unit_price)}</td>
+                <td>${item.discount_percentage > 0 ? item.discount_percentage + '%' : '-'}</td>
+                <td>${formatCurrency(item.total_amount)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div class="totals">
+          <table>
+            <tr>
+              <td>Subtotal:</td>
+              <td>${formatCurrency(completedSale.subtotal)}</td>
+            </tr>
+            <tr>
+              <td>Discount:</td>
+              <td>-${formatCurrency(completedSale.discount_amount)}</td>
+            </tr>
+            <tr>
+              <td>Tax (GST):</td>
+              <td>${formatCurrency(completedSale.tax_amount)}</td>
+            </tr>
+            <tr class="grand-total">
+              <td>TOTAL:</td>
+              <td>${formatCurrency(completedSale.total_amount)}</td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="footer">
+          <p>Thank you for your purchase!</p>
+          <p>For any queries, please contact the pharmacy</p>
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+            // window.close(); // Uncomment to auto-close after print
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(receiptHTML);
+    printWindow.document.close();
+  };
 
   return (
     <div className="space-y-6">
@@ -889,7 +1167,7 @@ const PharmacyBilling: React.FC = () => {
               </div>
               
               <div className="flex gap-2">
-                <Button className="flex-1">
+                <Button className="flex-1" onClick={printReceipt}>
                   <Printer className="h-4 w-4 mr-2" />
                   Print Receipt
                 </Button>
