@@ -103,7 +103,7 @@ const DischargedPatients = () => {
   const { data: visits, isLoading, error, refetch } = useQuery({
     queryKey: ['discharged-patients', searchTerm, statusFilter, patientTypeFilter, billingStatusFilter, corporateFilter, sortBy, sortOrder, hospitalConfig?.name, availableCorporates?.length],
     queryFn: async () => {
-      console.log('🏥 Fetching discharged patients for hospital:', hospitalConfig?.name, '(IPD & Emergency only)');
+      console.log('🏥 Fetching discharged patients for hospital:', hospitalConfig?.name, '(IPD, IPD (Inpatient) & Emergency only)');
 
       let query = supabase
         .from('visits')
@@ -122,7 +122,7 @@ const DischargedPatients = () => {
           )
         `)
         .not('discharge_date', 'is', null) // Only show discharged patients
-        .in('patient_type', ['IPD', 'Emergency']) // Only show IPD and Emergency patients, exclude OPD
+        .in('patient_type', ['IPD', 'IPD (Inpatient)', 'Emergency']) // Only show IPD and Emergency patients, exclude OPD
         .order(sortBy, { ascending: sortOrder === 'asc' });
 
       // Apply hospital filter if hospitalConfig exists
@@ -163,7 +163,7 @@ const DischargedPatients = () => {
         throw error;
       }
 
-      console.log(`🏥 Found ${data?.length || 0} discharged patients (IPD & Emergency) for hospital:`, hospitalConfig?.name);
+      console.log(`🏥 Found ${data?.length || 0} discharged patients (IPD, IPD (Inpatient) & Emergency) for hospital:`, hospitalConfig?.name);
       return data as Visit[];
     },
     staleTime: 30000, // 30 seconds
@@ -288,7 +288,7 @@ const DischargedPatients = () => {
           <div>
             <h1 className="text-2xl font-bold">Discharged Patients</h1>
             <p className="text-muted-foreground">
-              View and manage discharged IPD and Emergency patients
+              View and manage all discharged inpatients (IPD & Emergency)
             </p>
           </div>
         </div>
@@ -344,6 +344,7 @@ const DischargedPatients = () => {
               <SelectContent>
                 <SelectItem value="all">All (IPD & Emergency)</SelectItem>
                 <SelectItem value="IPD">IPD Only</SelectItem>
+                <SelectItem value="IPD (Inpatient)">IPD (Inpatient) Only</SelectItem>
                 <SelectItem value="Emergency">Emergency Only</SelectItem>
               </SelectContent>
             </Select>
@@ -433,7 +434,7 @@ const DischargedPatients = () => {
               <p className="text-gray-500">
                 {searchTerm || statusFilter !== 'all' || patientTypeFilter !== 'all' || billingStatusFilter !== 'all' || corporateFilter !== 'all'
                   ? 'Try adjusting your filters or search terms.'
-                  : 'No IPD or Emergency patients have been discharged yet.'}
+                  : 'No inpatients (IPD/Emergency) have been discharged yet.'}
               </p>
             </div>
           ) : (

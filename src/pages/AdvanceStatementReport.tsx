@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ArrowLeft, FileText, Search, Download, Printer } from 'lucide-react';
@@ -18,6 +19,7 @@ import '@/styles/print.css';
 
 const AdvanceStatementReport = () => {
   const navigate = useNavigate();
+  const { hospitalConfig } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -35,9 +37,10 @@ const AdvanceStatementReport = () => {
 
   // Fetch advance statement data
   const { data: allData = [], isLoading } = useQuery({
-    queryKey: ['advance-statement-report-currently-admitted', debouncedSearchTerm, dateFrom, dateTo],
+    queryKey: ['advance-statement-report-currently-admitted', hospitalConfig?.name, debouncedSearchTerm, dateFrom, dateTo],
     queryFn: async () => {
-      console.log('🔍 Fetching advance statement data...', { debouncedSearchTerm, dateFrom, dateTo });
+      console.log('🏥 Fetching advance statement data for hospital:', hospitalConfig?.name);
+      console.log('🔍 Search params:', { debouncedSearchTerm, dateFrom, dateTo });
 
       let query = supabase
         .from('visits')
@@ -50,13 +53,17 @@ const AdvanceStatementReport = () => {
           admission_date,
           discharge_date,
           file_status,
-          patients (
+          ward_allotted,
+          room_allotted,
+          patients!inner (
             id,
             name,
             patients_id,
             age,
             gender,
-            insurance_person_no
+            insurance_person_no,
+            hospital_name,
+            corporate
           ),
           visit_diagnoses (
             diagnoses (
@@ -69,12 +76,22 @@ const AdvanceStatementReport = () => {
               id,
               name,
               code,
-              category
+              category,
+              cost,
+              NABH_NABL_Rate,
+              Non_NABH_NABL_Rate
             )
           )
         `)
         .not('admission_date', 'is', null) // Only get visits with admission date
-        .is('discharge_date', null); // Only get visits WITHOUT discharge date (currently admitted)
+        .is('discharge_date', null) // Only get visits WITHOUT discharge date (currently admitted)
+        .eq('patient_type', 'IPD'); // Only IPD patients (match Currently Admitted Patients)
+
+      // Apply hospital filter if hospitalConfig exists
+      if (hospitalConfig?.name) {
+        query = query.eq('patients.hospital_name', hospitalConfig.name);
+        console.log('🏥 Applied hospital filter for:', hospitalConfig.name);
+      }
 
       // Remove search filter from query - we'll filter on frontend
       // if (debouncedSearchTerm) {
@@ -104,13 +121,47 @@ const AdvanceStatementReport = () => {
         throw error;
       }
 
-      console.log('✅ Fetched advance statement data:', data?.length || 0, 'records');
+      console.log(`✅ Fetched ${data?.length || 0} advance statement records for hospital: ${hospitalConfig?.name}`);
       console.log('Sample data:', data?.[0]);
-      console.log('🔍 Query filters applied: admission_date not null, discharge_date is null');
+      console.log('🔍 Query filters applied: admission_date not null, discharge_date is null, patient_type = IPD, hospital_name =', hospitalConfig?.name);
       console.log('🔍 Date filters: from:', dateFrom, 'to:', dateTo);
       console.log('🔍 Raw data length:', data?.length || 0);
 
-      return data || [];
+      // Fetch room_management data for ward types
+      const wardIds = data
+        ?.map(visit => visit.ward_allotted)
+        .filter((id): id is string => id !== null && id !== undefined) || [];
+
+      const uniqueWardIds = Array.from(new Set(wardIds));
+
+      let wardMapping: Record<string, string> = {};
+
+      if (uniqueWardIds.length > 0) {
+        const { data: wardData, error: wardError } = await supabase
+          .from('room_management')
+          .select('ward_id, ward_type')
+          .in('ward_id', uniqueWardIds);
+
+        if (wardError) {
+          console.error('Error fetching ward data:', wardError);
+        } else if (wardData) {
+          // Create a mapping of ward_id to ward_type
+          wardMapping = wardData.reduce((acc, ward) => {
+            acc[ward.ward_id] = ward.ward_type;
+            return acc;
+          }, {} as Record<string, string>);
+        }
+      }
+
+      // Merge ward data with visits
+      const visitsWithRoomInfo = data?.map(visit => ({
+        ...visit,
+        room_management: visit.ward_allotted && wardMapping[visit.ward_allotted]
+          ? { ward_type: wardMapping[visit.ward_allotted] }
+          : null
+      })) || [];
+
+      return visitsWithRoomInfo;
     },
   });
 
@@ -197,11 +248,14 @@ const AdvanceStatementReport = () => {
           <table>
             <thead>
               <tr>
-                <th style="width: 6%;">Sr. No.</th>
-                <th style="width: 25%;">Patient Details</th>
-                <th style="width: 20%;">Diagnosis</th>
-                <th style="width: 15%;">Referral Letter</th>
-                <th style="width: 34%;">Planned Surgery or Procedure and Cost</th>
+                <th style="width: 4%;">Sr. No.</th>
+                <th style="width: 18%;">Patient Details</th>
+                <th style="width: 10%;">Corporate Type</th>
+                <th style="width: 10%;">Room/Bed</th>
+                <th style="width: 9%;">Admission Date</th>
+                <th style="width: 13%;">Diagnosis</th>
+                <th style="width: 11%;">Referral Letter</th>
+                <th style="width: 25%;">Planned Surgery or Procedure and Cost</th>
               </tr>
             </thead>
             <tbody>
@@ -223,11 +277,24 @@ const AdvanceStatementReport = () => {
                 const surgeries = item.visit_surgeries?.map(vs => vs.cghs_surgery ? {
                   name: vs.cghs_surgery.name,
                   code: vs.cghs_surgery.code,
-                  category: vs.cghs_surgery.category
+                  category: vs.cghs_surgery.category,
+                  cost: vs.cghs_surgery.cost,
+                  NABH_NABL_Rate: vs.cghs_surgery.NABH_NABL_Rate,
+                  Non_NABH_NABL_Rate: vs.cghs_surgery.Non_NABH_NABL_Rate
                 } : null).filter(Boolean) || [];
 
-                const surgeryText = surgeries.length > 0 ? 
-                  surgeries.map(surgery => `<div class="surgery-item"><strong>${surgery.name}</strong><br/>Code: ${surgery.code} | Category: ${surgery.category}</div>`).join('') : 
+                const surgeryText = surgeries.length > 0 ?
+                  surgeries.map(surgery => {
+                    let costInfo = '';
+                    if (surgery.cost || surgery.NABH_NABL_Rate || surgery.Non_NABH_NABL_Rate) {
+                      costInfo = '<br/><span style="color: #16a34a; font-size: 11px;">';
+                      if (surgery.cost) costInfo += `Cost: ₹${surgery.cost} `;
+                      if (surgery.NABH_NABL_Rate) costInfo += `| NABH/NABL: ₹${surgery.NABH_NABL_Rate} `;
+                      if (surgery.Non_NABH_NABL_Rate) costInfo += `| Non-NABH/NABL: ₹${surgery.Non_NABH_NABL_Rate}`;
+                      costInfo += '</span>';
+                    }
+                    return `<div class="surgery-item"><strong>${surgery.name}</strong><br/>Code: ${surgery.code} | Category: ${surgery.category}${costInfo}</div>`;
+                  }).join('') :
                   'No surgery planned';
 
                 // Get Referral Letter status
@@ -242,10 +309,27 @@ const AdvanceStatementReport = () => {
                 
                 const referralLetterText = getReferralLetterDisplay(item.file_status);
 
+                // Room/Bed text
+                const roomBedText = item.room_management?.ward_type && item.room_allotted
+                  ? `<strong>${item.room_management.ward_type}</strong><br/>Room ${item.room_allotted}`
+                  : 'Not Assigned';
+
+                // Admission date text
+                const admissionDateText = item.admission_date
+                  ? format(new Date(item.admission_date), 'dd/MM/yyyy')
+                  : 'N/A';
+
+                // Corporate type text - single indigo color
+                const corporateText = patient?.corporate || 'N/A';
+                const corporateColor = patient?.corporate ? '#4f46e5' : '#6b7280'; // indigo-600 or gray
+
                 return `
                   <tr>
                     <td style="text-align: center;">${index + 1}</td>
                     <td>${patientDetailsText}</td>
+                    <td style="text-align: center;"><strong style="color: ${corporateColor};">${corporateText}</strong></td>
+                    <td>${roomBedText}</td>
+                    <td style="text-align: center;">${admissionDateText}</td>
                     <td>${diagnosisText}</td>
                     <td style="text-align: center;">${referralLetterText}</td>
                     <td>${surgeryText}</td>
@@ -277,16 +361,38 @@ const AdvanceStatementReport = () => {
 
   const handleExport = () => {
     // Create CSV content
-    const headers = ['Sr. No.', 'Patient Details', 'Diagnosis', 'Referral Letter', 'Planned Surgery or Procedure and Cost'];
+    const headers = ['Sr. No.', 'Patient Details', 'Corporate Type', 'Room/Bed', 'Admission Date', 'Diagnosis', 'Referral Letter', 'Planned Surgery or Procedure and Cost'];
     const csvContent = [
       headers.join(','),
       ...advanceData.map((item, index) => {
         const patient = item.patients;
         const patientDetails = `${patient?.name || 'N/A'} (Visit: ${item.visit_id || 'N/A'}, Patient ID: ${patient?.patients_id || 'N/A'}, Age: ${patient?.age || 'N/A'}, Sex: ${patient?.gender || 'N/A'})`;
 
+        // Room/Bed
+        const roomBed = item.room_management?.ward_type && item.room_allotted
+          ? `${item.room_management.ward_type} - Room ${item.room_allotted}`
+          : 'Not Assigned';
+
+        // Admission Date
+        const admissionDate = item.admission_date
+          ? format(new Date(item.admission_date), 'dd/MM/yyyy')
+          : 'N/A';
+
+        // Corporate Type
+        const corporate = patient?.corporate || 'N/A';
+
         const diagnoses = item.visit_diagnoses?.map(vd => vd.diagnoses?.name).filter(Boolean).join(', ') || 'No diagnosis';
-        const surgeries = item.visit_surgeries?.map(vs => vs.cghs_surgery ? `${vs.cghs_surgery.name} (${vs.cghs_surgery.code})` : null).filter(Boolean).join(', ') || 'No surgery planned';
-        
+        const surgeries = item.visit_surgeries?.map(vs => {
+          if (!vs.cghs_surgery) return null;
+          let surgeryInfo = `${vs.cghs_surgery.name} (Code: ${vs.cghs_surgery.code})`;
+          const costs = [];
+          if (vs.cghs_surgery.cost) costs.push(`Cost: ₹${vs.cghs_surgery.cost}`);
+          if (vs.cghs_surgery.NABH_NABL_Rate) costs.push(`NABH/NABL: ₹${vs.cghs_surgery.NABH_NABL_Rate}`);
+          if (vs.cghs_surgery.Non_NABH_NABL_Rate) costs.push(`Non-NABH/NABL: ₹${vs.cghs_surgery.Non_NABH_NABL_Rate}`);
+          if (costs.length > 0) surgeryInfo += ` [${costs.join(', ')}]`;
+          return surgeryInfo;
+        }).filter(Boolean).join(', ') || 'No surgery planned';
+
         // Get Referral Letter status
         const getReferralLetterDisplay = (status: string | null) => {
           switch (status) {
@@ -296,12 +402,15 @@ const AdvanceStatementReport = () => {
             default: return 'Not Set';
           }
         };
-        
+
         const referralLetter = getReferralLetterDisplay(item.file_status);
 
         return [
           index + 1,
           `"${patientDetails}"`,
+          `"${corporate}"`,
+          `"${roomBed}"`,
+          `"${admissionDate}"`,
           `"${diagnoses}"`,
           `"${referralLetter}"`,
           `"${surgeries}"`
@@ -473,6 +582,9 @@ const AdvanceStatementReport = () => {
                 <TableRow>
                   <TableHead className="w-16">Sr. No.</TableHead>
                   <TableHead className="min-w-[250px]">Patient Details</TableHead>
+                  <TableHead className="min-w-[150px]">Corporate Type</TableHead>
+                  <TableHead className="min-w-[150px]">Room/Bed</TableHead>
+                  <TableHead className="min-w-[120px]">Admission Date</TableHead>
                   <TableHead className="min-w-[200px]">Diagnosis</TableHead>
                   <TableHead className="min-w-[300px]">Planned Surgery or Procedure and Cost</TableHead>
                 </TableRow>
@@ -480,13 +592,13 @@ const AdvanceStatementReport = () => {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8">
+                    <TableCell colSpan={7} className="text-center py-8">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : advanceData.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                       No data found
                     </TableCell>
                   </TableRow>
@@ -522,7 +634,10 @@ const AdvanceStatementReport = () => {
                     const surgeries = item.visit_surgeries?.map(vs => vs.cghs_surgery ? {
                       name: vs.cghs_surgery.name,
                       code: vs.cghs_surgery.code,
-                      category: vs.cghs_surgery.category
+                      category: vs.cghs_surgery.category,
+                      cost: vs.cghs_surgery.cost,
+                      NABH_NABL_Rate: vs.cghs_surgery.NABH_NABL_Rate,
+                      Non_NABH_NABL_Rate: vs.cghs_surgery.Non_NABH_NABL_Rate
                     } : null).filter(Boolean) || [];
 
                     const surgeryDisplay = surgeries.length > 0 ? (
@@ -533,6 +648,13 @@ const AdvanceStatementReport = () => {
                             <div className="text-xs text-gray-600">
                               Code: {surgery.code} | Category: {surgery.category}
                             </div>
+                            {(surgery.cost || surgery.NABH_NABL_Rate || surgery.Non_NABH_NABL_Rate) && (
+                              <div className="text-xs text-green-700 mt-1 space-y-0.5">
+                                {surgery.cost && <div>Cost: ₹{surgery.cost}</div>}
+                                {surgery.NABH_NABL_Rate && <div>NABH/NABL Rate: ₹{surgery.NABH_NABL_Rate}</div>}
+                                {surgery.Non_NABH_NABL_Rate && <div>Non-NABH/NABL Rate: ₹{surgery.Non_NABH_NABL_Rate}</div>}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -540,10 +662,37 @@ const AdvanceStatementReport = () => {
                       <span className="text-gray-500">No surgery planned</span>
                     );
 
+                    // Room/Bed display
+                    const roomBedDisplay = item.room_management?.ward_type && item.room_allotted ? (
+                      <div className="space-y-1">
+                        <div className="font-semibold text-blue-700">{item.room_management.ward_type}</div>
+                        <div className="text-sm text-gray-600">Room {item.room_allotted}</div>
+                      </div>
+                    ) : (
+                      <span className="text-gray-500">Not Assigned</span>
+                    );
+
+                    // Admission date display
+                    const admissionDateDisplay = item.admission_date ? (
+                      <span className="text-sm">{format(new Date(item.admission_date), 'dd/MM/yyyy')}</span>
+                    ) : (
+                      <span className="text-gray-500">N/A</span>
+                    );
+
+                    // Corporate type display - single indigo color
+                    const corporateDisplay = patient?.corporate ? (
+                      <span className="text-sm font-medium text-indigo-600">{patient.corporate}</span>
+                    ) : (
+                      <span className="text-gray-500">N/A</span>
+                    );
+
                     return (
                       <TableRow key={item.id}>
                         <TableCell className="text-center">{index + 1}</TableCell>
                         <TableCell>{patientDetails}</TableCell>
+                        <TableCell>{corporateDisplay}</TableCell>
+                        <TableCell>{roomBedDisplay}</TableCell>
+                        <TableCell>{admissionDateDisplay}</TableCell>
                         <TableCell>{diagnosisDisplay}</TableCell>
                         <TableCell>{surgeryDisplay}</TableCell>
                       </TableRow>

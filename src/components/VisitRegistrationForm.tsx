@@ -226,9 +226,6 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
           .from('visits')
           .update({
             visit_date: format(visitDate, 'yyyy-MM-dd'),
-            admission_date: (formData.patientType === 'IPD' || formData.patientType === 'IPD (Inpatient)' || formData.patientType === 'Emergency')
-              ? format(visitDate, 'yyyy-MM-dd')
-              : null, // Set admission_date for IPD/Emergency patients
             visit_type: formData.visitType,
             appointment_with: formData.appointmentWith,
             reason_for_visit: formData.reasonForVisit,
@@ -299,9 +296,6 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
             visit_id: visitId, // TEXT field for custom ID
             patient_id: patient.id,
             visit_date: format(visitDate, 'yyyy-MM-dd'),
-            admission_date: (formData.patientType === 'IPD' || formData.patientType === 'IPD (Inpatient)' || formData.patientType === 'Emergency')
-              ? format(visitDate, 'yyyy-MM-dd')
-              : null, // Set admission_date for IPD/Emergency patients
             visit_type: formData.visitType,
             appointment_with: formData.appointmentWith,
             reason_for_visit: formData.reasonForVisit,

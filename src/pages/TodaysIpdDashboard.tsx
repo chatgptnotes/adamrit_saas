@@ -1158,6 +1158,7 @@ const TodaysIpdDashboard = () => {
         .from('visits')
         .select(`
           *,
+          discharge_date,
           patients!inner(
             id,
             name,
@@ -1185,9 +1186,14 @@ const TodaysIpdDashboard = () => {
 
       console.log(`✅ TodaysIpdDashboard: Found ${data?.length || 0} visits for ${hospitalConfig?.name}`);
 
-      // Debug: Check comments in fetched data
+      // Debug: Check comments and discharge_date in fetched data
       console.log('📊 Sample visit data (first visit):', data?.[0]);
       console.log('💬 Comments in first visit:', data?.[0]?.comments);
+      console.log('📅 Discharge date in first visit:', data?.[0]?.discharge_date);
+
+      // Log all visits with discharge dates
+      const visitsWithDischargeDate = data?.filter(v => v.discharge_date) || [];
+      console.log(`📅 Found ${visitsWithDischargeDate.length} visits with discharge_date out of ${data?.length || 0} total visits`);
 
       // Log all visits with comments
       const visitsWithComments = data?.filter(v => v.comments) || [];
@@ -2294,7 +2300,17 @@ const TodaysIpdDashboard = () => {
                     {visit.admission_date ? `${Math.ceil((((visit.discharge_date ? new Date(visit.discharge_date).getTime() : Date.now()) - new Date(visit.admission_date).getTime())) / (1000 * 60 * 60 * 24))} days` : '—'}
                   </TableCell>
                   <TableCell>
-                    {visit.discharge_date ? format(new Date(visit.discharge_date), 'MMM dd, yyyy HH:mm') : '—'}
+                    {visit.discharge_date ? (
+                      (() => {
+                        try {
+                          console.log('🗓️ Discharge date for', visit.patients?.name, ':', visit.discharge_date, 'Type:', typeof visit.discharge_date);
+                          return format(new Date(visit.discharge_date), 'MMM dd, yyyy HH:mm');
+                        } catch (error) {
+                          console.error('❌ Date format error for', visit.patients?.name, ':', error, 'Value:', visit.discharge_date);
+                          return String(visit.discharge_date); // Show raw value if format fails
+                        }
+                      })()
+                    ) : '—'}
                   </TableCell>
                   <TableCell>
                     <Button
