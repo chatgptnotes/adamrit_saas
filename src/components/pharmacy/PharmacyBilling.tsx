@@ -50,12 +50,16 @@ import { savePharmacySale, SaleData } from '@/lib/pharmacy-billing-service';
 interface CartItem {
   id: string;
   medicine_id: string;
+  item_code?: string;
   medicine_name: string;
   generic_name?: string;
   strength?: string;
   dosage_form?: string;
+  pack?: string;
+  administration_time?: string;
   batch_number: string;
   expiry_date: string;
+  mrp: number;
   unit_price: number;
   quantity: number;
   discount_percentage: number;
@@ -114,6 +118,9 @@ const PharmacyBilling: React.FC = () => {
 
   const [visitId, setVisitId] = useState('');
   const [visitOptions, setVisitOptions] = useState<string[]>([]);
+  const [doctorName, setDoctorName] = useState('');
+  const [allEncounter, setAllEncounter] = useState(false);
+  const [encounterType, setEncounterType] = useState('(Private) - OPD');
 
   // Sale type options for allowed values (as per DB constraint)
   const saleTypeOptions = [
@@ -211,6 +218,7 @@ const PharmacyBilling: React.FC = () => {
       if (!patientInfo.id || patientInfo.id.length < 2) {
         setVisitOptions([]);
         setVisitId('');
+        setDoctorName('');
         return;
       }
       // 1. Get patient row from patients table using patients_id
@@ -223,25 +231,50 @@ const PharmacyBilling: React.FC = () => {
       if (patientError || !patientRows || patientRows.length === 0) {
         setVisitOptions([]);
         setVisitId('');
+        setDoctorName('');
         return;
       }
       const patientRow = patientRows[0];
-      // 2. Use id to get visits, sorted by created_at DESC
+      // 2. Use id to get visits with appointment_with, sorted by created_at DESC
       const { data: visits, error: visitError } = await supabase
         .from('visits')
-        .select('visit_id, created_at')
+        .select('visit_id, created_at, appointment_with')
         .eq('patient_id', patientRow.id)
         .order('created_at', { ascending: false });
       if (visitError || !visits || visits.length === 0) {
         setVisitOptions([]);
         setVisitId('');
+        setDoctorName('');
         return;
       }
       setVisitOptions(visits.map(v => v.visit_id));
       setVisitId(visits[0].visit_id); // Auto-select latest
+      setDoctorName(visits[0].appointment_with || ''); // Set doctor name from first visit
     };
     fetchVisitsForPatient();
   }, [patientInfo.id]);
+
+  // Fetch doctor name when visit ID changes
+  useEffect(() => {
+    const fetchDoctorName = async () => {
+      if (!visitId) {
+        setDoctorName('');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('visits')
+        .select('appointment_with')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (data && !error) {
+        setDoctorName(data.appointment_with || '');
+      }
+    };
+
+    fetchDoctorName();
+  }, [visitId]);
 
   const handleSelectPatient = (patient: { name: string, patients_id: string }) => {
     setPatientInfo({ name: patient.name, id: patient.patients_id, phone: '' });
@@ -271,12 +304,16 @@ const PharmacyBilling: React.FC = () => {
       const newItem: CartItem = {
         id: Date.now().toString(),
         medicine_id: medicine.id,
+        item_code: medicine.item_code || '',
         medicine_name: medicine.name || 'Unknown Medicine',
         generic_name: medicine.generic_name || '',
         strength: medicine.strength || '',
         dosage_form: medicine.dosage || '',
+        pack: '',
+        administration_time: '',
         batch_number: medicine.batch_number || 'BATCH-001',
         expiry_date: medicine.expiry_date || '',
+        mrp: medicine.price_per_strip || 0,
         unit_price: medicine.price_per_strip || 0,
         quantity: 1,
         discount_percentage: 0,
@@ -492,6 +529,7 @@ const PharmacyBilling: React.FC = () => {
       visit_id: visitId || undefined,            // Send as string
       patient_name: patientInfo.name || undefined,
       prescription_number: prescriptionId || undefined,
+      hospital_name: hospitalConfig?.name || undefined, // Add hospital name
       subtotal: totals.subtotal,
       discount: totals.totalDiscount,
       discount_percentage: discountPercentage,
@@ -812,6 +850,58 @@ const PharmacyBilling: React.FC = () => {
               <CardTitle>Sale Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="grid grid-cols-4 gap-4">
+                <div>
+                  <label className="text-sm font-medium">Patient Name / ID</label>
+                  <div className="relative">
+                    <Input
+                      placeholder="Type To Search"
+                      value={patientInfo.name}
+                      onChange={(e) => setPatientInfo(prev => ({...prev, name: e.target.value}))}
+                      onFocus={() => { if (patientInfo.name) setShowPatientDropdown(true); }}
+                      onBlur={() => setTimeout(() => setShowPatientDropdown(false), 100)}
+                    />
+                    {showPatientDropdown && patientSearchResults.length > 0 && (
+                      <div className="absolute z-10 w-full bg-white border rounded mt-1 max-h-60 overflow-y-auto">
+                        {isSearchingPatient
+                          ? <div className="p-2">Searching...</div>
+                          : patientSearchResults.map(p => (
+                              <div
+                                key={p.patients_id}
+                                className="p-2 hover:bg-gray-100 cursor-pointer"
+                                onMouseDown={() => handleSelectPatient(p)}
+                              >
+                                {p.name} ({p.patients_id})
+                              </div>
+                            ))
+                        }
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-end gap-2">
+                  <label className="flex items-center space-x-2 pb-2">
+                    <input
+                      type="checkbox"
+                      checked={allEncounter}
+                      onChange={(e) => setAllEncounter(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span className="text-sm font-medium">All Encounter</span>
+                  </label>
+                  <span className="text-sm pb-2">{encounterType}</span>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Doctor Name</label>
+                  <Input
+                    placeholder="Type To Search"
+                    value={doctorName}
+                    onChange={(e) => setDoctorName(e.target.value)}
+                    readOnly
+                    className="bg-gray-50"
+                  />
+                </div>
+              </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="text-sm font-medium">Sale Type</label>
@@ -852,32 +942,6 @@ const PharmacyBilling: React.FC = () => {
                       value={visitId}
                       onChange={e => setVisitId(e.target.value)}
                     />
-                  )}
-                </div>
-                <div className="relative">
-                  <label className="text-sm font-medium">Patient Name</label>
-                  <Input
-                    placeholder="Enter patient name"
-                    value={patientInfo.name}
-                    onChange={(e) => setPatientInfo(prev => ({...prev, name: e.target.value}))}
-                    onFocus={() => { if (patientInfo.name) setShowPatientDropdown(true); }}
-                    onBlur={() => setTimeout(() => setShowPatientDropdown(false), 100)}
-                  />
-                  {showPatientDropdown && patientSearchResults.length > 0 && (
-                    <div className="absolute z-10 w-full bg-white border rounded mt-1 max-h-60 overflow-y-auto">
-                      {isSearchingPatient 
-                        ? <div className="p-2">Searching...</div>
-                        : patientSearchResults.map(p => (
-                            <div 
-                              key={p.patients_id} 
-                              className="p-2 hover:bg-gray-100 cursor-pointer"
-                              onMouseDown={() => handleSelectPatient(p)}
-                            >
-                              {p.name} ({p.patients_id})
-                            </div>
-                          ))
-                      }
-                    </div>
                   )}
                 </div>
               </div>
@@ -960,66 +1024,148 @@ const PharmacyBilling: React.FC = () => {
                   <p className="text-sm text-muted-foreground">Search and add medicines to get started</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {cart.map((item) => (
-                    <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
-                      <div className="flex-1">
-                        <div className="font-medium">{item.medicine_name}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {item.strength} • {item.dosage_form} • Batch: {item.batch_number}
-                        </div>
-                        <div className="text-sm">
-                          {formatCurrency(item.unit_price)} each
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                        >
-                          <Minus className="h-3 w-3" />
-                        </Button>
-                        <span className="w-12 text-center">{item.quantity}</span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                          disabled={item.quantity >= item.available_stock}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      
-                      <div className="w-20">
-                        <Input
-                          type="number"
-                          placeholder="Disc %"
-                          value={item.discount_percentage}
-                          onChange={(e) => updateDiscount(item.id, parseFloat(e.target.value) || 0)}
-                          className="text-xs"
-                        />
-                      </div>
-                      
-                      <div className="text-right min-w-[80px]">
-                        <div className="font-medium">{formatCurrency(item.total_amount)}</div>
-                        {item.discount_amount > 0 && (
-                          <div className="text-xs text-green-600">
-                            -{formatCurrency(item.discount_amount)}
-                          </div>
-                        )}
-                      </div>
-                      
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => removeFromCart(item.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
+                <div className="overflow-x-auto">
+                  <p className="text-xs text-red-500 mb-2">(MSU = Minimum Saleable Unit)</p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item Code</TableHead>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead>Quantity (MSU)</TableHead>
+                        <TableHead>Pack</TableHead>
+                        <TableHead>Administration Time</TableHead>
+                        <TableHead>Batch No.</TableHead>
+                        <TableHead>Stock</TableHead>
+                        <TableHead>Expiry Date</TableHead>
+                        <TableHead>MRP</TableHead>
+                        <TableHead>Price</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>#</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {cart.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <Input
+                              className="w-20 text-xs"
+                              value={item.item_code || ''}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, item_code: e.target.value } : i
+                                ));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="min-w-[150px]">
+                              <div className="font-medium text-xs">{item.medicine_name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {item.generic_name}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                                className="h-6 w-6 p-0"
+                              >
+                                <Minus className="h-3 w-3" />
+                              </Button>
+                              <Input
+                                className="w-16 text-center text-xs h-6"
+                                value={item.quantity}
+                                onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
+                              />
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                                disabled={item.quantity >= item.available_stock}
+                                className="h-6 w-6 p-0"
+                              >
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              className="w-20 text-xs"
+                              value={item.pack || ''}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, pack: e.target.value } : i
+                                ));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <select
+                              className="w-32 p-1 border rounded text-xs"
+                              value={item.administration_time || ''}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, administration_time: e.target.value } : i
+                                ));
+                              }}
+                            >
+                              <option value="">Please Select</option>
+                              <option value="BREAKFAST TIME">BREAKFAST TIME</option>
+                              <option value="LUNCH TIME">LUNCH TIME</option>
+                              <option value="HS">HS</option>
+                              <option value="SOS">SOS</option>
+                            </select>
+                          </TableCell>
+                          <TableCell>
+                            <select
+                              className="w-32 p-1 border rounded text-xs"
+                              value={item.batch_number || ''}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, batch_number: e.target.value } : i
+                                ));
+                              }}
+                            >
+                              <option value="">Select</option>
+                              <option value={item.batch_number}>{item.batch_number}</option>
+                            </select>
+                          </TableCell>
+                          <TableCell className="text-xs">{item.available_stock}</TableCell>
+                          <TableCell>
+                            <Input
+                              type="date"
+                              className="w-32 text-xs"
+                              value={item.expiry_date || ''}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, expiry_date: e.target.value } : i
+                                ));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="text-xs">{formatCurrency(item.mrp || 0)}</TableCell>
+                          <TableCell className="text-xs">{formatCurrency(item.unit_price)}</TableCell>
+                          <TableCell className="text-xs font-medium">{formatCurrency(item.total_amount)}</TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => removeFromCart(item.id)}
+                              className="h-6 w-6 p-0 text-red-500"
+                            >
+                              ✕
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <Button className="mt-4" variant="outline">
+                    Add More
+                  </Button>
                 </div>
               )}
             </CardContent>
