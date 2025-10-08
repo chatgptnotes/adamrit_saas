@@ -8287,7 +8287,7 @@ INSTRUCTIONS:
       try {
         const { data, error } = await supabase
           .from('lab')
-          .select(`id, name, "CGHS_code", description, private, bhopal_nabh_rate`)
+          .select(`id, name, "CGHS_code", description, private, bhopal_nabh_rate, "Non-NABH_rates_in_rupee", "NABH_rates_in_rupee"`)
           .or(`name.ilike.%${serviceSearchTerm}%,description.ilike.%${serviceSearchTerm}%`)
           .order('name')
           .limit(20);
@@ -8316,22 +8316,40 @@ INSTRUCTIONS:
 
         console.log('✅ Lab search results:', data?.length || 0, 'records');
 
-        // Map the field names to expected format - use bhopal_nabh_rate for specific corporates
+        // Map the field names to expected format - use appropriate rates based on corporate type
         const mappedData = data?.map(item => {
-          // Check if corporate qualifies for Bhopal NABH rates (case-insensitive partial match)
+          // Check patient corporate type (case-insensitive partial match)
           const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+          const hasCorporate = corporate.length > 0;
+
+          // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+          const usesNonNABHRate =
+            corporate.includes('cghs') ||
+            corporate.includes('echs') ||
+            corporate.includes('esic');
+
+          // Check if corporate qualifies for Bhopal NABH rates
           const usesBhopaliNABHRate =
             corporate.includes('mp police') ||
             corporate.includes('ordnance factory') ||
             corporate.includes('ordnance factory itarsi');
 
-          // Select appropriate rate based on corporate
+          // Check if patient has other corporate (not CGHS/ECHS/ESIC, not MP Police/Ordnance Factory)
+          const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+          // Select appropriate rate based on corporate (priority: Non-NABH > Bhopal NABH > NABH > Private > Fallback)
           let cost = 100; // Default fallback
           let rateSource = 'fallback';
 
-          if (usesBhopaliNABHRate && item.bhopal_nabh_rate && item.bhopal_nabh_rate > 0) {
+          if (usesNonNABHRate && item['Non-NABH_rates_in_rupee'] && item['Non-NABH_rates_in_rupee'] > 0) {
+            cost = item['Non-NABH_rates_in_rupee'];
+            rateSource = 'non_nabh';
+          } else if (usesBhopaliNABHRate && item.bhopal_nabh_rate && item.bhopal_nabh_rate > 0) {
             cost = item.bhopal_nabh_rate;
             rateSource = 'bhopal_nabh';
+          } else if (usesNABHRate && item['NABH_rates_in_rupee'] && item['NABH_rates_in_rupee'] > 0) {
+            cost = item['NABH_rates_in_rupee'];
+            rateSource = 'nabh';
           } else if (item.private && item.private > 0) {
             cost = item.private;
             rateSource = 'private';
@@ -8341,7 +8359,12 @@ INSTRUCTIONS:
             service: item.name,
             patientCorporate: patientInfo?.corporate || 'NOT SET',
             corporateLower: corporate || 'EMPTY',
+            hasCorporate: hasCorporate,
+            usesNonNABHRate: usesNonNABHRate,
             usesBhopaliNABHRate: usesBhopaliNABHRate,
+            usesNABHRate: usesNABHRate,
+            nonNABHRate: item['Non-NABH_rates_in_rupee'],
+            nabhRate: item['NABH_rates_in_rupee'],
             bhopaliNABHRate: item.bhopal_nabh_rate,
             privateRate: item.private,
             finalCost: cost,
@@ -8379,7 +8402,7 @@ INSTRUCTIONS:
 
       const { data, error } = await supabase
         .from('radiology')
-        .select('id, name, cost, category, description, bhopal_nabh')
+        .select('id, name, cost, category, description, bhopal_nabh, Non_NABH_NABL_Rate, NABH_NABL_Rate')
         .or(`name.ilike.%${serviceSearchTerm}%,description.ilike.%${serviceSearchTerm}%`)
         .order('name')
         .limit(20);
@@ -8392,29 +8415,52 @@ INSTRUCTIONS:
       console.log('✅ Radiology search results:', data?.length || 0, 'records found');
       console.log('📋 Sample radiology results:', data?.slice(0, 2));
 
-      // Transform data - use bhopal_nabh for specific corporates
+      // Transform data - use appropriate rates based on corporate type
       const transformedData = data?.map(item => {
-        // Check if corporate qualifies for Bhopal NABH rates (case-insensitive partial match)
+        // Check patient corporate type (case-insensitive partial match)
         const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+        const hasCorporate = corporate.length > 0;
+
+        // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+        const usesNonNABHRate =
+          corporate.includes('cghs') ||
+          corporate.includes('echs') ||
+          corporate.includes('esic');
+
+        // Check if corporate qualifies for Bhopal NABH rates
         const usesBhopaliNABHRate =
           corporate.includes('mp police') ||
           corporate.includes('ordnance factory') ||
           corporate.includes('ordnance factory itarsi');
 
-        // Select appropriate rate based on corporate
+        // Check if patient has other corporate (not CGHS/ECHS/ESIC, not MP Police/Ordnance Factory)
+        const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+        // Select appropriate rate based on corporate (priority: Non-NABH > Bhopal NABH > NABH > Regular Cost)
         let finalCost = item.cost || 0; // Default to regular cost
         let rateSource = 'regular_cost';
 
-        if (usesBhopaliNABHRate && item.bhopal_nabh && item.bhopal_nabh > 0) {
+        if (usesNonNABHRate && item.Non_NABH_NABL_Rate && item.Non_NABH_NABL_Rate > 0) {
+          finalCost = item.Non_NABH_NABL_Rate;
+          rateSource = 'non_nabh_nabl';
+        } else if (usesBhopaliNABHRate && item.bhopal_nabh && item.bhopal_nabh > 0) {
           finalCost = item.bhopal_nabh;
           rateSource = 'bhopal_nabh';
+        } else if (usesNABHRate && item.NABH_NABL_Rate && item.NABH_NABL_Rate > 0) {
+          finalCost = item.NABH_NABL_Rate;
+          rateSource = 'nabh_nabl';
         }
 
         console.log('🔍 Radiology mapping:', {
           service: item.name,
           patientCorporate: patientInfo?.corporate || 'NOT SET',
           corporateLower: corporate || 'EMPTY',
+          hasCorporate: hasCorporate,
+          usesNonNABHRate: usesNonNABHRate,
           usesBhopaliNABHRate: usesBhopaliNABHRate,
+          usesNABHRate: usesNABHRate,
+          nonNABHRate: item.Non_NABH_NABL_Rate,
+          nabhRate: item.NABH_NABL_Rate,
           bhopaliNABH: item.bhopal_nabh,
           regularCost: item.cost,
           finalCost: finalCost,
@@ -9145,28 +9191,54 @@ INSTRUCTIONS:
 
       // Apply corporate-based rate selection
       const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+      const isPrivate = !corporate || corporate === 'private';
+
+      // Check if corporate qualifies for Bhopal NABH rates
       const usesBhopaliRate =
         corporate.includes('mp police') ||
         corporate.includes('ordnance factory') ||
         corporate.includes('ordnance factory itarsi');
 
       const surgeriesWithSelectedRate = data?.map(surgery => {
-        // Select appropriate rate based on corporate
-        let selectedRate = surgery.NABH_NABL_Rate || surgery.private || 0;
-        let rateSource = 'nabh_nabl/private';
+        // Select appropriate rate based on corporate (priority: Private > Bhopal NABH > NABH NABL > Fallback)
+        let selectedRate = 0;
+        let rateSource = 'fallback';
 
-        if (usesBhopaliRate && surgery.bhopal_nabh_rate && surgery.bhopal_nabh_rate > 0) {
+        if (isPrivate) {
+          // Private patients → use private rate (even if 0), only fallback to NABH if NULL
+          if (surgery.private !== null && surgery.private !== undefined) {
+            selectedRate = surgery.private;
+            rateSource = 'private';
+          } else if (surgery.NABH_NABL_Rate && surgery.NABH_NABL_Rate > 0) {
+            selectedRate = surgery.NABH_NABL_Rate;
+            rateSource = 'nabh_nabl_fallback';
+          } else {
+            selectedRate = 0;
+            rateSource = 'no_rate';
+          }
+        } else if (usesBhopaliRate && surgery.bhopal_nabh_rate && surgery.bhopal_nabh_rate > 0) {
+          // MP Police/Ordnance Factory → use bhopal_nabh_rate
           selectedRate = surgery.bhopal_nabh_rate;
           rateSource = 'bhopal_nabh';
+        } else if (surgery.NABH_NABL_Rate && surgery.NABH_NABL_Rate > 0) {
+          // All other corporate patients → use NABH_NABL_Rate
+          selectedRate = surgery.NABH_NABL_Rate;
+          rateSource = 'nabh_nabl';
+        } else {
+          // Fallback
+          selectedRate = surgery.NABH_NABL_Rate || surgery.private || 0;
+          rateSource = 'fallback';
         }
 
         console.log('🔍 Surgery rate mapping in FinalBill:', {
           surgeryName: surgery.name,
           patientCorporate: patientInfo?.corporate || 'NOT SET',
           corporateLower: corporate || 'EMPTY',
+          isPrivate: isPrivate,
           usesBhopaliRate: usesBhopaliRate,
           bhopaliNABHRate: surgery.bhopal_nabh_rate,
           nabhNablRate: surgery.NABH_NABL_Rate,
+          privateRate: surgery.private,
           selectedRate: selectedRate,
           rateSource: rateSource
         });
@@ -14476,8 +14548,12 @@ Dr. Murali B K
                             <div className="text-xs text-green-600">Code: {surgery.code}</div>
                             {surgery.NABH_NABL_Rate && (
                               <div className="text-xs text-green-600">
-                                NABH Rate: ₹{surgery.NABH_NABL_Rate}
-                                {surgery.rateSource === 'bhopal_nabh' && <span className="ml-1 text-purple-600 font-semibold">(Bhopal NABH)</span>}
+                                {surgery.rateSource === 'private' && 'Private Rate: '}
+                                {surgery.rateSource === 'bhopal_nabh' && 'Bhopal NABH Rate: '}
+                                {surgery.rateSource === 'nabh_nabl' && 'NABH Rate: '}
+                                {surgery.rateSource === 'nabh_nabl_fallback' && 'NABH Rate (Private Fallback): '}
+                                {(surgery.rateSource === 'fallback' || surgery.rateSource === 'no_rate' || !surgery.rateSource) && 'Rate: '}
+                                ₹{surgery.NABH_NABL_Rate}
                               </div>
                             )}
                           </div>
@@ -14552,8 +14628,12 @@ Dr. Murali B K
                           <div className="text-xs text-gray-500">Code: {surgery.code}</div>
                           {surgery.NABH_NABL_Rate && (
                             <div className="text-xs text-green-600">
-                              NABH Rate: ₹{surgery.NABH_NABL_Rate}
-                              {surgery.rateSource === 'bhopal_nabh' && <span className="ml-1 text-purple-600 font-semibold">(Bhopal NABH)</span>}
+                              {surgery.rateSource === 'private' && 'Private Rate: '}
+                              {surgery.rateSource === 'bhopal_nabh' && 'Bhopal NABH Rate: '}
+                              {surgery.rateSource === 'nabh_nabl' && 'NABH Rate: '}
+                              {surgery.rateSource === 'nabh_nabl_fallback' && 'NABH Rate (Private Fallback): '}
+                              {(surgery.rateSource === 'fallback' || surgery.rateSource === 'no_rate') && 'Rate: '}
+                              ₹{surgery.NABH_NABL_Rate}
                             </div>
                           )}
                         </div>
@@ -17279,7 +17359,7 @@ Dr. Murali B K
                         <div id="doctors-plan-section" className="bg-white shadow-lg rounded-lg p-4 max-w-full">
                           {/* ESIC Header */}
                           <div className="text-center border-b-2 border-black pb-2 mb-4">
-                            <h2 className="text-xl font-bold">ESIC</h2>
+                            <h2 className="text-xl font-bold">{patientInfo?.corporate ? patientInfo.corporate.toUpperCase() : 'PRIVATE'}</h2>
                           </div>
 
                           {/* Patient Information Table - Editable */}
@@ -17578,7 +17658,7 @@ Dr. Murali B K
                                           <!DOCTYPE html>
                                           <html>
                                           <head>
-                                            <title>Doctor's Plan - ESIC Form</title>
+                                            <title>Doctor's Plan - ${patientInfo?.corporate ? patientInfo.corporate.toUpperCase() : 'PRIVATE'} Form</title>
                                             <style>
                                               @page {
                                                 size: A4;
@@ -18987,7 +19067,7 @@ Dr. Murali B K
                   <h1 className="text-2xl font-bold tracking-wider print:text-xl">FINAL BILL</h1>
                 </div>
                 <div className="border-2 border-black p-2 mb-2">
-                  <h2 className="text-xl font-bold tracking-wider print:text-xl">ESIC</h2>
+                  <h2 className="text-xl font-bold tracking-wider print:text-xl">{patientInfo?.corporate ? patientInfo.corporate.toUpperCase() : 'PRIVATE'}</h2>
                 </div>
                 <div className="border-2 border-black p-2">
                   <h3 className="text-lg font-semibold tracking-wide print:text-xl print:font-bold">
