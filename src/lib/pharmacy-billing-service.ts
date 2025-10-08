@@ -40,6 +40,7 @@ export interface SaleData {
   doctor_name?: string;
   ward_type?: string;
   remarks?: string;
+  hospital_name?: string; // Add hospital name field
   subtotal: number;
   discount: number;
   discount_percentage?: number;
@@ -85,6 +86,7 @@ export async function savePharmacySale(saleData: SaleData): Promise<SaleResponse
         doctor_name: saleData.doctor_name,
         ward_type: saleData.ward_type,
         remarks: saleData.remarks,
+        hospital_name: saleData.hospital_name, // Add hospital name
         subtotal: saleData.subtotal,
         discount: saleData.discount,
         discount_percentage: saleData.discount_percentage || 0,

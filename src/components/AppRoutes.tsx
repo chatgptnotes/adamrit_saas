@@ -72,6 +72,7 @@ const Reports = lazy(() => import("../pages/Reports"));
 const FinalBillTest = lazy(() => import("../pages/FinalBillTest"));
 const LabPrintDemo = lazy(() => import("../pages/LabPrintDemo"));
 const StoreRequisition = lazy(() => import("../components/pharmacy/StoreRequisition"));
+const EditSaleBill = lazy(() => import("../components/pharmacy/EditSaleBill"));
 const DaywiseBills = lazy(() => import("../pages/DaywiseBills"));
 const OldBills = lazy(() => import("../pages/OldBills"));
 const ViewBill = lazy(() => import("../pages/ViewBill"));
@@ -153,6 +154,7 @@ export const AppRoutes = () => {
         <Route path="/pharmacy/product-purchase-report" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
         <Route path="/pharmacy/inventory-tracking" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
         <Route path="/pharmacy" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
+        <Route path="/pharmacy/edit-sale/:saleId" element={<Suspense fallback={<PageLoader />}><EditSaleBill /></Suspense>} />
         <Route path="/reports" element={<Suspense fallback={<PageLoader />}><Reports /></Suspense>} />
         <Route path="/final-bill/:visitId" element={<Suspense fallback={<PageLoader />}><FinalBill /></Suspense>} />
         <Route path="/no-deduction-letter/:visitId" element={<NoDeductionLetterPage />} />
