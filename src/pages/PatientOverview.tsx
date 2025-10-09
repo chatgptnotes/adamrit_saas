@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -95,6 +95,13 @@ const PatientOverview = () => {
 
   // State to track update reason edits for All Patient tab
   const [patientUpdateReasons, setPatientUpdateReasons] = useState<Record<string, string>>({});
+
+  // Update selectedHospital when hospitalConfig changes
+  useEffect(() => {
+    if (hospitalConfig?.name) {
+      setSelectedHospital(hospitalConfig.name);
+    }
+  }, [hospitalConfig]);
 
   // Fetch call records for Call Today tab (patients discharged within the last 5 days)
   const { data: todayVisits = [], isLoading: loadingToday } = useQuery({
@@ -1125,23 +1132,54 @@ const PatientOverview = () => {
                   >
                     Patient Name{getSortIcon('patients.name')}
                   </TableHead>
-                  <TableHead className="">Disposition</TableHead>
-                  <TableHead className="">Sub Disposition</TableHead>
-                  <TableHead className="">Follow-up Date</TableHead>
-                  <TableHead className="">Remark</TableHead>
-                  <TableHead className="">Call assigned To</TableHead>
+                  <TableHead
+                    className=" cursor-pointer"
+                    onClick={handleHospitalFilter}
+                  >
+                    Hospital Name: {selectedHospital === 'all' ? 'All' : selectedHospital}{getHospitalFilterIcon()}
+                  </TableHead>
+                  <TableHead
+                    className=" cursor-pointer"
+                    onClick={() => handleSort('disposition')}
+                  >
+                    Disposition{getSortIcon('disposition')}
+                  </TableHead>
+                  <TableHead
+                    className=" cursor-pointer"
+                    onClick={() => handleSort('sub_disposition')}
+                  >
+                    Sub Disposition{getSortIcon('sub_disposition')}
+                  </TableHead>
+                  <TableHead
+                    className=" cursor-pointer"
+                    onClick={() => handleSort('follow_up_date')}
+                  >
+                    Follow-up Date{getSortIcon('follow_up_date')}
+                  </TableHead>
+                  <TableHead
+                    className=" cursor-pointer"
+                    onClick={() => handleSort('remark')}
+                  >
+                    Remark{getSortIcon('remark')}
+                  </TableHead>
+                  <TableHead
+                    className=" cursor-pointer"
+                    onClick={() => handleSort('telecaller_name')}
+                  >
+                    Call assigned To{getSortIcon('telecaller_name')}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loadingHistory ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
+                    <TableCell colSpan={8} className="text-center py-8">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : callHistory.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
+                    <TableCell colSpan={8} className="text-center py-8">
                       No records found
                     </TableCell>
                   </TableRow>
@@ -1150,6 +1188,7 @@ const PatientOverview = () => {
                     <TableRow key={record.id}>
                       <TableCell>{record.call_date ? new Date(record.call_date).toLocaleDateString() : '-'}</TableCell>
                       <TableCell>{record.patient_name || '-'}</TableCell>
+                      <TableCell>{record.hospital_name || '-'}</TableCell>
                       <TableCell>{record.disposition || '-'}</TableCell>
                       <TableCell>{record.sub_disposition || '-'}</TableCell>
                       <TableCell>{record.follow_up_date ? new Date(record.follow_up_date).toLocaleDateString() : '-'}</TableCell>
