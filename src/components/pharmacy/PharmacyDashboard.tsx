@@ -3,31 +3,20 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  Pill, 
-  ShoppingCart, 
-  FileText, 
-  Package, 
+import {
+  Pill,
+  ShoppingCart,
+  FileText,
+  Package,
   AlertTriangle,
   TrendingUp,
   DollarSign,
-  Users,
   Clock,
-  CheckCircle,
   Calendar,
   BarChart3,
-  Search,
   Plus,
-  Scan,
-  RefreshCw,
-  Building2,
-  Truck,
-  RotateCcw,
-  Archive,
-  Move
+  Scan
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-// import { format } from 'date-fns';
 
 // Import pharmacy components (we'll create these)
 import MedicineInventory from './MedicineInventory';
@@ -36,21 +25,11 @@ import PharmacyBilling from './PharmacyBilling';
 import StockManagement from './StockManagement';
 import PharmacyReports from './PharmacyReports';
 import SupplierMaster from './SupplierMaster';
-import PurchaseOrders from './PurchaseOrders';
-import StockMovement from './StockMovement';
-import ReturnToVendor from './ReturnToVendor';
-import WriteOffManagement from './WriteOffManagement';
-import InternalTransfers from './InternalTransfers';
-import AddPurchaseOrder from './AddPurchaseOrder';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
 import SalesDetails from './SalesDetails';
+import TreatmentSheetList from './TreatmentSheetList';
 
 const PharmacyDashboard: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState('overview');
-  const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
-  const [reportsDropdownOpen, setReportsDropdownOpen] = useState(false);
-
-  const navigate = useNavigate();
 
   // Mock data for dashboard - will be replaced with real data from hooks
   const dashboardData = {
@@ -117,12 +96,7 @@ const PharmacyDashboard: React.FC = () => {
           <TabsTrigger value="billing">Billing</TabsTrigger>
           <TabsTrigger value="view_sales">View Sales</TabsTrigger>
             <TabsTrigger value="stock-mgmt">Stock Mgmt</TabsTrigger>
-          <TabsTrigger value="purchase-orders">Purchase Orders</TabsTrigger>
-            <TabsTrigger value="store-requisition" onClick={() => navigate('/pharmacy/store-requisition')}>Store Requisition</TabsTrigger>
-          <TabsTrigger value="stock-movement">Stock Movement</TabsTrigger>
-          <TabsTrigger value="returns">Returns</TabsTrigger>
-          <TabsTrigger value="write-off">Write-off</TabsTrigger>
-          <TabsTrigger value="transfers">Transfers</TabsTrigger>
+          <TabsTrigger value="treatment-sheet">Treatment Sheet</TabsTrigger>
           </div>
         </TabsList>
 
@@ -398,28 +372,16 @@ const PharmacyDashboard: React.FC = () => {
           <PharmacyReports />
         </TabsContent>
 
-        <TabsContent value="purchase-orders">
-          <PurchaseOrders />
-        </TabsContent>
-
-        <TabsContent value="returns">
-          <ReturnToVendor />
-        </TabsContent>
-
-        <TabsContent value="write-off">
-          <WriteOffManagement />
-        </TabsContent>
-
-        <TabsContent value="transfers">
-          <InternalTransfers />
-        </TabsContent>
-
         <TabsContent value="manufacturer">
           <SupplierMaster activeTab="manufacturer" />
         </TabsContent>
 
         <TabsContent value="view_sales">
           <SalesDetails />
+        </TabsContent>
+
+        <TabsContent value="treatment-sheet">
+          <TreatmentSheetList />
         </TabsContent>
       </Tabs>
     </div>
