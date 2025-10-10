@@ -17,7 +17,7 @@ export const menuItems = [
     icon: LayoutDashboard,
   },
   {
-    title: "Today's IPD",
+    title: "IPD Dashboard",
     url: "/todays-ipd",
     icon: Calendar,
   },

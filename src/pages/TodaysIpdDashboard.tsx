@@ -2500,7 +2500,7 @@ const TodaysIpdDashboard = () => {
 
           return (
             <PrintPreview
-              reportTitle="Today's IPD Dashboard"
+              reportTitle="IPD Dashboard"
               columns={IPD_PRINT_COLUMNS}
               data={filteredVisits}
               settings={finalSettings}
