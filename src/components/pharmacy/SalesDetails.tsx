@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import TreatmentSheetForm from './TreatmentSheetForm';
+import TreatmentSheetPrintView from './TreatmentSheetPrintView';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { FileText, Printer } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 const dummyData = [
   {
@@ -72,6 +76,10 @@ export const SalesDetails: React.FC = () => {
   const [patientSales, setPatientSales] = useState<any[]>([]);
   const [patientReturns, setPatientReturns] = useState<any[]>([]);
   const [showSidePanel, setShowSidePanel] = useState(false);
+
+  // Treatment Sheet dialog
+  const [showTreatmentSheet, setShowTreatmentSheet] = useState(false);
+  const [selectedVisitId, setSelectedVisitId] = useState<string | null>(null);
 
   // Fetch patients as user types
   useEffect(() => {
@@ -416,6 +424,11 @@ export const SalesDetails: React.FC = () => {
     }
   };
 
+  const handleOpenTreatmentSheet = (visitId: string) => {
+    setSelectedVisitId(visitId);
+    setShowTreatmentSheet(true);
+  };
+
   return (
     <div className="p-4 flex gap-4">
       {/* Left Side - Patient List */}
@@ -506,6 +519,9 @@ export const SalesDetails: React.FC = () => {
                   <span title="View Bills" className="cursor-pointer text-blue-600" onClick={() => handleViewPatientBills(row)}>👁️</span>
                   <span title="Print Bill" className="cursor-pointer" onClick={() => handlePrintBill(row)}>🖨️</span>
                   <span title="Download Bill" className="cursor-pointer" onClick={() => handlePrintBill(row)}>⬇️</span>
+                  {row.visit_id && (
+                    <span title="Treatment Sheet" className="cursor-pointer text-green-600" onClick={() => handleOpenTreatmentSheet(row.visit_id)}>📋</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -578,6 +594,9 @@ export const SalesDetails: React.FC = () => {
                           <span title="View" className="cursor-pointer">👁️</span>
                           <span title="Copy" className="cursor-pointer">📋</span>
                           <span title="Print" className="cursor-pointer" onClick={() => handlePrintBill(sale)}>🖨️</span>
+                          {sale.visit_id && (
+                            <span title="Treatment Sheet" className="cursor-pointer text-green-600" onClick={() => handleOpenTreatmentSheet(sale.visit_id)}>📄</span>
+                          )}
                         </td>
                         <td className="px-2 py-1 border">
                           <input type="checkbox" />
@@ -654,6 +673,28 @@ export const SalesDetails: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Treatment Sheet Dialog */}
+      <Dialog open={showTreatmentSheet} onOpenChange={setShowTreatmentSheet}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Treatment Sheet</span>
+              <Button
+                size="sm"
+                onClick={() => window.print()}
+                className="flex items-center gap-2"
+              >
+                <Printer className="h-4 w-4" />
+                Print
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          {selectedVisitId && (
+            <TreatmentSheetPrintView visitId={selectedVisitId} />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
