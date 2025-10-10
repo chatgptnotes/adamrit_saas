@@ -261,6 +261,7 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
         // Invalidate queries to refresh data
         await queryClient.invalidateQueries({ queryKey: ['opd-patients'] });
         await queryClient.invalidateQueries({ queryKey: ['todays-visits'] });
+        await queryClient.invalidateQueries({ queryKey: ['currently-admitted-visits'] });
         await queryClient.invalidateQueries({ queryKey: ['visits'] });
         await queryClient.invalidateQueries({ queryKey: ['patients'] });
 
@@ -457,6 +458,7 @@ export const VisitRegistrationForm: React.FC<VisitRegistrationFormProps> = ({
       // Invalidate queries to refresh data - INCLUDING REPORTS DATA
       queryClient.invalidateQueries({ queryKey: ['visits'] });
       queryClient.invalidateQueries({ queryKey: ['todays-visits'] });
+      queryClient.invalidateQueries({ queryKey: ['currently-admitted-visits'] });
       queryClient.invalidateQueries({ queryKey: ['patients'] });
       queryClient.invalidateQueries({ queryKey: ['patient-data'] }); // This will refresh Reports page data
       queryClient.invalidateQueries({ queryKey: ['spreadsheet-data'] }); // Refresh spreadsheet data
