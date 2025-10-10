@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDebounce } from 'use-debounce';
 import { Badge } from '@/components/ui/badge';
-import { Eye, FileText, Search, Calendar, DollarSign, Trash2, FolderOpen, FolderX, CheckCircle, XCircle, Clock, MinusCircle, RotateCcw, Printer, Filter, MessageSquare, ClipboardList } from 'lucide-react';
+import { Eye, FileText, Search, Calendar, DollarSign, Trash2, FolderOpen, FolderX, CheckCircle, XCircle, Clock, MinusCircle, RotateCcw, Printer, Filter, MessageSquare, ClipboardList, ArrowUpDown } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +28,6 @@ import {
 } from '@/components/ui/table';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { ImportRegistrationData } from '@/components/ImportRegistrationData';
 import { EditPatientDialog } from '@/components/EditPatientDialog';
 import { usePatients } from '@/hooks/usePatients';
 import { CascadingBillingStatusDropdown } from '@/components/shared/CascadingBillingStatusDropdown';
@@ -60,6 +59,7 @@ const TodaysIpdDashboard = () => {
   const [originalComments, setOriginalComments] = useState<Record<string, string>>({});
   const [savingComments, setSavingComments] = useState<Record<string, boolean>>({});
   const [savedComments, setSavedComments] = useState<Record<string, boolean>>({});
+  const [sortBy, setSortBy] = useState<'sr_no' | 'sr_no_desc' | 'latest' | 'oldest' | 'name_asc' | 'name_desc' | 'visit_id_asc' | 'visit_id_desc'>('sr_no');
   const navigate = useNavigate();
 
   const { diagnoses, updatePatient } = usePatients();
@@ -1324,35 +1324,88 @@ const TodaysIpdDashboard = () => {
   const extensionOfStayOptions = useMemo(() => Array.from(new Set((todaysVisits || []).map((v) => v.extension_of_stay).filter(Boolean))) as string[], [todaysVisits]);
   const additionalApprovalsOptions = useMemo(() => Array.from(new Set((todaysVisits || []).map((v) => v.additional_approvals).filter(Boolean))) as string[], [todaysVisits]);
 
-  const filteredVisits = todaysVisits.filter(visit => {
-    const matchesSearch = visit.patients?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      visit.visit_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      visit.appointment_with?.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredVisits = useMemo(() => {
+    // First, filter the visits
+    const filtered = todaysVisits.filter(visit => {
+      const matchesSearch = visit.patients?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        visit.visit_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        visit.appointment_with?.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const matchesBillingExecutive = !billingExecutiveFilter ||
-      visit.billing_executive === billingExecutiveFilter;
+      const matchesBillingExecutive = !billingExecutiveFilter ||
+        visit.billing_executive === billingExecutiveFilter;
 
-    const matchesBillingStatus = !billingStatusFilter ||
-      visit.billing_status === billingStatusFilter;
+      const matchesBillingStatus = !billingStatusFilter ||
+        visit.billing_status === billingStatusFilter;
 
-    const matchesBunch = !bunchFilter ||
-      visit.bunch_no === bunchFilter;
+      const matchesBunch = !bunchFilter ||
+        visit.bunch_no === bunchFilter;
 
-    const matchesCorporate = !corporateFilter ||
-      visit.patients?.corporate?.toLowerCase().trim() === corporateFilter.toLowerCase().trim();
+      const matchesCorporate = !corporateFilter ||
+        visit.patients?.corporate?.toLowerCase().trim() === corporateFilter.toLowerCase().trim();
 
 
-    const includeBy = (selected: string[], value?: string | null) =>
-      selected.length === 0 || (value ? selected.includes(value) : false);
+      const includeBy = (selected: string[], value?: string | null) =>
+        selected.length === 0 || (value ? selected.includes(value) : false);
 
-    const matchesFile = includeBy(fileStatusFilter, visit.file_status);
-    const matchesCondSub = includeBy(condonationSubmissionFilter, visit.condonation_delay_claim);
-    const matchesCondInt = includeBy(condonationIntimationFilter, visit.condonation_delay_intimation);
-    const matchesExtStay = includeBy(extensionOfStayFilter, visit.extension_of_stay);
-    const matchesAddAppr = includeBy(additionalApprovalsFilter, visit.additional_approvals);
+      const matchesFile = includeBy(fileStatusFilter, visit.file_status);
+      const matchesCondSub = includeBy(condonationSubmissionFilter, visit.condonation_delay_claim);
+      const matchesCondInt = includeBy(condonationIntimationFilter, visit.condonation_delay_intimation);
+      const matchesExtStay = includeBy(extensionOfStayFilter, visit.extension_of_stay);
+      const matchesAddAppr = includeBy(additionalApprovalsFilter, visit.additional_approvals);
 
-    return matchesSearch && matchesBillingExecutive && matchesBillingStatus && matchesBunch && matchesCorporate && matchesFile && matchesCondSub && matchesCondInt && matchesExtStay && matchesAddAppr;
-  });
+      return matchesSearch && matchesBillingExecutive && matchesBillingStatus && matchesBunch && matchesCorporate && matchesFile && matchesCondSub && matchesCondInt && matchesExtStay && matchesAddAppr;
+    });
+
+    // Then, sort the filtered results
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'sr_no':
+          // Ascending order by sr_no (default)
+          const srNoA = Number(a.sr_no) || 0;
+          const srNoB = Number(b.sr_no) || 0;
+          return srNoA - srNoB;
+
+        case 'sr_no_desc':
+          // Descending order by sr_no
+          const srNoDescA = Number(a.sr_no) || 0;
+          const srNoDescB = Number(b.sr_no) || 0;
+          return srNoDescB - srNoDescA;
+
+        case 'latest':
+          // Latest first (newest visit_id or created_at)
+          return (b.visit_id || '').localeCompare(a.visit_id || '');
+
+        case 'oldest':
+          // Oldest first
+          return (a.visit_id || '').localeCompare(b.visit_id || '');
+
+        case 'name_asc':
+          // Patient name A-Z
+          const nameA = a.patients?.name || '';
+          const nameB = b.patients?.name || '';
+          return nameA.localeCompare(nameB);
+
+        case 'name_desc':
+          // Patient name Z-A
+          const nameDescA = a.patients?.name || '';
+          const nameDescB = b.patients?.name || '';
+          return nameDescB.localeCompare(nameDescA);
+
+        case 'visit_id_asc':
+          // Visit ID ascending
+          return (a.visit_id || '').localeCompare(b.visit_id || '');
+
+        case 'visit_id_desc':
+          // Visit ID descending
+          return (b.visit_id || '').localeCompare(a.visit_id || '');
+
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }, [todaysVisits, searchTerm, billingExecutiveFilter, billingStatusFilter, bunchFilter, corporateFilter, fileStatusFilter, condonationSubmissionFilter, condonationIntimationFilter, extensionOfStayFilter, additionalApprovalsFilter, sortBy]);
 
   const formatTime = (dateString: string) => {
     return format(new Date(dateString), 'MMM dd, yyyy HH:mm');
@@ -1886,7 +1939,43 @@ const TodaysIpdDashboard = () => {
               <Printer className="h-4 w-4" />
               Print List
             </Button>
-            <ImportRegistrationData />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="flex items-center gap-2">
+                  <ArrowUpDown className="h-4 w-4" />
+                  Sort By
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => setSortBy('sr_no')} className={sortBy === 'sr_no' ? 'bg-accent' : ''}>
+                  Sr No (Ascending) {sortBy === 'sr_no' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy('sr_no_desc')} className={sortBy === 'sr_no_desc' ? 'bg-accent' : ''}>
+                  Sr No (Descending) {sortBy === 'sr_no_desc' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setSortBy('latest')} className={sortBy === 'latest' ? 'bg-accent' : ''}>
+                  Latest First {sortBy === 'latest' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy('oldest')} className={sortBy === 'oldest' ? 'bg-accent' : ''}>
+                  Oldest First {sortBy === 'oldest' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setSortBy('name_asc')} className={sortBy === 'name_asc' ? 'bg-accent' : ''}>
+                  Patient Name (A-Z) {sortBy === 'name_asc' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy('name_desc')} className={sortBy === 'name_desc' ? 'bg-accent' : ''}>
+                  Patient Name (Z-A) {sortBy === 'name_desc' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setSortBy('visit_id_asc')} className={sortBy === 'visit_id_asc' ? 'bg-accent' : ''}>
+                  Visit ID (Ascending) {sortBy === 'visit_id_asc' && '✓'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSortBy('visit_id_desc')} className={sortBy === 'visit_id_desc' ? 'bg-accent' : ''}>
+                  Visit ID (Descending) {sortBy === 'visit_id_desc' && '✓'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <select
               value={billingExecutiveFilter}
               onChange={(e) => {
