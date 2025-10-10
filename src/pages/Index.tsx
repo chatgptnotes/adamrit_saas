@@ -5,7 +5,6 @@ import { StatisticsCards } from '@/components/StatisticsCards';
 import { AddPatientDialog } from '@/components/AddPatientDialog';
 import { AddDiagnosisDialog } from '@/components/AddDiagnosisDialog';
 import { NoResultsCard } from '@/components/NoResultsCard';
-import RadiologyManagement from '@/components/radiology/RadiologyManagement';
 import { Button } from '@/components/ui/button';
 import { ChevronDown } from 'lucide-react';
 import { usePatients } from '@/hooks/usePatients';
@@ -457,11 +456,6 @@ const Index = () => {
               />
             ))
           )}
-        </div>
-
-        {/* Radiology Management Section */}
-        <div className="mt-8">
-          <RadiologyManagement />
         </div>
 
         <AddPatientDialog
