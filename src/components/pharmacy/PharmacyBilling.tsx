@@ -138,15 +138,28 @@ const PharmacyBilling: React.FC = () => {
       setIsSearching(true);
       const { data, error } = await supabase
         .from('medication')
-        .select('*, name, generic_name, strength, dosage, stock, price_per_strip')
+        .select('id, name, generic_name, category, dosage, description')
         .or(`name.ilike.%${debouncedSearchTerm}%,generic_name.ilike.%${debouncedSearchTerm}%`)
         .limit(10);
-      
+
       if (error) {
         console.error('Error searching for medicines:', error);
         setSearchResults([]);
       } else {
-        setSearchResults(data || []);
+        // Map medication fields to expected format
+        const mappedData = (data || []).map(item => ({
+          id: item.id,
+          name: item.name,
+          generic_name: item.generic_name,
+          strength: '',
+          dosage: item.dosage || '',
+          stock: 0,
+          price_per_strip: 0,
+          item_code: '',
+          batch_number: 'BATCH-001',
+          expiry_date: ''
+        }));
+        setSearchResults(mappedData);
       }
       setIsSearching(false);
     };
