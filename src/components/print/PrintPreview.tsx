@@ -73,21 +73,62 @@ export const PrintPreview: React.FC<PrintPreviewProps> = (props) => {
 
         /* Print styles */
         @media print {
-          /* Hide close button */
-          .no-print {
-            display: none !important;
-          }
-
           /* Convert overlay to normal flow for print */
           .print-preview-overlay {
             position: static !important;
-            z-index: auto !important;
+            z-index: 99999 !important;
             width: 100% !important;
             height: auto !important;
             overflow: visible !important;
             padding: 0 !important;
             margin: 0 !important;
             background: white !important;
+            display: block !important;
+            visibility: visible !important;
+          }
+
+          /* CRITICAL: Force all print content to be visible */
+          .print-preview-overlay,
+          .print-preview-overlay *,
+          [data-print-content="true"],
+          [data-print-content="true"] *,
+          .print-container,
+          .print-container *,
+          .print-table,
+          .print-table *,
+          .print-table-container,
+          .print-table-container * {
+            display: revert !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+          }
+
+          /* Ensure table elements display correctly */
+          .print-table {
+            display: table !important;
+          }
+
+          .print-table thead {
+            display: table-header-group !important;
+          }
+
+          .print-table tbody {
+            display: table-row-group !important;
+          }
+
+          .print-table tr {
+            display: table-row !important;
+          }
+
+          .print-table th,
+          .print-table td {
+            display: table-cell !important;
+          }
+
+          /* Hide only the close button */
+          .no-print {
+            display: none !important;
+            visibility: hidden !important;
           }
 
           /* Ensure body shows content */

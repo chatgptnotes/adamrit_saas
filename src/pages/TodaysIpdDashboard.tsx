@@ -1867,7 +1867,7 @@ const TodaysIpdDashboard = () => {
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between no-print">
           <div className="flex items-center gap-3">
             <Calendar className="h-8 w-8 text-primary" />
             <div>
@@ -1987,7 +1987,7 @@ const TodaysIpdDashboard = () => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 no-print">
           <div className="bg-card p-4 rounded-lg border">
             <div className="text-2xl font-bold text-blue-600">
               {todaysVisits.filter(v => v.status === 'scheduled' || !v.status).length}
@@ -2527,17 +2527,25 @@ const TodaysIpdDashboard = () => {
             background: white !important;
           }
 
-          /* Hide non-printable elements */
+          /* Hide UI elements and dashboard content */
           [data-sidebar],
           aside,
           nav,
-          button,
+          button:not(.print-preview-overlay button),
           select,
           input,
           .no-print,
+          header,
+          footer,
+          [role="dialog"]:not(.print-preview-overlay [role="dialog"]),
+          [data-radix-portal],
+          [data-radix-dialog-overlay],
+          [data-radix-dialog-content],
           .flex.flex-col.md\\:flex-row.justify-between.items-start.md\\:items-center.mb-6,
-          .grid.grid-cols-1.md\\:grid-cols-4.gap-4 {
+          .grid.grid-cols-1.md\\:grid-cols-4.gap-4,
+          .bg-card.rounded-lg.border.no-print {
             display: none !important;
+            visibility: hidden !important;
           }
 
           /* Hide the page title/header inside the table card */
@@ -2573,75 +2581,19 @@ const TodaysIpdDashboard = () => {
             padding: 0 !important;
           }
 
-          /* Table container */
-          .bg-card.rounded-lg.border {
-            border: none !important;
-            border-radius: 0 !important;
-            box-shadow: none !important;
-            background: white !important;
-            page-break-inside: auto !important;
-          }
-
-          /* Table styling */
-          table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            display: table !important;
-            font-size: 9px !important;
-            table-layout: auto !important;
-          }
-
-          thead {
-            display: table-header-group !important;
-          }
-
-          tbody {
-            display: table-row-group !important;
-          }
-
-          tr {
-            display: table-row !important;
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-          }
-
-          th, td {
-            display: table-cell !important;
-            border: 1px solid #333 !important;
-            padding: 4px 6px !important;
-            text-align: left !important;
-            background: white !important;
-            vertical-align: middle !important;
-            word-wrap: break-word !important;
-          }
-
-          thead th {
-            background: #f0f0f0 !important;
-            font-weight: bold !important;
-            font-size: 10px !important;
-            color: black !important;
-          }
-
-          /* Ensure visibility of table content */
-          .bg-card.rounded-lg.border,
-          .bg-card.rounded-lg.border table,
-          .bg-card.rounded-lg.border thead,
-          .bg-card.rounded-lg.border tbody,
-          .bg-card.rounded-lg.border tr,
-          .bg-card.rounded-lg.border th,
-          .bg-card.rounded-lg.border td {
-            visibility: visible !important;
-            opacity: 1 !important;
-          }
-
-          /* Print info */
-          .print-info {
+          /* CRITICAL: Ensure PrintPreview and its content are visible */
+          .print-preview-overlay {
             display: block !important;
-            margin-bottom: 10px !important;
-            padding: 10px !important;
-            font-size: 12px !important;
-            color: #333 !important;
-            border-bottom: 1px solid #ccc !important;
+            visibility: visible !important;
+            position: static !important;
+            z-index: 99999 !important;
+          }
+
+          .print-preview-overlay,
+          .print-preview-overlay *,
+          [data-print-content="true"],
+          [data-print-content="true"] * {
+            visibility: visible !important;
           }
 
           /* Remove any interactive elements styling */
