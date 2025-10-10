@@ -2240,7 +2240,7 @@ const TodaysIpdDashboard = () => {
                     <BillingExecutiveInput visit={visit} isAdmin={isAdmin} />
                   </TableCell>
                   <TableCell>
-                    <BillingStatusDropdown visit={visit} disabled={!isAdmin} />
+                    <BillingStatusDropdown visit={visit} />
                   </TableCell>
                   <TableCell>
                     {visit.patients?.corporate || '—'}

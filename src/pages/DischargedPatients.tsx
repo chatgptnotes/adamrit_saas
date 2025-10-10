@@ -517,9 +517,11 @@ const DischargedPatients = () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getBillingStatusBadgeVariant(visit.billing_status)}>
-                          {visit.billing_status || 'Not Set'}
-                        </Badge>
+                        <CascadingBillingStatusDropdown
+                          visit={visit}
+                          queryKey={['discharged-patients']}
+                          onUpdate={() => refetch()}
+                        />
                       </TableCell>
                       <TableCell>
                         {visit.patients?.corporate || '—'}
