@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar, CalendarDays } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface MedicationRow {
   id: string;
@@ -125,6 +126,26 @@ const IpdDischargeSummary = () => {
   const { visitId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { hospitalConfig } = useAuth();
+
+  // Fetch consultants based on hospital
+  const { data: consultants = [] } = useQuery({
+    queryKey: ['consultants', hospitalConfig.name],
+    queryFn: async () => {
+      const tableName = hospitalConfig.name === 'hope' ? 'hope_consultants' : 'ayushman_consultants';
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching consultants:', error);
+        return [];
+      }
+
+      return data || [];
+    }
+  });
 
   // Force complete cache clear and component refresh
   React.useEffect(() => {
@@ -3937,8 +3958,11 @@ Enter surgical procedure description here...`}
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Please select">Please select</SelectItem>
-                  <SelectItem value="Dr. Smith">Dr. Smith</SelectItem>
-                  <SelectItem value="Dr. Johnson">Dr. Johnson</SelectItem>
+                  {consultants.map((consultant: any) => (
+                    <SelectItem key={consultant.id} value={consultant.name}>
+                      {consultant.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
