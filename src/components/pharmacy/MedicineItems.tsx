@@ -26,7 +26,9 @@ import {
   Edit,
   Trash2,
   Download,
-  Upload
+  Upload,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -35,15 +37,8 @@ interface Medicine {
   id: string;
   name: string;
   generic_name?: string;
-  item_code?: string;
-  barcode?: string;
-  therapeutic_category?: string;
-  manufacturer?: string;
-  strength?: string;
-  dosage_form?: string;
-  price_per_strip?: string;
-  stock?: string;
-  exp_date?: string;
+  category?: string;
+  dosage?: string;
   description?: string;
   created_at?: string;
   updated_at?: string;
@@ -56,6 +51,8 @@ const MedicineItems: React.FC = () => {
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
   const { toast } = useToast();
 
   const fetchMedicines = async () => {
@@ -117,9 +114,20 @@ const MedicineItems: React.FC = () => {
     const searchLower = searchTerm.toLowerCase();
     return medicine.name?.toLowerCase().includes(searchLower) ||
            medicine.generic_name?.toLowerCase().includes(searchLower) ||
-           medicine.item_code?.toLowerCase().includes(searchLower) ||
-           medicine.manufacturer?.toLowerCase().includes(searchLower);
+           medicine.category?.toLowerCase().includes(searchLower) ||
+           medicine.dosage?.toLowerCase().includes(searchLower);
   });
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredMedicines.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedMedicines = filteredMedicines.slice(startIndex, endIndex);
+
+  // Reset to first page when search term changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   return (
     <div className="space-y-6">
@@ -205,24 +213,22 @@ const MedicineItems: React.FC = () => {
                 <TableRow>
                   <TableHead>Medicine Name</TableHead>
                   <TableHead>Generic Name</TableHead>
-                  <TableHead>Manufacturer</TableHead>
-                  <TableHead>Code</TableHead>
                   <TableHead>Category</TableHead>
-                  <TableHead>Strength</TableHead>
                   <TableHead>Dosage Form</TableHead>
+                  <TableHead>Description</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8">
+                    <TableCell colSpan={6} className="text-center py-8">
                       Loading medicines...
                     </TableCell>
                   </TableRow>
-                ) : filteredMedicines.length === 0 ? (
+                ) : paginatedMedicines.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8">
+                    <TableCell colSpan={6} className="text-center py-8">
                       <div className="flex flex-col items-center gap-2">
                         <Package className="h-8 w-8 text-muted-foreground" />
                         <p className="text-muted-foreground">
@@ -234,22 +240,20 @@ const MedicineItems: React.FC = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredMedicines.map((medicine) => {
+                  paginatedMedicines.map((medicine) => {
                     return (
                       <TableRow key={medicine.id}>
                         <TableCell className="font-medium">{medicine.name}</TableCell>
                         <TableCell>{medicine.generic_name || 'N/A'}</TableCell>
-                        <TableCell>{medicine.manufacturer || 'N/A'}</TableCell>
-                        <TableCell className="font-mono text-sm">{medicine.item_code || 'N/A'}</TableCell>
                         <TableCell>
-                          {medicine.therapeutic_category ? (
-                            <Badge variant="outline">{medicine.therapeutic_category}</Badge>
+                          {medicine.category ? (
+                            <Badge variant="outline">{medicine.category}</Badge>
                           ) : (
                             'N/A'
                           )}
                         </TableCell>
-                        <TableCell>{medicine.strength || 'N/A'}</TableCell>
-                        <TableCell>{medicine.dosage_form || 'N/A'}</TableCell>
+                        <TableCell>{medicine.dosage || 'N/A'}</TableCell>
+                        <TableCell className="max-w-xs truncate">{medicine.description || 'N/A'}</TableCell>
                         <TableCell>
                           <div className="flex gap-2">
                             <Button
@@ -275,6 +279,64 @@ const MedicineItems: React.FC = () => {
               </TableBody>
             </Table>
           </div>
+
+          {/* Pagination Controls */}
+          {filteredMedicines.length > 0 && (
+            <div className="flex items-center justify-between px-2 py-4 border-t">
+              <div className="text-sm text-muted-foreground">
+                Showing {startIndex + 1} to {Math.min(endIndex, filteredMedicines.length)} of {filteredMedicines.length} medicines
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                    // Show first page, last page, current page, and pages around current
+                    const showPage =
+                      page === 1 ||
+                      page === totalPages ||
+                      (page >= currentPage - 1 && page <= currentPage + 1);
+
+                    if (!showPage) {
+                      // Show ellipsis
+                      if (page === currentPage - 2 || page === currentPage + 2) {
+                        return <span key={page} className="px-2">...</span>;
+                      }
+                      return null;
+                    }
+
+                    return (
+                      <Button
+                        key={page}
+                        variant={currentPage === page ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setCurrentPage(page)}
+                        className="min-w-[40px]"
+                      >
+                        {page}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -310,11 +372,7 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
   const [formData, setFormData] = useState({
     name: '',
     generic_name: '',
-    medicine_code: '',
-    barcode: '',
     category: '',
-    manufacturer_id: '',
-    strength: '',
     dosage: 'Tablet',
     description: '',
   });
@@ -328,12 +386,8 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
         {
           name: formData.name,
           generic_name: formData.generic_name || null,
-          item_code: formData.medicine_code || null,
-          barcode: formData.barcode || null,
-          therapeutic_category: formData.category || null,
-          manufacturer: formData.manufacturer_id || null,
-          strength: formData.strength || null,
-          dosage_form: formData.dosage || null,
+          category: formData.category || null,
+          dosage: formData.dosage || null,
           description: formData.description || null,
         }
       ]);
@@ -375,27 +429,11 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
           />
         </div>
         <div>
-          <label className="text-sm font-medium">Item Code</label>
+          <label className="text-sm font-medium">Category</label>
           <Input
-            value={formData.medicine_code}
-            onChange={(e) => setFormData(prev => ({ ...prev, medicine_code: e.target.value }))}
-            placeholder="Enter item code"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Barcode</label>
-          <Input
-            value={formData.barcode}
-            onChange={(e) => setFormData(prev => ({ ...prev, barcode: e.target.value }))}
-            placeholder="Enter barcode"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Strength</label>
-          <Input
-            value={formData.strength}
-            onChange={(e) => setFormData(prev => ({ ...prev, strength: e.target.value }))}
-            placeholder="e.g., 500mg"
+            value={formData.category}
+            onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+            placeholder="Enter category"
           />
         </div>
         <div>
@@ -414,22 +452,6 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
             <option value="Cream">Cream</option>
             <option value="Suspension">Suspension</option>
           </select>
-        </div>
-        <div>
-          <label className="text-sm font-medium">Category</label>
-          <Input
-            value={formData.category}
-            onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-            placeholder="Enter category"
-          />
-        </div>
-        <div className="col-span-2">
-          <label className="text-sm font-medium">Manufacturer</label>
-          <Input
-            value={formData.manufacturer_id}
-            onChange={(e) => setFormData(prev => ({ ...prev, manufacturer_id: e.target.value }))}
-            placeholder="Enter manufacturer name"
-          />
         </div>
         <div className="col-span-2">
           <label className="text-sm font-medium">Description</label>
@@ -457,12 +479,8 @@ const EditMedicineForm: React.FC<{
   const [formData, setFormData] = useState({
     name: medicine.name || '',
     generic_name: medicine.generic_name || '',
-    medicine_code: medicine.item_code || '',
-    barcode: medicine.barcode || '',
-    category: medicine.therapeutic_category || '',
-    manufacturer_id: medicine.manufacturer || '',
-    strength: medicine.strength || '',
-    dosage: medicine.dosage_form || 'Tablet',
+    category: medicine.category || '',
+    dosage: medicine.dosage || 'Tablet',
     description: medicine.description || '',
   });
 
@@ -474,12 +492,8 @@ const EditMedicineForm: React.FC<{
       .update({
         name: formData.name,
         generic_name: formData.generic_name || null,
-        item_code: formData.medicine_code || null,
-        barcode: formData.barcode || null,
-        therapeutic_category: formData.category || null,
-        manufacturer: formData.manufacturer_id || null,
-        strength: formData.strength || null,
-        dosage_form: formData.dosage || null,
+        category: formData.category || null,
+        dosage: formData.dosage || null,
         description: formData.description || null,
       })
       .eq('id', medicine.id);
@@ -521,27 +535,11 @@ const EditMedicineForm: React.FC<{
           />
         </div>
         <div>
-          <label className="text-sm font-medium">Item Code</label>
+          <label className="text-sm font-medium">Category</label>
           <Input
-            value={formData.medicine_code}
-            onChange={(e) => setFormData(prev => ({ ...prev, medicine_code: e.target.value }))}
-            placeholder="Enter item code"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Barcode</label>
-          <Input
-            value={formData.barcode}
-            onChange={(e) => setFormData(prev => ({ ...prev, barcode: e.target.value }))}
-            placeholder="Enter barcode"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Strength</label>
-          <Input
-            value={formData.strength}
-            onChange={(e) => setFormData(prev => ({ ...prev, strength: e.target.value }))}
-            placeholder="e.g., 500mg"
+            value={formData.category}
+            onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
+            placeholder="Enter category"
           />
         </div>
         <div>
@@ -560,22 +558,6 @@ const EditMedicineForm: React.FC<{
             <option value="Cream">Cream</option>
             <option value="Suspension">Suspension</option>
           </select>
-        </div>
-        <div>
-          <label className="text-sm font-medium">Category</label>
-          <Input
-            value={formData.category}
-            onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-            placeholder="Enter category"
-          />
-        </div>
-        <div className="col-span-2">
-          <label className="text-sm font-medium">Manufacturer</label>
-          <Input
-            value={formData.manufacturer_id}
-            onChange={(e) => setFormData(prev => ({ ...prev, manufacturer_id: e.target.value }))}
-            placeholder="Enter manufacturer name"
-          />
         </div>
         <div className="col-span-2">
           <label className="text-sm font-medium">Description</label>
