@@ -542,6 +542,9 @@ const FinalBill = () => {
     respiratoryRate: '18'
   });
 
+  // Trigger for refetching services when patient info loads
+  const [servicesRefetchTrigger, setServicesRefetchTrigger] = useState(0);
+
   // Advance Payment Modal State
   const [isAdvancePaymentModalOpen, setIsAdvancePaymentModalOpen] = useState(false);
 
@@ -717,17 +720,107 @@ const FinalBill = () => {
 
   useEffect(() => {
     const fetchSurgeries = async () => {
+      // Fetch visit data for patient type determination
+      let visitDataResult = null;
+      if (visitId) {
+        const { data, error: visitError } = await supabase
+          .from('visits')
+          .select('id, patient_type, insurance_type')
+          .eq('visit_id', visitId)
+          .single();
+
+        if (!visitError && data) {
+          visitDataResult = data;
+        }
+      }
+
       const { data, error } = await supabase
         .from('cghs_surgery')
-        .select('id, name, NABH_NABL_Rate, code');
+        .select('id, name, code, category, private, Non_NABH_NABL_Rate, bhopal_nabh_rate, NABH_NABL_Rate, description');
+
       if (data && Array.isArray(data)) {
         console.log('CGHS Surgeries loaded:', data.length, 'surgeries');
-        console.log('Sample surgery:', data[0]);
-        setCghsSurgeries(data as any);
+
+        // Determine patient type to select appropriate rate
+        const patientType = (visitDataResult?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+        const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+        // Corporate field takes priority - check if patient has a corporate panel first
+        const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+        // Patient is private ONLY if they don't have a corporate panel
+        const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+        // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+        const usesNonNABHRate = hasCorporate &&
+          (corporate.includes('cghs') ||
+          corporate.includes('echs') ||
+          corporate.includes('esic'));
+
+        // Check if corporate qualifies for Bhopal NABH rates
+        const usesBhopaliNABHRate = hasCorporate &&
+          (corporate.includes('mp police') ||
+          corporate.includes('ordnance factory') ||
+          corporate.includes('ordnance factory itarsi'));
+
+        // Check if patient has other corporate
+        const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+        console.log('🔍 Patient Type for Surgery Dropdown:', {
+          patientType,
+          corporate,
+          isPrivatePatient,
+          hasCorporate,
+          usesNonNABHRate,
+          usesBhopaliNABHRate,
+          usesNABHRate
+        });
+
+        // Transform data with conditional pricing based on patient type
+        const transformedData = data.map(item => {
+          let rate = 0;
+          let rateSource = 'fallback';
+
+          // Rate selection based on patient type (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+          if (isPrivatePatient && item.private && item.private > 0) {
+            rate = item.private;
+            rateSource = 'private';
+          } else if (usesNonNABHRate && item.Non_NABH_NABL_Rate && item.Non_NABH_NABL_Rate > 0) {
+            rate = item.Non_NABH_NABL_Rate;
+            rateSource = 'non_nabh_nabl';
+          } else if (usesBhopaliNABHRate && item.bhopal_nabh_rate && item.bhopal_nabh_rate > 0) {
+            rate = item.bhopal_nabh_rate;
+            rateSource = 'bhopal_nabh';
+          } else if (usesNABHRate && item.NABH_NABL_Rate && item.NABH_NABL_Rate > 0) {
+            rate = item.NABH_NABL_Rate;
+            rateSource = 'nabh_nabl';
+          } else if (item.private && item.private > 0) {
+            rate = item.private;
+            rateSource = 'private_fallback';
+          }
+
+          console.log('🔍 Surgery mapping:', {
+            surgery: item.name,
+            privateRate: item.private,
+            nabhRate: item.NABH_NABL_Rate,
+            nonNabhRate: item.Non_NABH_NABL_Rate,
+            bhopaliRate: item.bhopal_nabh_rate,
+            selectedRate: rate,
+            rateSource: rateSource
+          });
+
+          return {
+            ...item,
+            NABH_NABL_Rate: rate.toString(), // Store selected rate in NABH_NABL_Rate field for compatibility
+            rateSource: rateSource
+          };
+        });
+
+        setCghsSurgeries(transformedData as any);
       }
     };
     fetchSurgeries();
-  }, []);
+  }, [visitId, servicesRefetchTrigger]);
 
   // Fetch available lab services from database
   useEffect(() => {
@@ -735,13 +828,27 @@ const FinalBill = () => {
       try {
         setIsLoadingLabServices(true);
 
+        // Fetch visit data to get patient_type
+        let visitDataResult = null;
+        if (visitId) {
+          const { data: visitData, error: visitError } = await supabase
+            .from('visits')
+            .select('id, patient_type, insurance_type')
+            .eq('visit_id', visitId)
+            .single();
+
+          if (!visitError && visitData) {
+            visitDataResult = visitData;
+          }
+        }
+
         // Get current hospital for filtering
         const currentHospital = hospitalConfig?.name || 'hope';
         console.log('🏥 [LAB SERVICES] Fetching lab services for hospital:', currentHospital);
 
         const { data, error } = await supabase
           .from('lab')
-          .select(`id, name, "CGHS_code", private, hospital_name`)
+          .select(`id, name, "CGHS_code", private, "NABH_rates_in_rupee", "Non-NABH_rates_in_rupee", bhopal_nabh_rate, bhopal_non_nabh_rate, hospital_name`)
           .eq('hospital_name', currentHospital)
           .order('name');
 
@@ -752,15 +859,77 @@ const FinalBill = () => {
           console.log('Lab services fetched successfully:', data.length, 'records for', currentHospital);
           console.log('Sample lab services:', data.slice(0, 3));
 
-          // Map the field names to expected format using private rates
+          // Determine patient type to select appropriate rate
+          const patientType = (visitDataResult?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+          const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+          // Corporate field takes priority - check if patient has a corporate panel first
+          const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+          // Patient is private ONLY if they don't have a corporate panel
+          const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+          // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+          const usesNonNABHRate = hasCorporate &&
+            (corporate.includes('cghs') ||
+            corporate.includes('echs') ||
+            corporate.includes('esic'));
+
+          // Check if corporate qualifies for Bhopal NABH rates
+          const usesBhopaliNABHRate = hasCorporate &&
+            (corporate.includes('mp police') ||
+            corporate.includes('ordnance factory') ||
+            corporate.includes('ordnance factory itarsi'));
+
+          // Check if patient has other corporate
+          const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+          console.log('🔍 Patient Type for Lab Dropdown:', {
+            patientType,
+            corporate,
+            isPrivatePatient,
+            hasCorporate,
+            usesNonNABHRate,
+            usesBhopaliNABHRate,
+            usesNABHRate
+          });
+
+          // Map the field names to expected format using CORRECT rate based on patient type
           const mappedData = data.map(item => {
-            // Use private rate, fallback to 100 if null/0 (temporary until DB updated)
-            const cost = (item.private && item.private > 0) ? item.private : 100;
+            // Select appropriate rate based on patient type (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+            let cost = 100; // Default fallback
+            let rateSource = 'fallback';
+
+            // ALWAYS check private patient FIRST
+            if (isPrivatePatient && item.private && item.private > 0) {
+              cost = item.private;
+              rateSource = 'private';
+            } else if (usesNonNABHRate && item['Non-NABH_rates_in_rupee'] && item['Non-NABH_rates_in_rupee'] > 0) {
+              cost = item['Non-NABH_rates_in_rupee'];
+              rateSource = 'non_nabh';
+            } else if (usesBhopaliNABHRate && item.bhopal_nabh_rate && item.bhopal_nabh_rate > 0) {
+              cost = item.bhopal_nabh_rate;
+              rateSource = 'bhopal_nabh';
+            } else if (usesNABHRate && item['NABH_rates_in_rupee'] && item['NABH_rates_in_rupee'] > 0) {
+              cost = item['NABH_rates_in_rupee'];
+              rateSource = 'nabh';
+            } else if (item.private && item.private > 0) {
+              cost = item.private;
+              rateSource = 'private_fallback';
+            }
+
             console.log('🔍 fetchLabServices mapping:', {
+              id: item.id,
               service: item.name,
+              cghs_code: item['CGHS_code'],
+              hospital: item.hospital_name,
               privateRate: item.private,
-              finalCost: cost,
-              usingFallback: !item.private || item.private === 0
+              nabhRate: item['NABH_rates_in_rupee'],
+              nonNabhRate: item['Non-NABH_rates_in_rupee'],
+              bhopaliRate: item.bhopal_nabh_rate,
+              selectedRate: cost,
+              rateSource: rateSource,
+              patientCategory: isPrivatePatient ? 'Private' : corporate || 'Unknown'
             });
 
             return {
@@ -772,6 +941,29 @@ const FinalBill = () => {
           });
 
           console.log('Mapped lab services sample:', mappedData.slice(0, 3));
+
+          // Special logging for CBC to help debug rate issues
+          const cbcServices = data.filter(item =>
+            item.name.toLowerCase().includes('cbc') ||
+            item.name.toLowerCase().includes('complete blood count')
+          );
+          if (cbcServices.length > 0) {
+            console.log('🩸 CBC Services found in database:', cbcServices.map(item => ({
+              id: item.id,
+              name: item.name,
+              privateRate: item.private,
+              nabhRate: item['NABH_rates_in_rupee'],
+              nonNabhRate: item['Non-NABH_rates_in_rupee'],
+              bhopaliRate: item.bhopal_nabh_rate
+            })));
+            console.log('🩸 CBC Services after mapping (what user sees in dropdown):',
+              mappedData.filter(item =>
+                item.name.toLowerCase().includes('cbc') ||
+                item.name.toLowerCase().includes('complete blood count')
+              )
+            );
+          }
+
           setAvailableLabServices(mappedData);
         }
       } catch (error) {
@@ -783,7 +975,7 @@ const FinalBill = () => {
     };
 
     fetchLabServices();
-  }, [visitId]);
+  }, [visitId, servicesRefetchTrigger]);
 
   // Fetch available radiology services from database
   useEffect(() => {
@@ -792,41 +984,27 @@ const FinalBill = () => {
         console.log('🔄 Starting to fetch radiology services...');
         setIsLoadingRadiologyServices(true);
 
-        // First get patient type from visit data if visitId is available
-        let patientCategory = 'Private'; // Default fallback
+        // Fetch visit data for patient type determination
+        let visitDataResult = null;
         if (visitId) {
-          const { data: visitDataResult, error: visitError } = await supabase
+          const { data, error: visitError } = await supabase
             .from('visits')
-            .select(`
-              id,
-              patient_type,
-              insurance_type
-            `)
+            .select('id, patient_type, insurance_type')
             .eq('visit_id', visitId)
             .single();
 
-          if (!visitError && visitDataResult) {
-            // Get patient type from visit data instead of patient profile
-            patientCategory = visitDataResult.patient_type ||
-              visitDataResult.insurance_type ||
-              'Private';
-
-            console.log('👤 fetchRadiologyServices - Patient category determined:', {
-              category: patientCategory,
-              visitCategory: visitDataResult.category,
-              patientCategory: visitDataResult.patients?.category,
-              patientType: visitDataResult.patients?.patient_type,
-              insuranceType: visitDataResult.patients?.insurance_type
+          if (!visitError && data) {
+            visitDataResult = data;
+            console.log('👤 fetchRadiologyServices - Visit data fetched:', {
+              patient_type: data.patient_type,
+              insurance_type: data.insurance_type
             });
           }
         }
 
-        const isPrivatePatient = patientCategory?.toLowerCase() === 'private';
-        console.log('🔍 fetchRadiologyServices - Patient status:', { patientCategory, isPrivatePatient });
-
         const { data, error } = await supabase
           .from('radiology')
-          .select('id, name, cost, category, description, private')
+          .select('id, name, cost, category, description, private, NABH_NABL_Rate, Non_NABH_NABL_Rate, bhopal_nabh')
           .order('name');
 
         if (error) {
@@ -835,16 +1013,77 @@ const FinalBill = () => {
         } else if (data) {
           console.log('✅ Radiology services fetched successfully:', data.length, 'records');
           console.log('📋 Sample radiology services:', data.slice(0, 3));
-          
-          // Transform data with conditional pricing
+
+          // Determine patient type to select appropriate rate
+          const patientType = (visitDataResult?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+          const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+          // Corporate field takes priority - check if patient has a corporate panel first
+          const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+          // Patient is private ONLY if they don't have a corporate panel
+          const isPrivatePatientCheck = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+          // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+          const usesNonNABHRate = hasCorporate &&
+            (corporate.includes('cghs') ||
+            corporate.includes('echs') ||
+            corporate.includes('esic'));
+
+          // Check if corporate qualifies for Bhopal NABH rates
+          const usesBhopaliNABHRate = hasCorporate &&
+            (corporate.includes('mp police') ||
+            corporate.includes('ordnance factory') ||
+            corporate.includes('ordnance factory itarsi'));
+
+          // Check if patient has other corporate
+          const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+          console.log('🔍 Patient Type for Radiology Dropdown:', {
+            patientType,
+            corporate,
+            isPrivatePatient: isPrivatePatientCheck,
+            hasCorporate,
+            usesNonNABHRate,
+            usesBhopaliNABHRate,
+            usesNABHRate
+          });
+
+          // Transform data with conditional pricing based on patient type
           const transformedData = data.map(item => {
-            const cost = isPrivatePatient && item.private ? item.private : (item.cost || 0);
+            // Select appropriate rate based on patient type (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+            let cost = 0; // Default fallback
+            let rateSource = 'fallback';
+
+            // ALWAYS check private patient FIRST
+            if (isPrivatePatientCheck && item.private && item.private > 0) {
+              cost = item.private;
+              rateSource = 'private';
+            } else if (usesNonNABHRate && item.Non_NABH_NABL_Rate && item.Non_NABH_NABL_Rate > 0) {
+              cost = item.Non_NABH_NABL_Rate;
+              rateSource = 'non_nabh_nabl';
+            } else if (usesBhopaliNABHRate && item.bhopal_nabh && item.bhopal_nabh > 0) {
+              cost = item.bhopal_nabh;
+              rateSource = 'bhopal_nabh';
+            } else if (usesNABHRate && item.NABH_NABL_Rate && item.NABH_NABL_Rate > 0) {
+              cost = item.NABH_NABL_Rate;
+              rateSource = 'nabh_nabl';
+            } else if (item.private && item.private > 0) {
+              cost = item.private;
+              rateSource = 'private_fallback';
+            }
+
             console.log('🔍 fetchRadiologyServices mapping:', {
               service: item.name,
-              isPrivatePatient,
+              patientType,
+              isPrivatePatient: isPrivatePatientCheck,
+              patientCorporate: patientInfo?.corporate || 'NOT SET',
               privateRate: item.private,
-              standardRate: item.cost,
-              finalCost: cost
+              nabhRate: item.NABH_NABL_Rate,
+              nonNabhRate: item.Non_NABH_NABL_Rate,
+              bhopaliRate: item.bhopal_nabh,
+              selectedRate: cost,
+              rateSource: rateSource
             });
 
             return {
@@ -867,7 +1106,7 @@ const FinalBill = () => {
     };
 
     fetchRadiologyServices();
-  }, [visitId]);
+  }, [visitId, servicesRefetchTrigger]);
 
   // Fetch available pharmacy/medication services from database
   useEffect(() => {
@@ -1558,6 +1797,14 @@ const FinalBill = () => {
   const [finalDischargeSummary, setFinalDischargeSummary] = useState('');
   const [isGeneratingDischargeSummary, setIsGeneratingDischargeSummary] = useState(false);
   const [patientInfo, setPatientInfo] = useState<any>(null);
+
+  // Refetch services when patient info changes (especially corporate panel)
+  useEffect(() => {
+    if (patientInfo?.corporate) {
+      console.log('🔄 Patient info loaded, triggering services refetch. Corporate:', patientInfo.corporate);
+      setServicesRefetchTrigger(prev => prev + 1);
+    }
+  }, [patientInfo?.corporate]);
 
   // OT Notes state
   const [otNotesData, setOtNotesData] = useState({
@@ -2514,8 +2761,11 @@ const FinalBill = () => {
         return;
       }
 
+      // Log discharge update
+      console.log('💾 Starting discharge update for visitId:', visitId);
+
       // Update visit discharge status and discharge date with timestamp
-      await supabase
+      const { error: visitError } = await supabase
         .from('visits')
         .update({
           discharge_date: new Date().toISOString(), // Set discharge date and time (full timestamp)
@@ -2527,7 +2777,16 @@ const FinalBill = () => {
         })
         .eq('visit_id', visitId);
 
-      toast.success('Final payment saved successfully!');
+      if (visitError) {
+        console.error('❌ Error updating visit discharge status:', visitError);
+        toast.error('Failed to update discharge status. Please try again.');
+        return;
+      }
+
+      console.log('✅ Visit discharge status updated successfully');
+      console.log('✅ Patient should now appear in Discharged Patients dashboard');
+
+      toast.success('Patient discharged successfully!');
 
       // Reset form and close modal
       setFinalPaymentAmount('');
@@ -2536,8 +2795,12 @@ const FinalBill = () => {
       setFinalPaymentRemark('');
       setIsFinalPaymentModalOpen(false);
 
-      // Refresh financial summary data
-      window.location.reload(); // Simple refresh for now, can be improved with query invalidation
+      // Invalidate queries to refresh data without full page reload
+      queryClient.invalidateQueries({ queryKey: ["finalBillData", visitId] });
+      queryClient.invalidateQueries({ queryKey: ["discharged-patients"] });
+      queryClient.invalidateQueries({ queryKey: ["currently-admitted-patients"] });
+
+      console.log('🔄 Queries invalidated - data will refresh automatically');
 
     } catch (error) {
       console.error('Error in handleSaveAndDischarge:', error);
@@ -4866,23 +5129,85 @@ INSTRUCTIONS:
         .eq('visit_id', visitData.id);
 
       if (!radiologyError && radiologyData) {
-        // Fetch radiology details for each radiology_id
+        // Fetch radiology details for each radiology_id with all rate columns
         const formattedRadiologyData = await Promise.all(
           radiologyData.map(async (item) => {
             if (item.radiology_id) {
               const { data: radiologyDetail } = await supabase
                 .from('radiology')
-                .select('name, description, cost')
+                .select('name, description, cost, bhopal_nabh, Non_NABH_NABL_Rate, NABH_NABL_Rate')
                 .eq('id', item.radiology_id)
                 .single();
+
+              // Determine correct rate based on patient's corporate type
+              const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+              const hasCorporate = corporate.length > 0;
+
+              // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+              const usesNonNABHRate =
+                corporate.includes('cghs') ||
+                corporate.includes('echs') ||
+                corporate.includes('esic');
+
+              // Check if corporate qualifies for Bhopal NABH rates
+              const usesBhopaliNABHRate =
+                corporate.includes('mp police') ||
+                corporate.includes('ordnance factory') ||
+                corporate.includes('ordnance factory itarsi');
+
+              // Check if patient has other corporate
+              const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+              // STRICT CORPORATE RATE SELECTION - NO FALLBACK
+              let correctRate = 0;
+              let rateSource = 'not_available';
+
+              if (usesNonNABHRate) {
+                correctRate = (radiologyDetail?.Non_NABH_NABL_Rate && radiologyDetail.Non_NABH_NABL_Rate > 0) ? radiologyDetail.Non_NABH_NABL_Rate : 0;
+                rateSource = correctRate > 0 ? 'non_nabh_nabl' : 'not_available';
+              } else if (usesBhopaliNABHRate) {
+                correctRate = (radiologyDetail?.bhopal_nabh && radiologyDetail.bhopal_nabh > 0) ? radiologyDetail.bhopal_nabh : 0;
+                rateSource = correctRate > 0 ? 'bhopal_nabh' : 'not_available';
+              } else if (usesNABHRate) {
+                correctRate = (radiologyDetail?.NABH_NABL_Rate && radiologyDetail.NABH_NABL_Rate > 0) ? radiologyDetail.NABH_NABL_Rate : 0;
+                rateSource = correctRate > 0 ? 'nabh_nabl' : 'not_available';
+              } else {
+                // Private patients
+                correctRate = parseFloat(radiologyDetail?.cost?.toString().replace(/[^\d.-]/g, '')) || 0;
+                rateSource = 'regular_cost';
+              }
+
+              console.log('🔍 Saved radiology rate determination:', {
+                radiologyName: radiologyDetail?.name,
+                savedCost: item.cost,
+                correctRate: correctRate,
+                rateSource: rateSource,
+                patientCorporate: patientInfo?.corporate || 'NOT SET',
+                usesNonNABHRate,
+                usesBhopaliNABHRate,
+                usesNABHRate
+              });
+
+              // VALIDATION: Warn if corporate-specific rate is missing
+              if (correctRate === 0 && hasCorporate) {
+                console.warn('⚠️ SAVED RADIOLOGY - RATE NOT AVAILABLE:', {
+                  service: radiologyDetail?.name,
+                  patientType: patientInfo?.corporate,
+                  expectedRate: usesBhopaliNABHRate ? 'bhopal_nabh' :
+                                usesNonNABHRate ? 'Non_NABH_NABL_Rate' :
+                                usesNABHRate ? 'NABH_NABL_Rate' : 'unknown',
+                  message: `No rate found for ${patientInfo?.corporate} patients. Showing ₹0.`
+                });
+              }
 
               return {
                 id: item.id,
                 radiology_name: radiologyDetail?.name || `Radiology ID: ${item.radiology_id}`,
                 description: radiologyDetail?.description || '',
                 ordered_date: item.ordered_date,
-                cost: parseFloat(radiologyDetail?.cost?.toString().replace(/[^\d.-]/g, '')) || 0,
-                created_at: item.created_at
+                cost: correctRate, // Use calculated correct rate based on patient type
+                created_at: item.created_at,
+                rateSource: rateSource // Store rate source for debugging
               };
             }
             return {
@@ -4936,10 +5261,10 @@ INSTRUCTIONS:
     console.log('🔍 Fetching saved lab data for visit:', visitId);
 
     try {
-      // First get the actual visit UUID from the visits table
+      // First get the actual visit UUID and patient_type from the visits table
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id')
+        .select('id, patient_type')
         .eq('visit_id', visitId)
         .single();
 
@@ -4958,24 +5283,99 @@ INSTRUCTIONS:
 
       if (!labError && labData) {
         console.log('🧪 Found lab data, formatting:', labData);
-        // Fetch lab details for each lab_id
+        // Fetch lab details for each lab_id with all rate columns
         const formattedLabData = await Promise.all(
           labData.map(async (item) => {
             if (item.lab_id) {
               const { data: labDetail } = await supabase
                 .from('lab')
-                .select('name, description, private')
+                .select('name, description, private, "NABH_rates_in_rupee", "Non-NABH_rates_in_rupee", bhopal_nabh_rate, bhopal_non_nabh_rate')
                 .eq('id', item.lab_id)
                 .single();
 
+              // Determine correct rate based on patient type and corporate status
+              // Check if patient is PRIVATE by checking BOTH patient_type AND corporate fields
+              const patientType = (visitData?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+              const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+              // Corporate field takes priority - check if patient has a corporate panel first
+              const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+              // Patient is private ONLY if they don't have a corporate panel
+              const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+              // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+              const usesNonNABHRate = hasCorporate &&
+                (corporate.includes('cghs') ||
+                corporate.includes('echs') ||
+                corporate.includes('esic'));
+
+              // Check if corporate qualifies for Bhopal NABH rates
+              const usesBhopaliNABHRate = hasCorporate &&
+                (corporate.includes('mp police') ||
+                corporate.includes('ordnance factory') ||
+                corporate.includes('ordnance factory itarsi'));
+
+              // Check if patient has other corporate (not CGHS/ECHS/ESIC, not MP Police/Ordnance Factory)
+              const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+              // Select appropriate rate based on corporate (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+              let correctRate = 100; // Default fallback
+              let rateSource = 'fallback';
+
+              // ALWAYS check private patient FIRST
+              if (isPrivatePatient && labDetail?.private && labDetail.private > 0) {
+                correctRate = labDetail.private;
+                rateSource = 'private';
+              } else if (usesNonNABHRate && labDetail?.['Non-NABH_rates_in_rupee'] && labDetail['Non-NABH_rates_in_rupee'] > 0) {
+                correctRate = labDetail['Non-NABH_rates_in_rupee'];
+                rateSource = 'non_nabh';
+              } else if (usesBhopaliNABHRate && labDetail?.bhopal_nabh_rate && labDetail.bhopal_nabh_rate > 0) {
+                correctRate = labDetail.bhopal_nabh_rate;
+                rateSource = 'bhopal_nabh';
+              } else if (usesNABHRate && labDetail?.['NABH_rates_in_rupee'] && labDetail['NABH_rates_in_rupee'] > 0) {
+                correctRate = labDetail['NABH_rates_in_rupee'];
+                rateSource = 'nabh';
+              } else if (labDetail?.private && labDetail.private > 0) {
+                correctRate = labDetail.private;
+                rateSource = 'private_fallback';
+              }
+
+              console.log('🔍 Lab rate determination in fetchSavedLabData:', {
+                labName: labDetail?.name,
+                savedCost: item.cost,
+                correctRate: correctRate,
+                rateSource: rateSource,
+                patientType,
+                isPrivatePatient,
+                patientCorporate: patientInfo?.corporate || 'NOT SET',
+                hasCorporate,
+                usesNonNABHRate,
+                usesBhopaliNABHRate,
+                usesNABHRate
+              });
+
+              // VALIDATION: Check if saved cost differs from current master rate
+              if (item.cost && item.cost !== correctRate) {
+                console.warn('⚠️ Rate mismatch detected:', {
+                  labName: labDetail?.name,
+                  savedCost: item.cost,
+                  correctCurrentRate: correctRate,
+                  difference: correctRate - item.cost,
+                  message: `Using current ${rateSource} rate (₹${correctRate}) instead of saved cost (₹${item.cost})`
+                });
+              }
+
+              // Use correct rate from lab table instead of potentially outdated saved cost
               return {
                 id: item.id,
                 lab_name: labDetail?.name || `Lab ID: ${item.lab_id}`,
                 description: labDetail?.description || '',
                 ordered_date: item.ordered_date,
-                cost: item.cost || ((labDetail?.private && labDetail.private > 0) ? labDetail.private : 100), // Preserve saved cost, fallback to lab rate
+                cost: correctRate, // Use calculated correct rate based on patient type
                 quantity: item.quantity || 1, // Preserve quantity from database
-                created_at: item.created_at
+                created_at: item.created_at,
+                rateSource: rateSource // Store rate source for debugging
               };
             }
             return {
@@ -4989,7 +5389,7 @@ INSTRUCTIONS:
             };
           })
         );
-        console.log('✅ Formatted lab data:', formattedLabData);
+        console.log('✅ Formatted lab data with correct rates:', formattedLabData);
         setSavedLabData(formattedLabData);
       } else {
         console.log('❌ No lab data found or error occurred');
@@ -8104,10 +8504,10 @@ INSTRUCTIONS:
 
       console.log('Fetching saved radiology for visit ID:', visitId);
 
-      // First get the actual visit UUID from the visits table
+      // First get the actual visit UUID and patient_type from the visits table
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id')
+        .select('id, patient_type, insurance_type')
         .eq('visit_id', visitId)
         .single();
 
@@ -8150,7 +8550,7 @@ INSTRUCTIONS:
 
       const { data: radiologyData, error: radiologyError } = await supabase
         .from('radiology')
-        .select('id, name, description, category, cost')
+        .select('id, name, description, category, cost, private, NABH_NABL_Rate, Non_NABH_NABL_Rate, bhopal_nabh')
         .in('id', radiologyIds);
 
       if (radiologyError) {
@@ -8169,25 +8569,82 @@ INSTRUCTIONS:
 
       console.log('Radiology details data:', radiologyData);
 
-      // Combine the data preserving database values when available
+      // Determine patient type to select appropriate rate
+      const patientType = (visitData?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+      const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+      // Corporate field takes priority - check if patient has a corporate panel first
+      const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+      // Patient is private ONLY if they don't have a corporate panel
+      const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+      // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+      const usesNonNABHRate = hasCorporate &&
+        (corporate.includes('cghs') ||
+        corporate.includes('echs') ||
+        corporate.includes('esic'));
+
+      // Check if corporate qualifies for Bhopal NABH rates
+      const usesBhopaliNABHRate = hasCorporate &&
+        (corporate.includes('mp police') ||
+        corporate.includes('ordnance factory') ||
+        corporate.includes('ordnance factory itarsi'));
+
+      // Check if patient has other corporate
+      const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+      console.log('🔍 Saved Radiology - Patient Type Detection:', {
+        patientType,
+        corporate,
+        isPrivatePatient,
+        hasCorporate,
+        usesNonNABHRate,
+        usesBhopaliNABHRate,
+        usesNABHRate
+      });
+
+      // Combine the data and RECALCULATE rates based on patient type
       const formattedRadiology = visitRadiologyData.map((visitRadiology: any) => {
         const radiologyDetail = radiologyData?.find((r: any) => r.id === visitRadiology.radiology_id);
-
-        // Use stored database values first, fallback to calculated values only if missing
-        const storedCost = visitRadiology.cost;
-        const storedUnitRate = visitRadiology.unit_rate;
         const quantity = visitRadiology.quantity || 1;
 
-        // Only calculate if database values are missing/invalid
-        let finalCost = storedCost;
-        let finalUnitRate = storedUnitRate;
+        // ALWAYS RECALCULATE rate based on current patient type
+        let correctRate = 0;
+        let rateSource = 'not_available';
 
-        if (!storedCost || storedCost <= 0 || !storedUnitRate || storedUnitRate <= 0) {
-          // Fallback calculation for older data without proper cost/unit_rate
-          const fallbackUnitRate = (radiologyDetail?.cost && radiologyDetail.cost > 0) ? radiologyDetail.cost : 100;
-          finalUnitRate = storedUnitRate || fallbackUnitRate;
-          finalCost = storedCost || (fallbackUnitRate * quantity);
+        // ALWAYS check private patient FIRST
+        if (isPrivatePatient && radiologyDetail?.private && radiologyDetail.private > 0) {
+          correctRate = radiologyDetail.private;
+          rateSource = 'private';
+        } else if (usesNonNABHRate && radiologyDetail?.Non_NABH_NABL_Rate && radiologyDetail.Non_NABH_NABL_Rate > 0) {
+          correctRate = radiologyDetail.Non_NABH_NABL_Rate;
+          rateSource = 'non_nabh_nabl';
+        } else if (usesBhopaliNABHRate && radiologyDetail?.bhopal_nabh && radiologyDetail.bhopal_nabh > 0) {
+          correctRate = radiologyDetail.bhopal_nabh;
+          rateSource = 'bhopal_nabh';
+        } else if (usesNABHRate && radiologyDetail?.NABH_NABL_Rate && radiologyDetail.NABH_NABL_Rate > 0) {
+          correctRate = radiologyDetail.NABH_NABL_Rate;
+          rateSource = 'nabh_nabl';
+        } else if (radiologyDetail?.private && radiologyDetail.private > 0) {
+          correctRate = radiologyDetail.private;
+          rateSource = 'private_fallback';
         }
+
+        const finalUnitRate = correctRate;
+        const finalCost = correctRate * quantity;
+
+        console.log('🔍 Saved Radiology Rate Recalculation:', {
+          radiologyName: radiologyDetail?.name,
+          storedCost: visitRadiology.cost,
+          recalculatedUnitRate: correctRate,
+          recalculatedCost: finalCost,
+          quantity,
+          rateSource,
+          patientType,
+          isPrivatePatient,
+          patientCorporate: patientInfo?.corporate || 'NOT SET'
+        });
 
         return {
           ...visitRadiology,
@@ -8284,6 +8741,20 @@ INSTRUCTIONS:
       });
       if (!serviceSearchTerm || serviceSearchTerm.length < 2) return [];
 
+      // Fetch visit data to get patient_type
+      let visitDataResult = null;
+      if (visitId) {
+        const { data: visitData, error: visitError } = await supabase
+          .from('visits')
+          .select('id, patient_type, insurance_type')
+          .eq('visit_id', visitId)
+          .single();
+
+        if (!visitError && visitData) {
+          visitDataResult = visitData;
+        }
+      }
+
       try {
         const { data, error } = await supabase
           .from('lab')
@@ -8318,30 +8789,40 @@ INSTRUCTIONS:
 
         // Map the field names to expected format - use appropriate rates based on corporate type
         const mappedData = data?.map(item => {
-          // Check patient corporate type (case-insensitive partial match)
+          // Check patient type from BOTH patient_type AND corporate fields
+          const patientType = (visitDataResult?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
           const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
-          const hasCorporate = corporate.length > 0;
+
+          // Corporate field takes priority - check if patient has a corporate panel first
+          const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+          // Patient is private ONLY if they don't have a corporate panel
+          const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
 
           // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
-          const usesNonNABHRate =
-            corporate.includes('cghs') ||
+          const usesNonNABHRate = hasCorporate &&
+            (corporate.includes('cghs') ||
             corporate.includes('echs') ||
-            corporate.includes('esic');
+            corporate.includes('esic'));
 
           // Check if corporate qualifies for Bhopal NABH rates
-          const usesBhopaliNABHRate =
-            corporate.includes('mp police') ||
+          const usesBhopaliNABHRate = hasCorporate &&
+            (corporate.includes('mp police') ||
             corporate.includes('ordnance factory') ||
-            corporate.includes('ordnance factory itarsi');
+            corporate.includes('ordnance factory itarsi'));
 
           // Check if patient has other corporate (not CGHS/ECHS/ESIC, not MP Police/Ordnance Factory)
           const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
 
-          // Select appropriate rate based on corporate (priority: Non-NABH > Bhopal NABH > NABH > Private > Fallback)
+          // Select appropriate rate based on patient type (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
           let cost = 100; // Default fallback
           let rateSource = 'fallback';
 
-          if (usesNonNABHRate && item['Non-NABH_rates_in_rupee'] && item['Non-NABH_rates_in_rupee'] > 0) {
+          // ALWAYS check private patient FIRST
+          if (isPrivatePatient && item.private && item.private > 0) {
+            cost = item.private;
+            rateSource = 'private';
+          } else if (usesNonNABHRate && item['Non-NABH_rates_in_rupee'] && item['Non-NABH_rates_in_rupee'] > 0) {
             cost = item['Non-NABH_rates_in_rupee'];
             rateSource = 'non_nabh';
           } else if (usesBhopaliNABHRate && item.bhopal_nabh_rate && item.bhopal_nabh_rate > 0) {
@@ -8352,13 +8833,15 @@ INSTRUCTIONS:
             rateSource = 'nabh';
           } else if (item.private && item.private > 0) {
             cost = item.private;
-            rateSource = 'private';
+            rateSource = 'private_fallback';
           }
 
           console.log('🔍 Lab search mapping:', {
             service: item.name,
+            patientType,
             patientCorporate: patientInfo?.corporate || 'NOT SET',
             corporateLower: corporate || 'EMPTY',
+            isPrivatePatient,
             hasCorporate: hasCorporate,
             usesNonNABHRate: usesNonNABHRate,
             usesBhopaliNABHRate: usesBhopaliNABHRate,
@@ -8400,9 +8883,23 @@ INSTRUCTIONS:
       });
       if (!serviceSearchTerm || serviceSearchTerm.length < 2) return [];
 
+      // Fetch visit data to get patient_type
+      let visitDataResult = null;
+      if (visitId) {
+        const { data: visitData, error: visitError } = await supabase
+          .from('visits')
+          .select('id, patient_type, insurance_type')
+          .eq('visit_id', visitId)
+          .single();
+
+        if (!visitError && visitData) {
+          visitDataResult = visitData;
+        }
+      }
+
       const { data, error } = await supabase
         .from('radiology')
-        .select('id, name, cost, category, description, bhopal_nabh, Non_NABH_NABL_Rate, NABH_NABL_Rate')
+        .select('id, name, cost, category, description, private, bhopal_nabh, Non_NABH_NABL_Rate, NABH_NABL_Rate')
         .or(`name.ilike.%${serviceSearchTerm}%,description.ilike.%${serviceSearchTerm}%`)
         .order('name')
         .limit(20);
@@ -8417,48 +8914,69 @@ INSTRUCTIONS:
 
       // Transform data - use appropriate rates based on corporate type
       const transformedData = data?.map(item => {
-        // Check patient corporate type (case-insensitive partial match)
+        // Check patient type from BOTH patient_type AND corporate fields
+        const patientType = (visitDataResult?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
         const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
-        const hasCorporate = corporate.length > 0;
+
+        // Corporate field takes priority - check if patient has a corporate panel first
+        const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+        // Patient is private ONLY if they don't have a corporate panel
+        const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
 
         // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
-        const usesNonNABHRate =
-          corporate.includes('cghs') ||
+        const usesNonNABHRate = hasCorporate &&
+          (corporate.includes('cghs') ||
           corporate.includes('echs') ||
-          corporate.includes('esic');
+          corporate.includes('esic'));
 
         // Check if corporate qualifies for Bhopal NABH rates
-        const usesBhopaliNABHRate =
-          corporate.includes('mp police') ||
+        const usesBhopaliNABHRate = hasCorporate &&
+          (corporate.includes('mp police') ||
           corporate.includes('ordnance factory') ||
-          corporate.includes('ordnance factory itarsi');
+          corporate.includes('ordnance factory itarsi'));
 
         // Check if patient has other corporate (not CGHS/ECHS/ESIC, not MP Police/Ordnance Factory)
         const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
 
-        // Select appropriate rate based on corporate (priority: Non-NABH > Bhopal NABH > NABH > Regular Cost)
-        let finalCost = item.cost || 0; // Default to regular cost
-        let rateSource = 'regular_cost';
+        // Rate selection based on patient type (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+        let finalCost = 0;
+        let rateSource = 'not_available';
 
-        if (usesNonNABHRate && item.Non_NABH_NABL_Rate && item.Non_NABH_NABL_Rate > 0) {
-          finalCost = item.Non_NABH_NABL_Rate;
-          rateSource = 'non_nabh_nabl';
-        } else if (usesBhopaliNABHRate && item.bhopal_nabh && item.bhopal_nabh > 0) {
-          finalCost = item.bhopal_nabh;
-          rateSource = 'bhopal_nabh';
-        } else if (usesNABHRate && item.NABH_NABL_Rate && item.NABH_NABL_Rate > 0) {
-          finalCost = item.NABH_NABL_Rate;
-          rateSource = 'nabh_nabl';
+        // ALWAYS check private patient FIRST
+        if (isPrivatePatient) {
+          // Private patients - use private column
+          finalCost = (item.private && item.private > 0) ? item.private : 0;
+          rateSource = finalCost > 0 ? 'private' : 'not_available';
+        } else if (usesNonNABHRate) {
+          // CGHS/ECHS/ESIC patients - use ONLY Non-NABH rate (no fallback)
+          finalCost = (item.Non_NABH_NABL_Rate && item.Non_NABH_NABL_Rate > 0) ? item.Non_NABH_NABL_Rate : 0;
+          rateSource = finalCost > 0 ? 'non_nabh_nabl' : 'not_available';
+        } else if (usesBhopaliNABHRate) {
+          // MP Police/Ordnance Factory patients - use ONLY Bhopal NABH rate (no fallback)
+          finalCost = (item.bhopal_nabh && item.bhopal_nabh > 0) ? item.bhopal_nabh : 0;
+          rateSource = finalCost > 0 ? 'bhopal_nabh' : 'not_available';
+        } else if (usesNABHRate) {
+          // Other corporate patients - use ONLY NABH rate (no fallback)
+          finalCost = (item.NABH_NABL_Rate && item.NABH_NABL_Rate > 0) ? item.NABH_NABL_Rate : 0;
+          rateSource = finalCost > 0 ? 'nabh_nabl' : 'not_available';
+        } else {
+          // Fallback to private column if nothing else matches
+          finalCost = (item.private && item.private > 0) ? item.private : 0;
+          rateSource = finalCost > 0 ? 'private_fallback' : 'not_available';
         }
 
         console.log('🔍 Radiology mapping:', {
           service: item.name,
+          patientType,
           patientCorporate: patientInfo?.corporate || 'NOT SET',
           corporateLower: corporate || 'EMPTY',
+          isPrivatePatient,
           hasCorporate: hasCorporate,
           usesNonNABHRate: usesNonNABHRate,
           usesBhopaliNABHRate: usesBhopaliNABHRate,
           usesNABHRate: usesNABHRate,
+          privateRate: item.private,
           nonNABHRate: item.Non_NABH_NABL_Rate,
           nabhRate: item.NABH_NABL_Rate,
           bhopaliNABH: item.bhopal_nabh,
@@ -8466,6 +8984,19 @@ INSTRUCTIONS:
           finalCost: finalCost,
           rateSource: rateSource
         });
+
+        // VALIDATION: Warn if corporate-specific rate is missing
+        if (finalCost === 0 && hasCorporate) {
+          console.warn('⚠️ RATE NOT AVAILABLE:', {
+            service: item.name,
+            patientType: patientInfo?.corporate,
+            expectedRate: usesBhopaliNABHRate ? 'bhopal_nabh' :
+                          usesNonNABHRate ? 'Non_NABH_NABL_Rate' :
+                          usesNABHRate ? 'NABH_NABL_Rate' : 'unknown',
+            message: `No rate found for ${patientInfo?.corporate} patients. Service will show ₹0 or N/A.`,
+            suggestion: 'Please update the radiology table with the appropriate rate.'
+          });
+        }
 
         return {
           ...item,
@@ -8514,14 +9045,19 @@ INSTRUCTIONS:
     isSearchingLabServices
   });
 
-  const filteredRadiologyServices = serviceSearchTerm.length >= 2 ? searchedRadiologyServices :
-    availableRadiologyServices.filter(service =>
-      (service.name?.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
-        service.code?.toLowerCase().includes(serviceSearchTerm.toLowerCase())) &&
-      // Temporarily hide services that might have cross mark issues
-      !service.name?.toLowerCase().includes('2d echocardiography') &&
-      !service.name?.toLowerCase().includes('2d echo charges')
-    );
+  const filteredRadiologyServices = (serviceSearchTerm.length >= 2
+    ? searchedRadiologyServices
+    : availableRadiologyServices.filter(service =>
+        service.name?.toLowerCase().includes(serviceSearchTerm.toLowerCase()) ||
+        service.code?.toLowerCase().includes(serviceSearchTerm.toLowerCase())
+      )
+  ).filter(service =>
+    // Temporarily hide services that might have cross mark issues
+    !service.name?.toLowerCase().includes('2d echocardiography') &&
+    !service.name?.toLowerCase().includes('2d echo charges') &&
+    // Hide services without valid rates
+    service.amount && service.amount > 0
+  );
 
   // Debug logging for radiology services
   console.log('🔍 Radiology Services Debug:', {
@@ -9179,7 +9715,7 @@ INSTRUCTIONS:
 
       const { data, error } = await supabase
         .from('cghs_surgery')
-        .select('id, name, code, category, NABH_NABL_Rate, bhopal_nabh_rate, private, description')
+        .select('id, name, code, category, private, Non_NABH_NABL_Rate, bhopal_nabh_rate, NABH_NABL_Rate, description')
         .or(`name.ilike.%${surgerySearchTerm}%,code.ilike.%${surgerySearchTerm}%,category.ilike.%${surgerySearchTerm}%`)
         .order('name')
         .limit(10);
@@ -9191,16 +9727,30 @@ INSTRUCTIONS:
 
       // Apply corporate-based rate selection
       const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
-      const isPrivate = !corporate || corporate === 'private';
+
+      // Corporate field takes priority - check if patient has a corporate panel first
+      const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+      // Patient is private ONLY if they don't have a corporate panel
+      const isPrivate = !hasCorporate;
+
+      // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+      const usesNonNABHRate = hasCorporate &&
+        (corporate.includes('cghs') ||
+        corporate.includes('echs') ||
+        corporate.includes('esic'));
 
       // Check if corporate qualifies for Bhopal NABH rates
-      const usesBhopaliRate =
-        corporate.includes('mp police') ||
+      const usesBhopaliRate = hasCorporate &&
+        (corporate.includes('mp police') ||
         corporate.includes('ordnance factory') ||
-        corporate.includes('ordnance factory itarsi');
+        corporate.includes('ordnance factory itarsi'));
+
+      // Check if patient has other corporate
+      const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliRate;
 
       const surgeriesWithSelectedRate = data?.map(surgery => {
-        // Select appropriate rate based on corporate (priority: Private > Bhopal NABH > NABH NABL > Fallback)
+        // Select appropriate rate based on corporate (priority: Private > Non-NABH > Bhopal NABH > NABH NABL > Fallback)
         let selectedRate = 0;
         let rateSource = 'fallback';
 
@@ -9216,11 +9766,15 @@ INSTRUCTIONS:
             selectedRate = 0;
             rateSource = 'no_rate';
           }
+        } else if (usesNonNABHRate && surgery.Non_NABH_NABL_Rate && surgery.Non_NABH_NABL_Rate > 0) {
+          // CGHS/ECHS/ESIC → use Non_NABH_NABL_Rate
+          selectedRate = surgery.Non_NABH_NABL_Rate;
+          rateSource = 'non_nabh_nabl';
         } else if (usesBhopaliRate && surgery.bhopal_nabh_rate && surgery.bhopal_nabh_rate > 0) {
           // MP Police/Ordnance Factory → use bhopal_nabh_rate
           selectedRate = surgery.bhopal_nabh_rate;
           rateSource = 'bhopal_nabh';
-        } else if (surgery.NABH_NABL_Rate && surgery.NABH_NABL_Rate > 0) {
+        } else if (usesNABHRate && surgery.NABH_NABL_Rate && surgery.NABH_NABL_Rate > 0) {
           // All other corporate patients → use NABH_NABL_Rate
           selectedRate = surgery.NABH_NABL_Rate;
           rateSource = 'nabh_nabl';
@@ -9235,10 +9789,13 @@ INSTRUCTIONS:
           patientCorporate: patientInfo?.corporate || 'NOT SET',
           corporateLower: corporate || 'EMPTY',
           isPrivate: isPrivate,
+          usesNonNABHRate: usesNonNABHRate,
           usesBhopaliRate: usesBhopaliRate,
+          usesNABHRate: usesNABHRate,
+          privateRate: surgery.private,
+          nonNabhRate: surgery.Non_NABH_NABL_Rate,
           bhopaliNABHRate: surgery.bhopal_nabh_rate,
           nabhNablRate: surgery.NABH_NABL_Rate,
-          privateRate: surgery.private,
           selectedRate: selectedRate,
           rateSource: rateSource
         });
@@ -9290,7 +9847,7 @@ INSTRUCTIONS:
 
       const { data, error } = await supabase
         .from('lab')
-        .select('id, name, description, private, "CGHS_code", category')
+        .select('id, name, description, private, "NABH_rates_in_rupee", "Non-NABH_rates_in_rupee", bhopal_nabh_rate, bhopal_non_nabh_rate, "CGHS_code", category')
         .ilike('name', `%${labSearchTerm}%`)
         .limit(10);
 
@@ -9817,10 +10374,10 @@ INSTRUCTIONS:
 
       console.log('Fetching saved labs for visit ID:', visitId);
 
-      // Get the actual visit UUID from the visits table
+      // Get the actual visit UUID and patient_type from the visits table
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id')
+        .select('id, patient_type')
         .eq('visit_id', visitId)
         .single();
 
@@ -9863,7 +10420,7 @@ INSTRUCTIONS:
 
       const { data: labsData, error: labsError } = await supabase
         .from('lab')
-        .select('id, name, description, category, "CGHS_code", private')
+        .select('id, name, description, category, "CGHS_code", private, "NABH_rates_in_rupee", "Non-NABH_rates_in_rupee", bhopal_nabh_rate, bhopal_non_nabh_rate')
         .in('id', labIds);
 
       if (labsError) {
@@ -9887,35 +10444,83 @@ INSTRUCTIONS:
         privateRate: lab.private
       })));
 
-      // Combine the data preserving database values when available
+      // Determine correct rate based on patient type and corporate status
+      // Check if patient is PRIVATE by checking BOTH patient_type AND corporate fields
+      const patientType = (visitData?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+      const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+      // Corporate field takes priority - check if patient has a corporate panel first
+      const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+      // Patient is private ONLY if they don't have a corporate panel
+      const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+      // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+      const usesNonNABHRate = hasCorporate &&
+        (corporate.includes('cghs') ||
+        corporate.includes('echs') ||
+        corporate.includes('esic'));
+
+      // Check if corporate qualifies for Bhopal NABH rates
+      const usesBhopaliNABHRate = hasCorporate &&
+        (corporate.includes('mp police') ||
+        corporate.includes('ordnance factory') ||
+        corporate.includes('ordnance factory itarsi'));
+
+      // Check if patient has other corporate
+      const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+      console.log('🔍 Patient Type Check in fetchSavedLabs:', {
+        patientType,
+        isPrivatePatient,
+        corporate,
+        hasCorporate,
+        usesNonNABHRate,
+        usesBhopaliNABHRate,
+        usesNABHRate
+      });
+
+      // ALWAYS recalculate rates based on current patient type and master rates
+      // Don't rely on stored costs as they may be outdated or incorrect
       const formattedLabs = visitLabsData.map((visitLab: any) => {
         const labDetail = labsData?.find((l: any) => l.id === visitLab.lab_id);
-
-        // Use stored database values first, fallback to calculated values only if missing
-        const storedCost = visitLab.cost;
-        const storedUnitRate = visitLab.unit_rate;
         const quantity = visitLab.quantity || 1;
 
-        // Only calculate if database values are missing/invalid
-        let finalCost = storedCost;
-        let finalUnitRate = storedUnitRate;
+        // ALWAYS calculate current rate based on patient type (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+        let correctUnitRate = 100; // Default fallback
+        let rateSource = 'fallback';
 
-        if (!storedCost || storedCost <= 0 || !storedUnitRate || storedUnitRate <= 0) {
-          // Fallback calculation for older data without proper cost/unit_rate
-          const fallbackUnitRate = (labDetail?.private && labDetail.private > 0) ? labDetail.private : 100;
-          finalUnitRate = storedUnitRate || fallbackUnitRate;
-          finalCost = storedCost || (fallbackUnitRate * quantity);
+        // ALWAYS check private patient FIRST
+        if (isPrivatePatient && labDetail?.private && labDetail.private > 0) {
+          correctUnitRate = labDetail.private;
+          rateSource = 'private';
+        } else if (usesNonNABHRate && labDetail?.['Non-NABH_rates_in_rupee'] && labDetail['Non-NABH_rates_in_rupee'] > 0) {
+          correctUnitRate = labDetail['Non-NABH_rates_in_rupee'];
+          rateSource = 'non_nabh';
+        } else if (usesBhopaliNABHRate && labDetail?.bhopal_nabh_rate && labDetail.bhopal_nabh_rate > 0) {
+          correctUnitRate = labDetail.bhopal_nabh_rate;
+          rateSource = 'bhopal_nabh';
+        } else if (usesNABHRate && labDetail?.['NABH_rates_in_rupee'] && labDetail['NABH_rates_in_rupee'] > 0) {
+          correctUnitRate = labDetail['NABH_rates_in_rupee'];
+          rateSource = 'nabh';
+        } else if (labDetail?.private && labDetail.private > 0) {
+          correctUnitRate = labDetail.private;
+          rateSource = 'private_fallback';
         }
 
-        console.log('🎯 fetchSavedLabs data resolution:', {
+        const finalUnitRate = correctUnitRate;
+        const finalCost = correctUnitRate * quantity;
+
+        console.log('🎯 fetchSavedLabs ALWAYS RECALCULATE:', {
           labName: labDetail?.name,
-          storedCost,
-          storedUnitRate,
+          storedCost: visitLab.cost,
+          recalculatedUnitRate: correctUnitRate,
+          recalculatedCost: finalCost,
           quantity,
-          finalCost,
-          finalUnitRate,
-          usingFallback: !storedCost || !storedUnitRate,
-          privateRate: labDetail?.private
+          rateSource,
+          patientType,
+          isPrivatePatient,
+          patientCorporate: patientInfo?.corporate || 'NOT SET'
         });
 
         return {
@@ -11229,10 +11834,10 @@ Format the response as JSON:
         return;
       }
 
-      // First get the actual visit UUID from the visits table
+      // First get the actual visit UUID and patient_type from the visits table
       const { data: visitData, error: visitError } = await supabase
         .from('visits')
-        .select('id')
+        .select('id, patient_type')
         .eq('visit_id', visitId)
         .single();
 
@@ -11249,18 +11854,87 @@ Format the response as JSON:
 
       console.log('Found visit UUID for labs:', visitData.id, 'for visit_id:', visitId);
 
+      // Determine correct rate based on patient type and corporate status
+      // Check if patient is PRIVATE by checking BOTH patient_type AND corporate fields
+      const patientType = (visitData?.patient_type || patientInfo?.patient_type || '').toLowerCase().trim();
+      const corporate = (patientInfo?.corporate || '').toLowerCase().trim();
+
+      // Corporate field takes priority - check if patient has a corporate panel first
+      const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+      // Patient is private ONLY if they don't have a corporate panel
+      const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+      // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+      const usesNonNABHRate = hasCorporate &&
+        (corporate.includes('cghs') ||
+        corporate.includes('echs') ||
+        corporate.includes('esic'));
+
+      // Check if corporate qualifies for Bhopal NABH rates
+      const usesBhopaliNABHRate = hasCorporate &&
+        (corporate.includes('mp police') ||
+        corporate.includes('ordnance factory') ||
+        corporate.includes('ordnance factory itarsi'));
+
+      // Check if patient has other corporate (not CGHS/ECHS/ESIC, not MP Police/Ordnance Factory)
+      const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+      console.log('🔍 Patient Type Check in saveLabsToVisit:', {
+        patientType,
+        isPrivatePatient,
+        corporate,
+        hasCorporate,
+        usesNonNABHRate,
+        usesBhopaliNABHRate,
+        usesNABHRate
+      });
+
       // Prepare data for insertion using the actual visit UUID
-      const labsToSave = selectedLabs.map((lab) => ({
-        visit_id: visitData.id, // Use the actual UUID
-        lab_id: lab.id,
-        lab_name: lab.name,
-        cost: lab['NABH/NABL_rates_in_rupee'] || 0,
-        description: lab.description || '',
-        category: lab.category || '',
-        cghs_code: lab['CGHS_code'] || '',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }));
+      const labsToSave = selectedLabs.map((lab) => {
+        // Select appropriate rate based on patient category (priority: Private > Non-NABH > Bhopal NABH > NABH > Fallback)
+        let correctRate = 100; // Default fallback
+        let rateSource = 'fallback';
+
+        // ALWAYS check private patient FIRST when saving labs
+        if (isPrivatePatient && lab.private && lab.private > 0) {
+          correctRate = lab.private;
+          rateSource = 'private';
+        } else if (usesNonNABHRate && lab['Non-NABH_rates_in_rupee'] && lab['Non-NABH_rates_in_rupee'] > 0) {
+          correctRate = lab['Non-NABH_rates_in_rupee'];
+          rateSource = 'non_nabh';
+        } else if (usesBhopaliNABHRate && lab.bhopal_nabh_rate && lab.bhopal_nabh_rate > 0) {
+          correctRate = lab.bhopal_nabh_rate;
+          rateSource = 'bhopal_nabh';
+        } else if (usesNABHRate && lab['NABH_rates_in_rupee'] && lab['NABH_rates_in_rupee'] > 0) {
+          correctRate = lab['NABH_rates_in_rupee'];
+          rateSource = 'nabh';
+        } else if (lab.private && lab.private > 0) {
+          correctRate = lab.private;
+          rateSource = 'private_fallback';
+        }
+
+        console.log('💾 Saving lab with rate:', {
+          labName: lab.name,
+          patientCategory: patientInfo?.corporate || 'PRIVATE',
+          rateSource,
+          correctRate
+        });
+
+        return {
+          visit_id: visitData.id, // Use the actual UUID
+          lab_id: lab.id,
+          lab_name: lab.name,
+          cost: correctRate,
+          unit_rate: correctRate, // Save unit rate as well
+          quantity: 1, // Default quantity
+          description: lab.description || '',
+          category: lab.category || '',
+          cghs_code: lab['CGHS_code'] || '',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      });
 
       console.log('Labs to save:', labsToSave);
 
@@ -15376,7 +16050,8 @@ Dr. Murali B K
                                 filteredLabServices.map((service) => (
                                   <div
                                     key={service.id}
-                                    className="p-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                    className={`p-2 border-b border-gray-100 last:border-b-0 ${(!service.amount || service.amount === 0) ? 'bg-gray-50 cursor-not-allowed opacity-60' : 'hover:bg-gray-100 cursor-pointer'}`}
+                                    title={(!service.amount || service.amount === 0) ? `Rate not available - please update in database first` : `Click to add ${service.name}`}
                                     onClick={async (e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
@@ -15389,6 +16064,22 @@ Dr. Murali B K
                                         fullServiceObject: service
                                       });
                                       console.log('🔍 Current visitId:', visitId);
+
+                                      // VALIDATION: Check if rate is available before adding
+                                      if (!service.amount || service.amount === 0) {
+                                        toast.error(
+                                          `Rate not available for "${service.name}". Please update the ${patientInfo?.corporate ? `${patientInfo.corporate} rate` : 'rate'} in the lab table first.`,
+                                          { duration: 5000 }
+                                        );
+                                        console.warn('⚠️ BLOCKED: Cannot add lab service with no rate:', {
+                                          service: service.name,
+                                          amount: service.amount,
+                                          patientType: patientInfo?.corporate || 'PRIVATE',
+                                          message: 'Lab service blocked from being added due to missing rate'
+                                        });
+                                        return; // Prevent adding service
+                                      }
+
                                       alert(`Lab clicked: ${service.name} (₹${service.amount}) - Check console for details`);
                                       await addLabServiceToInvoice(service);
                                       setServiceSearchTerm("");
@@ -15396,11 +16087,14 @@ Dr. Murali B K
                                     }}
                                   >
                                     <div className="flex justify-between items-center">
-                                      <div>
-                                        <div className="font-medium text-sm">{service.name}</div>
+                                      <div className="flex-1">
+                                        <div className={`font-medium text-sm ${(!service.amount || service.amount === 0) ? 'text-gray-400' : ''}`}>{service.name}</div>
                                         <div className="text-xs text-gray-500">Code: {service.code || 'N/A'}</div>
+                                        {(!service.amount || service.amount === 0) && (
+                                          <div className="text-xs text-red-500 mt-1">⚠️ Rate not available</div>
+                                        )}
                                       </div>
-                                      <div className="text-sm font-medium">₹{(() => {
+                                      <div className={`text-sm font-medium ${(!service.amount || service.amount === 0) ? 'text-red-500' : ''}`}>₹{(() => {
                                         console.log('🔍 Lab service display:', {
                                           name: service.name,
                                           amount: service.amount,
@@ -15432,29 +16126,48 @@ Dr. Murali B K
                               {filteredRadiologyServices.map((service) => (
                                 <div
                                   key={service.id}
-                                  className="radiology-service-item p-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                                  className={`radiology-service-item p-2 border-b border-gray-100 last:border-b-0 ${(!service.amount || service.amount === 0) ? 'bg-gray-50 cursor-not-allowed opacity-60' : 'hover:bg-gray-100 cursor-pointer'}`}
                                   data-service-name={service.name}
+                                  title={(!service.amount || service.amount === 0) ? `Rate not available - please update in database first` : `Click to add ${service.name}`}
                                   style={{
                                     position: 'relative',
                                     textDecoration: 'none',
-                                    background: 'white',
+                                    background: (!service.amount || service.amount === 0) ? '#f9fafb' : 'white',
                                     zIndex: 10,
                                     listStyle: 'none',
                                     listStyleType: 'none',
                                     display: 'block'
                                   }}
                                   onClick={() => {
+                                    // VALIDATION: Check if rate is available before adding
+                                    if (!service.amount || service.amount === 0) {
+                                      toast.error(
+                                        `Rate not available for "${service.name}". Please update the ${patientInfo?.corporate ? `${patientInfo.corporate} rate` : 'rate'} in the radiology table first.`,
+                                        { duration: 5000 }
+                                      );
+                                      console.warn('⚠️ BLOCKED: Cannot add service with no rate:', {
+                                        service: service.name,
+                                        amount: service.amount,
+                                        patientType: patientInfo?.corporate || 'PRIVATE',
+                                        message: 'Service blocked from being added due to missing rate'
+                                      });
+                                      return; // Prevent adding service
+                                    }
+
                                     // Save to visit_radiology table instead of adding to invoice
                                     saveSingleRadiologyToVisit(service);
                                     setServiceSearchTerm("");
                                   }}
                                 >
                                   <div className="flex justify-between items-center">
-                                    <div>
-                                      <div className="font-medium text-sm">{service.name}</div>
+                                    <div className="flex-1">
+                                      <div className={`font-medium text-sm ${(!service.amount || service.amount === 0) ? 'text-gray-400' : ''}`}>{service.name}</div>
                                       <div className="text-xs text-gray-500">Code: {service.code || 'N/A'}</div>
+                                      {(!service.amount || service.amount === 0) && (
+                                        <div className="text-xs text-red-500 mt-1">⚠️ Rate not available</div>
+                                      )}
                                     </div>
-                                    <div className="text-sm font-medium">₹{service.amount || 'N/A'}</div>
+                                    <div className={`text-sm font-medium ${(!service.amount || service.amount === 0) ? 'text-red-500' : ''}`}>₹{service.amount || 'N/A'}</div>
                                   </div>
                                 </div>
                               ))}
