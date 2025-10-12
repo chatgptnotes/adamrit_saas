@@ -1,6 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Printer } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 const initialRow = {
   name: '',
@@ -12,7 +14,14 @@ const initialRow = {
   administered: false,
 };
 
-export const TreatmentSheetForm: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+interface TreatmentSheetFormProps {
+  visitId?: string;
+  onClose?: () => void;
+}
+
+export const TreatmentSheetForm: React.FC<TreatmentSheetFormProps> = ({ visitId, onClose }) => {
+  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
   const [patientName, setPatientName] = useState('');
   const [regNo, setRegNo] = useState('');
   const [admissionDate, setAdmissionDate] = useState('');
@@ -29,6 +38,90 @@ export const TreatmentSheetForm: React.FC<{ onClose: () => void }> = ({ onClose 
   const [doctor, setDoctor] = useState('');
   const [signDate, setSignDate] = useState('');
 
+  // Fetch patient and visit data
+  useEffect(() => {
+    if (visitId) {
+      fetchTreatmentSheetData();
+    } else {
+      setLoading(false);
+    }
+  }, [visitId]);
+
+  const fetchTreatmentSheetData = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch visit data with patient info
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select(`
+          *,
+          patient:patient_id (
+            name,
+            patients_id,
+            date_of_birth,
+            gender
+          )
+        `)
+        .eq('visit_id', visitId)
+        .single();
+
+      if (visitError) throw visitError;
+
+      if (visitData) {
+        // Set patient info
+        setPatientName(visitData.patient?.name || '');
+        setRegNo(visitData.patient?.patients_id || '');
+        setAdmissionDate(visitData.admission_date || visitData.created_at?.split('T')[0] || '');
+        setConsultant(visitData.appointment_with || '');
+        setDate(new Date().toISOString().split('T')[0]);
+
+        // Fetch diagnosis from visit notes or other fields
+        setDiagnosis(visitData.diagnosis || visitData.chief_complaint || '');
+        setSpecialInstruction(visitData.special_instructions || '');
+        setIntensiveCare(visitData.intensive_care_notes || '');
+      }
+
+      // Fetch medications for this visit
+      const { data: medications, error: medError } = await supabase
+        .from('visit_medications')
+        .select(`
+          *,
+          medication:medication_id (
+            name,
+            generic_name,
+            strength,
+            dosage_form
+          )
+        `)
+        .eq('visit_id', visitData.id)
+        .eq('status', 'dispensed');
+
+      if (!medError && medications && medications.length > 0) {
+        const medicineRows = medications.map(med => ({
+          name: `${med.medication?.name || ''} ${med.medication?.strength || ''}`,
+          route: med.route || '',
+          dose: med.dosage || '',
+          times: ['', '', '', ''],
+          column1: med.frequency || '',
+          column2: med.duration || '',
+          administered: false
+        }));
+        setRows(medicineRows);
+      }
+
+    } catch (error: any) {
+      console.error('Error fetching treatment sheet data:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load treatment sheet data',
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRowChange = (idx: number, field: string, value: any) => {
     setRows(rows => rows.map((row, i) => i === idx ? { ...row, [field]: value } : row));
   };
@@ -42,6 +135,12 @@ export const TreatmentSheetForm: React.FC<{ onClose: () => void }> = ({ onClose 
 
   return (
     <div className="bg-white p-6 rounded shadow max-w-4xl mx-auto relative">
+      {loading ? (
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">Loading treatment sheet...</p>
+        </div>
+      ) : (
+        <>
       {/* Print Button Top Right */}
       <button
         className="absolute top-4 right-4 bg-blue-500 text-white px-3 py-2 rounded shadow print:hidden flex items-center gap-2"
@@ -245,8 +344,12 @@ export const TreatmentSheetForm: React.FC<{ onClose: () => void }> = ({ onClose 
         </div>
       </div>
       <div className="flex gap-2 mt-6 print:hidden">
-        <button className="bg-gray-400 text-white px-4 py-2 rounded" onClick={onClose}>Close</button>
+        {onClose && (
+          <button className="bg-gray-400 text-white px-4 py-2 rounded" onClick={onClose}>Close</button>
+        )}
       </div>
+      </>
+      )}
     </div>
   );
 };

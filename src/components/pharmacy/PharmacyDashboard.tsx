@@ -27,9 +27,13 @@ import PharmacyReports from './PharmacyReports';
 import SupplierMaster from './SupplierMaster';
 import SalesDetails from './SalesDetails';
 import TreatmentSheetList from './TreatmentSheetList';
+import MedicineItems from './MedicineItems';
+import DirectSaleBill from './DirectSaleBill';
+import DirectSaleView from './DirectSaleView';
 
 const PharmacyDashboard: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState('overview');
+  const [directSaleSubTab, setDirectSaleSubTab] = useState('bill'); // 'bill' or 'view'
 
   // Mock data for dashboard - will be replaced with real data from hooks
   const dashboardData = {
@@ -91,9 +95,9 @@ const PharmacyDashboard: React.FC = () => {
         <TabsList className="grid w-full grid-cols-12 bg-blue-50 rounded-md">
           <div className="flex flex-row items-center gap-x-4 w-full">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="inventory">Inventory</TabsTrigger>
-          <TabsTrigger value="prescriptions">Prescriptions</TabsTrigger>
-          <TabsTrigger value="billing">Billing</TabsTrigger>
+          <TabsTrigger value="items">Items</TabsTrigger>
+          <TabsTrigger value="direct-sale">Direct Sale</TabsTrigger>
+          <TabsTrigger value="billing">Sale Bill</TabsTrigger>
           <TabsTrigger value="view_sales">View Sales</TabsTrigger>
             <TabsTrigger value="stock-mgmt">Stock Mgmt</TabsTrigger>
           <TabsTrigger value="treatment-sheet">Treatment Sheet</TabsTrigger>
@@ -171,26 +175,26 @@ const PharmacyDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="h-auto flex-col py-4"
-                  onClick={() => setSelectedTab('prescriptions')}
+                  onClick={() => setSelectedTab('direct-sale')}
                 >
-                  <FileText className="h-6 w-6 mb-2" />
-                  <span>New Prescription</span>
+                  <ShoppingCart className="h-6 w-6 mb-2" />
+                  <span>Direct Sale</span>
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="h-auto flex-col py-4"
                   onClick={() => setSelectedTab('billing')}
                 >
                   <ShoppingCart className="h-6 w-6 mb-2" />
-                  <span>Quick Sale</span>
+                  <span>Sale Bill</span>
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="h-auto flex-col py-4"
-                  onClick={() => setSelectedTab('inventory')}
+                  onClick={() => setSelectedTab('items')}
                 >
                   <Plus className="h-6 w-6 mb-2" />
                   <span>Add Medicine</span>
@@ -352,12 +356,34 @@ const PharmacyDashboard: React.FC = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="inventory">
-          <MedicineInventory />
+        <TabsContent value="items">
+          <MedicineItems />
         </TabsContent>
 
-        <TabsContent value="prescriptions">
-          <PrescriptionManagement />
+        <TabsContent value="direct-sale">
+          <div className="space-y-4">
+            {/* Sub-tabs for Direct Sale */}
+            <div className="flex gap-2 border-b pb-2">
+              <Button
+                variant={directSaleSubTab === 'bill' ? 'default' : 'outline'}
+                onClick={() => setDirectSaleSubTab('bill')}
+                className="px-6"
+              >
+                Bill
+              </Button>
+              <Button
+                variant={directSaleSubTab === 'view' ? 'default' : 'outline'}
+                onClick={() => setDirectSaleSubTab('view')}
+                className="px-6"
+              >
+                View
+              </Button>
+            </div>
+
+            {/* Content based on selected sub-tab */}
+            {directSaleSubTab === 'bill' && <DirectSaleBill />}
+            {directSaleSubTab === 'view' && <DirectSaleView />}
+          </div>
         </TabsContent>
 
         <TabsContent value="billing">
