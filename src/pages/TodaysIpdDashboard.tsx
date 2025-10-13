@@ -2149,6 +2149,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead className="font-semibold">Days Admitted</TableHead>
                 <TableHead className="font-semibold">Discharge Date</TableHead>
                 <TableHead className="font-semibold">Discharge Summary</TableHead>
+                <TableHead className="font-semibold">Admission Notes</TableHead>
                 {isAdmin && <TableHead className="font-semibold">Actions</TableHead>}
               </TableRow>
               <TableRow className="bg-muted/30">
@@ -2180,6 +2181,7 @@ const TodaysIpdDashboard = () => {
                 <TableHead>
                   <ColumnFilter options={additionalApprovalsOptions} selected={additionalApprovalsFilter} onChange={setAdditionalApprovalsFilter} />
                 </TableHead>
+                <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
                 <TableHead></TableHead>
@@ -2411,6 +2413,17 @@ const TodaysIpdDashboard = () => {
                       disabled={!visit.has_final_payment}
                     >
                       <ClipboardList className={`h-4 w-4 ${visit.has_final_payment ? 'text-blue-600' : 'text-gray-400'}`} />
+                    </Button>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 hover:bg-green-50"
+                      onClick={() => navigate(`/admission-notes/${visit.visit_id}`)}
+                      title="Admission Notes"
+                    >
+                      <FileText className="h-4 w-4 text-green-600" />
                     </Button>
                   </TableCell>
                   {isAdmin && (
