@@ -608,8 +608,8 @@ const PharmacyBilling: React.FC = () => {
   };
 
   const filteredMedicines = searchResults.filter(medicine =>
-    medicine.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    medicine.generic_name.toLowerCase().includes(searchTerm.toLowerCase())
+    medicine.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    medicine.generic_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const totals = calculateTotals();
@@ -831,9 +831,21 @@ const PharmacyBilling: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <>
+      <style>{`
+        /* Hide number input spinners */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type=number] {
+          -moz-appearance: textfield;
+        }
+      `}</style>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <ShoppingCart className="h-6 w-6 text-primary" />
           <div>
@@ -1072,10 +1084,25 @@ const PharmacyBilling: React.FC = () => {
                           </TableCell>
                           <TableCell>
                             <div className="min-w-[150px]">
-                              <div className="font-medium text-xs">{item.medicine_name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {item.generic_name}
-                              </div>
+                              <Input
+                                className="w-full text-xs font-medium mb-1"
+                                value={item.medicine_name}
+                                onChange={(e) => {
+                                  setCart(prev => prev.map(i =>
+                                    i.id === item.id ? { ...i, medicine_name: e.target.value } : i
+                                  ));
+                                }}
+                              />
+                              <Input
+                                className="w-full text-xs text-muted-foreground"
+                                value={item.generic_name || ''}
+                                onChange={(e) => {
+                                  setCart(prev => prev.map(i =>
+                                    i.id === item.id ? { ...i, generic_name: e.target.value } : i
+                                  ));
+                                }}
+                                placeholder="Generic name"
+                              />
                             </div>
                           </TableCell>
                           <TableCell>
@@ -1146,7 +1173,18 @@ const PharmacyBilling: React.FC = () => {
                               <option value={item.batch_number}>{item.batch_number}</option>
                             </select>
                           </TableCell>
-                          <TableCell className="text-xs">{item.available_stock}</TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              className="w-20 text-xs"
+                              value={item.available_stock}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, available_stock: parseFloat(e.target.value) || 0 } : i
+                                ));
+                              }}
+                            />
+                          </TableCell>
                           <TableCell>
                             <Input
                               type="date"
@@ -1159,9 +1197,58 @@ const PharmacyBilling: React.FC = () => {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="text-xs">{formatCurrency(item.mrp || 0)}</TableCell>
-                          <TableCell className="text-xs">{formatCurrency(item.unit_price)}</TableCell>
-                          <TableCell className="text-xs font-medium">{formatCurrency(item.total_amount)}</TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              className="w-24 text-xs"
+                              value={item.mrp || 0}
+                              onChange={(e) => {
+                                const newMrp = parseFloat(e.target.value) || 0;
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, mrp: newMrp } : i
+                                ));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              className="w-24 text-xs"
+                              value={item.unit_price}
+                              onChange={(e) => {
+                                const newPrice = parseFloat(e.target.value) || 0;
+                                setCart(prev => prev.map(i => {
+                                  if (i.id === item.id) {
+                                    const subtotal = newPrice * i.quantity;
+                                    const discountAmount = (subtotal * i.discount_percentage) / 100;
+                                    const taxableAmount = subtotal - discountAmount;
+                                    const taxAmount = (taxableAmount * i.tax_percentage) / 100;
+                                    const totalAmount = taxableAmount + taxAmount;
+                                    return {
+                                      ...i,
+                                      unit_price: newPrice,
+                                      discount_amount: discountAmount,
+                                      tax_amount: taxAmount,
+                                      total_amount: totalAmount
+                                    };
+                                  }
+                                  return i;
+                                }));
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              className="w-24 text-xs font-medium"
+                              value={item.total_amount}
+                              onChange={(e) => {
+                                setCart(prev => prev.map(i =>
+                                  i.id === item.id ? { ...i, total_amount: parseFloat(e.target.value) || 0 } : i
+                                ));
+                              }}
+                            />
+                          </TableCell>
                           <TableCell>
                             <Button
                               size="sm"
@@ -1339,7 +1426,8 @@ const PharmacyBilling: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </>
   );
 };
 
