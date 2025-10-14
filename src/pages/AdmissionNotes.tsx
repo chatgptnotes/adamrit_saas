@@ -43,6 +43,7 @@ interface AdmissionNotesData {
   provisional_diagnosis: string;
   surgery_plans_doctor: string;
   doctor_signature: string;
+  review: string;
 }
 
 const AdmissionNotes = () => {
@@ -67,6 +68,7 @@ const AdmissionNotes = () => {
     provisional_diagnosis: '',
     surgery_plans_doctor: '',
     doctor_signature: '',
+    review: '',
   });
 
   // Debounce form data for auto-save
@@ -455,29 +457,57 @@ const AdmissionNotes = () => {
             />
           </div>
 
-          {/* Footer Information (always visible) */}
+          {/* Footer Information - Signature Table */}
           <div className="border-t border-gray-300 pt-4 mt-6">
-            <div className="grid grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <div>
-                  <Label className="text-xs font-semibold text-gray-600">Doctor Signature:</Label>
+            <Label className="text-sm font-semibold text-gray-700 mb-3 block">Signature</Label>
+
+            {/* Table Structure */}
+            <div className="signature-table border border-gray-300 rounded-lg overflow-hidden">
+              {/* Table Header */}
+              <div className="grid grid-cols-4 bg-gray-100 border-b border-gray-300">
+                <div className="p-2 border-r border-gray-300">
+                  <p className="text-xs font-semibold text-gray-700">Signature</p>
+                </div>
+                <div className="p-2 border-r border-gray-300">
+                  <p className="text-xs font-semibold text-gray-700">Name of Doctor</p>
+                </div>
+                <div className="p-2 border-r border-gray-300">
+                  <p className="text-xs font-semibold text-gray-700">Review</p>
+                </div>
+                <div className="p-2">
+                  <p className="text-xs font-semibold text-gray-700">Date and Time</p>
+                </div>
+              </div>
+
+              {/* Table Data Row */}
+              <div className="grid grid-cols-4 bg-white">
+                <div className="p-2 border-r border-gray-300 flex items-center">
+                  <div className="border-b border-gray-400 h-8 w-full"></div>
+                </div>
+                <div className="p-2 border-r border-gray-300">
                   <Input
                     value={formData.doctor_signature}
                     onChange={(e) => handleInputChange('doctor_signature', e.target.value)}
                     placeholder="Enter doctor name..."
-                    className="mt-1 print:border-none print:bg-transparent"
+                    className="border-0 p-1 h-8 text-sm focus:ring-0 print:border-none print:bg-transparent"
                   />
-                  <div className="border-b border-gray-400 h-8 mt-2 print:h-6"></div>
                 </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs font-semibold text-gray-600">Date:</p>
-                  <p className="text-sm font-medium mt-1">{formatDate(new Date().toISOString())}</p>
+                <div className="p-2 border-r border-gray-300">
+                  <Input
+                    value={formData.review}
+                    onChange={(e) => handleInputChange('review', e.target.value)}
+                    placeholder="N/A"
+                    className="border-0 p-1 h-8 text-sm focus:ring-0 print:border-none print:bg-transparent"
+                  />
                 </div>
-                <div>
-                  <p className="text-xs font-semibold text-gray-600">Time:</p>
-                  <p className="text-sm font-medium mt-1">{new Date().toLocaleTimeString('en-IN')}</p>
+                <div className="p-2">
+                  <p className="text-xs text-gray-700">{formatDate(new Date().toISOString())}</p>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Date: {formatDate(new Date().toISOString())}
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    Time: {new Date().toLocaleTimeString('en-IN')}
+                  </p>
                 </div>
               </div>
             </div>
@@ -611,6 +641,56 @@ const AdmissionNotes = () => {
               display: grid !important;
               grid-template-columns: 1fr 1fr !important;
               gap: 4px !important;
+            }
+
+            /* Signature Table for Print */
+            .signature-table {
+              border: 1px solid #000 !important;
+              border-radius: 0 !important;
+              overflow: visible !important;
+              margin-top: 4px !important;
+            }
+
+            .grid-cols-4 {
+              display: grid !important;
+              grid-template-columns: 1fr 2fr 1.5fr 2fr !important;
+              gap: 0 !important;
+            }
+
+            .grid-cols-4 > div {
+              border-right: 1px solid #000 !important;
+              padding: 3px 5px !important;
+            }
+
+            .grid-cols-4 > div:last-child {
+              border-right: none !important;
+            }
+
+            .signature-table .bg-gray-100 {
+              background: #f5f5f5 !important;
+              border-bottom: 1px solid #000 !important;
+            }
+
+            .signature-table .bg-gray-100 p {
+              font-size: 8pt !important;
+              font-weight: 700 !important;
+              margin: 0 !important;
+            }
+
+            .signature-table .bg-white {
+              background: white !important;
+            }
+
+            .signature-table input {
+              border: none !important;
+              padding: 0 !important;
+              font-size: 8pt !important;
+              background: transparent !important;
+            }
+
+            .signature-table p {
+              font-size: 7pt !important;
+              margin: 1px 0 !important;
             }
 
             /* Signature line */

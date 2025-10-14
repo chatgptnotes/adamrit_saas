@@ -21985,6 +21985,7 @@ Dr. Murali B K
                     <option value="UPI">UPI</option>
                     <option value="Bank Transfer">Bank Transfer</option>
                     <option value="Cheque">Cheque</option>
+                    <option value="Credit">Credit</option>
                   </select>
                 </div>
 
