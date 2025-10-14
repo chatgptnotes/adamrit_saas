@@ -3101,9 +3101,10 @@ DD/MM/YYYY:-Test Category: Test1:Value1 unit, Test2:Value2 unit`);
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Please select">Please select</SelectItem>
-                  <SelectItem value="Treatment Complete">Treatment Complete</SelectItem>
-                  <SelectItem value="Against Medical Advice">Against Medical Advice</SelectItem>
-                  <SelectItem value="Referred">Referred</SelectItem>
+                  <SelectItem value="DAMA">DAMA</SelectItem>
+                  <SelectItem value="Discharge on request">Discharge on request</SelectItem>
+                  <SelectItem value="Death">Death</SelectItem>
+                  <SelectItem value="Recovered">Recovered</SelectItem>
                 </SelectContent>
               </Select>
             </div>
