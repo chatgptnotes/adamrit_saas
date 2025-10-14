@@ -48,7 +48,7 @@ INSERT INTO corporate (name, description) VALUES
 ('Coal India Limited (CIL)', 'Public sector coal mining company'),
 ('Central Railways (C.Rly)', 'Indian Railways central zone'),
 ('South Eastern Central Railway (SECR)', 'Railway zone covering central India'),
-('Western Railway', 'Indian Railways western zone'),
+('West Central Railway', 'Indian Railways west central zone'),
 ('Western Coalfield Limited (WCL)', 'Coal mining subsidiary of Coal India'),
 ('MP State Government Employees-OST empanelled hospital', 'Madhya Pradesh government employees healthcare'),
 ('MP Police (Swasthya Suraksha Nyas)', 'Madhya Pradesh police health security trust'),
