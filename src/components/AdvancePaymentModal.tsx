@@ -55,6 +55,7 @@ const paymentModes = [
   { value: 'RTGS', label: 'RTGS' },
   { value: 'DD', label: 'Demand Draft' },
   { value: 'ONLINE', label: 'Online Transfer' },
+  { value: 'CREDIT', label: 'Credit' },
 ];
 
 const billingExecutives = [
