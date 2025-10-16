@@ -122,6 +122,10 @@ const PharmacyBilling: React.FC = () => {
   const [allEncounter, setAllEncounter] = useState(false);
   const [encounterType, setEncounterType] = useState('(Private) - OPD');
 
+  const [doctorSearchTerm, setDoctorSearchTerm] = useState('');
+  const [showDoctorResults, setShowDoctorResults] = useState(false);
+  const [doctorSuggestions, setDoctorSuggestions] = useState<Array<{name: string}>>([]);
+
   // Sale type options for allowed values (as per DB constraint)
   const saleTypeOptions = [
     { value: 'antibiotic', label: 'Antibiotic' },
@@ -293,6 +297,47 @@ const PharmacyBilling: React.FC = () => {
     setPatientInfo({ name: patient.name, id: patient.patients_id, phone: '' });
     setShowPatientDropdown(false);
   };
+
+  // Fetch doctor names from ayushman_consultants table
+  const searchDoctors = async (searchTerm: string) => {
+    if (searchTerm.length < 2) {
+      setDoctorSuggestions([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('ayushman_consultants')
+        .select('name')
+        .ilike('name', `%${searchTerm}%`)
+        .limit(10);
+
+      if (error) throw error;
+
+      // Remove duplicates based on name
+      const uniqueDoctors = data?.reduce((acc: Array<{name: string}>, curr: any) => {
+        if (curr.name && !acc.some(d => d.name === curr.name)) {
+          acc.push({ name: curr.name });
+        }
+        return acc;
+      }, []) || [];
+
+      setDoctorSuggestions(uniqueDoctors);
+    } catch (error: any) {
+      console.error('Error searching doctors:', error);
+    }
+  };
+
+  // Handle doctor name search
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      if (doctorSearchTerm) {
+        searchDoctors(doctorSearchTerm);
+      }
+    }, 300);
+
+    return () => clearTimeout(debounceTimer);
+  }, [doctorSearchTerm]);
 
   const formatCurrency = (amount: number) => 
     new Intl.NumberFormat('en-IN', { 
@@ -916,15 +961,40 @@ const PharmacyBilling: React.FC = () => {
                   </label>
                   <span className="text-sm pb-2">{encounterType}</span>
                 </div>
-                <div>
+                <div className="relative">
                   <label className="text-sm font-medium">Doctor Name</label>
                   <Input
                     placeholder="Type To Search"
-                    value={doctorName}
-                    onChange={(e) => setDoctorName(e.target.value)}
-                    readOnly
-                    className="bg-gray-50"
+                    value={doctorSearchTerm || doctorName}
+                    onChange={(e) => {
+                      setDoctorSearchTerm(e.target.value);
+                      setDoctorName(e.target.value);
+                      setShowDoctorResults(true);
+                    }}
+                    onFocus={() => {
+                      if (doctorSearchTerm && doctorSuggestions.length > 0) {
+                        setShowDoctorResults(true);
+                      }
+                    }}
+                    onBlur={() => setTimeout(() => setShowDoctorResults(false), 200)}
                   />
+                  {showDoctorResults && doctorSuggestions.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                      {doctorSuggestions.map((doctor, index) => (
+                        <div
+                          key={index}
+                          className="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                          onClick={() => {
+                            setDoctorName(doctor.name);
+                            setDoctorSearchTerm('');
+                            setShowDoctorResults(false);
+                          }}
+                        >
+                          <div className="font-medium text-gray-900">{doctor.name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4">

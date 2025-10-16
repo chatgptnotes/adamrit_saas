@@ -1,5 +1,5 @@
 // Direct Sales Bill Component
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,6 +52,12 @@ const DirectSaleBill: React.FC = () => {
   const { hospitalConfig } = useAuth();
   const [forHopeEmployee, setForHopeEmployee] = useState(false);
   const [patientName, setPatientName] = useState('');
+  const [patientSearchTerm, setPatientSearchTerm] = useState('');
+  const [showPatientResults, setShowPatientResults] = useState(false);
+  const [patientSuggestions, setPatientSuggestions] = useState<Array<{name: string, dob?: string, age?: number, gender?: string}>>([]);
+  const [doctorSearchTerm, setDoctorSearchTerm] = useState('');
+  const [showDoctorResults, setShowDoctorResults] = useState(false);
+  const [doctorSuggestions, setDoctorSuggestions] = useState<Array<{name: string}>>([]);
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState('');
@@ -61,6 +67,10 @@ const DirectSaleBill: React.FC = () => {
   const [totalAmount, setTotalAmount] = useState('Rs');
   const [netAmount, setNetAmount] = useState('Rs');
   const [completedBill, setCompletedBill] = useState<CompletedBill | null>(null);
+  const [medicationSuggestions, setMedicationSuggestions] = useState<{[key: string]: Array<{id: string, name: string, item_code?: string}>}>({});
+  const [showMedicationResults, setShowMedicationResults] = useState<{[key: string]: boolean}>({});
+  const [dropdownPosition, setDropdownPosition] = useState<{[key: string]: {top: number, left: number, width: number}}>({});
+  const inputRefs = useRef<{[key: string]: HTMLInputElement | null}>({});
 
   const [medicines, setMedicines] = useState<MedicineRow[]>([
     {
@@ -120,6 +130,138 @@ const DirectSaleBill: React.FC = () => {
       return m;
     }));
   };
+
+  // Fetch patient names from visits table
+  const searchPatients = async (searchTerm: string) => {
+    if (searchTerm.length < 2) {
+      setPatientSuggestions([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('visits')
+        .select(`
+          patient_id,
+          patients!inner(
+            name,
+            date_of_birth,
+            age,
+            gender
+          )
+        `)
+        .ilike('patients.name', `%${searchTerm}%`)
+        .limit(10);
+
+      if (error) throw error;
+
+      // Remove duplicates based on patient name
+      const uniquePatients = data?.reduce((acc: Array<{name: string, dob?: string, age?: number, gender?: string}>, curr: any) => {
+        const patientName = curr.patients?.name;
+        if (patientName && !acc.some(p => p.name === patientName)) {
+          acc.push({
+            name: patientName,
+            dob: curr.patients?.date_of_birth,
+            age: curr.patients?.age,
+            gender: curr.patients?.gender
+          });
+        }
+        return acc;
+      }, []) || [];
+
+      setPatientSuggestions(uniquePatients);
+    } catch (error: any) {
+      console.error('Error searching patients:', error);
+    }
+  };
+
+  // Fetch medication names from medication table
+  const searchMedications = async (searchTerm: string, medicineId: string) => {
+    if (searchTerm.length < 2) {
+      setMedicationSuggestions(prev => ({ ...prev, [medicineId]: [] }));
+      return;
+    }
+
+    try {
+      console.log('Searching medications for:', searchTerm);
+      const { data, error } = await supabase
+        .from('medication')
+        .select('id, name, item_code')
+        .ilike('name', `%${searchTerm}%`)
+        .limit(10);
+
+      if (error) {
+        console.error('Error searching medications:', error);
+        throw error;
+      }
+
+      console.log('Medication search results:', data);
+      setMedicationSuggestions(prev => ({ ...prev, [medicineId]: data || [] }));
+
+      if (data && data.length > 0) {
+        setShowMedicationResults(prev => ({ ...prev, [medicineId]: true }));
+      }
+    } catch (error: any) {
+      console.error('Error searching medications:', error);
+      toast({
+        title: "Error",
+        description: "Failed to search medications",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Fetch doctor names from ayushman_consultants table
+  const searchDoctors = async (searchTerm: string) => {
+    if (searchTerm.length < 2) {
+      setDoctorSuggestions([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('ayushman_consultants')
+        .select('name')
+        .ilike('name', `%${searchTerm}%`)
+        .limit(10);
+
+      if (error) throw error;
+
+      // Remove duplicates based on name
+      const uniqueDoctors = data?.reduce((acc: Array<{name: string}>, curr: any) => {
+        if (curr.name && !acc.some(d => d.name === curr.name)) {
+          acc.push({ name: curr.name });
+        }
+        return acc;
+      }, []) || [];
+
+      setDoctorSuggestions(uniqueDoctors);
+    } catch (error: any) {
+      console.error('Error searching doctors:', error);
+    }
+  };
+
+  // Handle patient name search
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      if (patientSearchTerm) {
+        searchPatients(patientSearchTerm);
+      }
+    }, 300);
+
+    return () => clearTimeout(debounceTimer);
+  }, [patientSearchTerm]);
+
+  // Handle doctor name search
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      if (doctorSearchTerm) {
+        searchDoctors(doctorSearchTerm);
+      }
+    }, 300);
+
+    return () => clearTimeout(debounceTimer);
+  }, [doctorSearchTerm]);
 
   // Calculate totals whenever medicines change
   React.useEffect(() => {
@@ -485,15 +627,52 @@ const DirectSaleBill: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-4 gap-4">
-          <div>
+          <div className="relative">
             <label className="text-sm font-medium">
               Name<span className="text-red-500">*</span>
             </label>
             <Input
               placeholder="Type To Search"
-              value={patientName}
-              onChange={(e) => setPatientName(e.target.value)}
+              value={patientSearchTerm || patientName}
+              onChange={(e) => {
+                setPatientSearchTerm(e.target.value);
+                setPatientName(e.target.value);
+                setShowPatientResults(true);
+              }}
+              onFocus={() => {
+                if (patientSearchTerm && patientSuggestions.length > 0) {
+                  setShowPatientResults(true);
+                }
+              }}
+              onBlur={() => setTimeout(() => setShowPatientResults(false), 200)}
             />
+            {showPatientResults && patientSuggestions.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                {patientSuggestions.map((patient, index) => (
+                  <div
+                    key={index}
+                    className="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                    onClick={() => {
+                      setPatientName(patient.name);
+                      setPatientSearchTerm('');
+                      if (patient.dob) setDateOfBirth(patient.dob);
+                      if (patient.age) setAge(patient.age.toString());
+                      if (patient.gender) setGender(patient.gender);
+                      setShowPatientResults(false);
+                    }}
+                  >
+                    <div className="font-medium text-gray-900">{patient.name}</div>
+                    {(patient.age || patient.gender) && (
+                      <div className="text-sm text-gray-600">
+                        {patient.age && `Age: ${patient.age}`}
+                        {patient.age && patient.gender && ' • '}
+                        {patient.gender && `Gender: ${patient.gender}`}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <label className="text-sm font-medium">Date of Birth:</label>
@@ -538,15 +717,42 @@ const DirectSaleBill: React.FC = () => {
               placeholder="Enter address"
             />
           </div>
-          <div>
+          <div className="relative">
             <label className="text-sm font-medium">
               Doctor Name:<span className="text-red-500">*</span>
             </label>
             <Input
-              value={doctorName}
-              onChange={(e) => setDoctorName(e.target.value)}
-              placeholder="Enter doctor name"
+              placeholder="Type To Search"
+              value={doctorSearchTerm || doctorName}
+              onChange={(e) => {
+                setDoctorSearchTerm(e.target.value);
+                setDoctorName(e.target.value);
+                setShowDoctorResults(true);
+              }}
+              onFocus={() => {
+                if (doctorSearchTerm && doctorSuggestions.length > 0) {
+                  setShowDoctorResults(true);
+                }
+              }}
+              onBlur={() => setTimeout(() => setShowDoctorResults(false), 200)}
             />
+            {showDoctorResults && doctorSuggestions.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                {doctorSuggestions.map((doctor, index) => (
+                  <div
+                    key={index}
+                    className="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                    onClick={() => {
+                      setDoctorName(doctor.name);
+                      setDoctorSearchTerm('');
+                      setShowDoctorResults(false);
+                    }}
+                  >
+                    <div className="font-medium text-gray-900">{doctor.name}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -597,10 +803,56 @@ const DirectSaleBill: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Input
+                      ref={(el) => inputRefs.current[medicine.id] = el}
                       className="w-48"
                       placeholder="Type To Search"
                       value={medicine.itemName}
-                      onChange={(e) => updateRow(medicine.id, 'itemName', e.target.value)}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        updateRow(medicine.id, 'itemName', value);
+                        if (value.length >= 2) {
+                          searchMedications(value, medicine.id);
+                          // Calculate position for dropdown (below the input)
+                          const inputEl = inputRefs.current[medicine.id];
+                          if (inputEl) {
+                            const rect = inputEl.getBoundingClientRect();
+                            setDropdownPosition(prev => ({
+                              ...prev,
+                              [medicine.id]: {
+                                top: rect.bottom + window.scrollY + 2,
+                                left: rect.left + window.scrollX,
+                                width: rect.width
+                              }
+                            }));
+                          }
+                          setShowMedicationResults(prev => ({ ...prev, [medicine.id]: true }));
+                        } else {
+                          setShowMedicationResults(prev => ({ ...prev, [medicine.id]: false }));
+                          setMedicationSuggestions(prev => ({ ...prev, [medicine.id]: [] }));
+                        }
+                      }}
+                      onFocus={() => {
+                        if (medicine.itemName.length >= 2) {
+                          searchMedications(medicine.itemName, medicine.id);
+                          // Calculate position for dropdown (below the input)
+                          const inputEl = inputRefs.current[medicine.id];
+                          if (inputEl) {
+                            const rect = inputEl.getBoundingClientRect();
+                            setDropdownPosition(prev => ({
+                              ...prev,
+                              [medicine.id]: {
+                                top: rect.bottom + window.scrollY + 2,
+                                left: rect.left + window.scrollX,
+                                width: rect.width
+                              }
+                            }));
+                          }
+                          setShowMedicationResults(prev => ({ ...prev, [medicine.id]: true }));
+                        }
+                      }}
+                      onBlur={() => setTimeout(() => {
+                        setShowMedicationResults(prev => ({ ...prev, [medicine.id]: false }));
+                      }, 300)}
                     />
                   </TableCell>
                   <TableCell>
@@ -785,6 +1037,45 @@ const DirectSaleBill: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Fixed positioned dropdowns - rendered outside card to pop over content */}
+      {medicines.map((medicine) => (
+        showMedicationResults[medicine.id] &&
+        medicationSuggestions[medicine.id]?.length > 0 &&
+        dropdownPosition[medicine.id] && (
+          <div
+            key={`dropdown-${medicine.id}`}
+            style={{
+              position: 'fixed',
+              top: `${dropdownPosition[medicine.id].top}px`,
+              left: `${dropdownPosition[medicine.id].left}px`,
+              width: `${Math.max(dropdownPosition[medicine.id].width, 320)}px`,
+              zIndex: 99999
+            }}
+            className="bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto"
+          >
+            {medicationSuggestions[medicine.id].map((medication) => (
+              <div
+                key={medication.id}
+                className="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  updateRow(medicine.id, 'itemName', medication.name);
+                  if (medication.item_code) {
+                    updateRow(medicine.id, 'itemCode', medication.item_code);
+                  }
+                  setShowMedicationResults(prev => ({ ...prev, [medicine.id]: false }));
+                }}
+              >
+                <div className="font-medium text-gray-900">{medication.name}</div>
+                {medication.item_code && (
+                  <div className="text-sm text-gray-600">Code: {medication.item_code}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      ))}
     </div>
   );
 };

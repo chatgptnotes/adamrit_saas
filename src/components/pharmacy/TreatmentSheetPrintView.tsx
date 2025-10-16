@@ -125,16 +125,23 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
   return (
     <div className="bg-white p-4" style={{ fontFamily: 'Arial, sans-serif', fontSize: '12px' }}>
       <style>{`
+        * {
+          box-sizing: border-box;
+        }
         .ts-table {
           width: 100%;
           border-collapse: collapse;
           border: 2px solid #000;
+          table-layout: fixed;
         }
         .ts-table th,
         .ts-table td {
           border: 1px solid #000;
           padding: 4px 6px;
           text-align: left;
+          overflow: visible;
+          word-wrap: break-word;
+          vertical-align: middle;
         }
         .ts-table th {
           font-weight: bold;
@@ -157,14 +164,126 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
           text-align: center;
           padding: 2px;
           font-size: 10px;
+          vertical-align: top;
         }
         .ts-time-label {
           font-size: 9px;
           display: block;
+          line-height: 1.1;
         }
+
         @media print {
-          body { background: white; }
-          .no-print { display: none !important; }
+          @page {
+            size: A4;
+            margin: 10mm;
+          }
+
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          body {
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .no-print {
+            display: none !important;
+          }
+
+          .ts-header {
+            page-break-after: avoid;
+            page-break-inside: avoid;
+          }
+
+          .ts-table {
+            page-break-inside: avoid;
+            table-layout: fixed !important;
+            width: 100% !important;
+            border: 2px solid #000 !important;
+          }
+
+          .ts-table th,
+          .ts-table td {
+            border: 1px solid #000 !important;
+            padding: 3px 4px !important;
+            font-size: 11px !important;
+            line-height: 1.3 !important;
+            overflow: visible !important;
+            word-wrap: break-word !important;
+            page-break-inside: avoid;
+          }
+
+          .ts-table th {
+            background-color: #f0f0f0 !important;
+            font-weight: bold !important;
+          }
+
+          /* Fixed column widths for medication table */
+          .ts-table thead tr th:nth-child(1) {
+            width: 5% !important;
+          }
+          .ts-table thead tr th:nth-child(2) {
+            width: 28% !important;
+          }
+          .ts-table thead tr th:nth-child(3) {
+            width: 8% !important;
+          }
+          .ts-table thead tr th:nth-child(4) {
+            width: 8% !important;
+          }
+          .ts-table thead tr th:nth-child(5) {
+            width: 33% !important;
+          }
+          .ts-table thead tr th:nth-child(6) {
+            width: 18% !important;
+          }
+
+          /* Time boxes layout */
+          .ts-time-box {
+            display: inline-block !important;
+            width: 38px !important;
+            height: 28px !important;
+            border: 1px solid #000 !important;
+            margin: 0 1px !important;
+            padding: 1px !important;
+            font-size: 8px !important;
+            vertical-align: top !important;
+            box-sizing: border-box !important;
+          }
+
+          .ts-time-label {
+            font-size: 8px !important;
+            line-height: 1 !important;
+            display: block !important;
+          }
+
+          /* Prevent page breaks inside sections */
+          .ts-table tbody tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+
+          /* Small text styling */
+          small {
+            font-size: 9px !important;
+          }
+
+          /* Patient info table */
+          .ts-table tbody tr td:nth-child(1) {
+            width: 20% !important;
+          }
+          .ts-table tbody tr td:nth-child(2) {
+            width: 30% !important;
+          }
+          .ts-table tbody tr td:nth-child(3) {
+            width: 20% !important;
+          }
+          .ts-table tbody tr td:nth-child(4) {
+            width: 30% !important;
+          }
         }
       `}</style>
 
@@ -313,24 +432,22 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
                     </td>
                     <td className="text-center">{med.route || 'BD'}</td>
                     <td className="text-center">{med.dosage || med.quantity || ''}</td>
-                    <td className="text-center">
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: '2px' }}>
-                        <div className="ts-time-box">
-                          <span className="ts-time-label">6</span>
-                          <span className="ts-time-label">AM</span>
-                        </div>
-                        <div className="ts-time-box">
-                          <span className="ts-time-label">2</span>
-                          <span className="ts-time-label">PM</span>
-                        </div>
-                        <div className="ts-time-box">
-                          <span className="ts-time-label">6</span>
-                          <span className="ts-time-label">PM</span>
-                        </div>
-                        <div className="ts-time-box">
-                          <span className="ts-time-label">10</span>
-                          <span className="ts-time-label">PM</span>
-                        </div>
+                    <td className="text-center" style={{ whiteSpace: 'nowrap' }}>
+                      <div className="ts-time-box">
+                        <span className="ts-time-label">6</span>
+                        <span className="ts-time-label">AM</span>
+                      </div>
+                      <div className="ts-time-box">
+                        <span className="ts-time-label">2</span>
+                        <span className="ts-time-label">PM</span>
+                      </div>
+                      <div className="ts-time-box">
+                        <span className="ts-time-label">6</span>
+                        <span className="ts-time-label">PM</span>
+                      </div>
+                      <div className="ts-time-box">
+                        <span className="ts-time-label">10</span>
+                        <span className="ts-time-label">PM</span>
                       </div>
                     </td>
                     <td className="text-center" style={{ color: 'blue' }}>
