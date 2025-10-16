@@ -8,6 +8,7 @@ const Invoice = () => {
   const [showPharmacyCharges, setShowPharmacyCharges] = useState(false);
   const [discountRemoved, setDiscountRemoved] = useState(false);
   const [chargeFilter, setChargeFilter] = useState('all'); // 'all', 'lab', 'radiology'
+  const [hideLabRadiology, setHideLabRadiology] = useState(false);
   const navigate = useNavigate();
   const { visitId } = useParams<{ visitId: string }>();
 
@@ -210,7 +211,8 @@ const Invoice = () => {
             id,
             name,
             category,
-            description
+            description,
+            cost
           )
         `)
         .eq('visit_id', visitUUID)
@@ -510,7 +512,8 @@ const Invoice = () => {
             item: visitLab.lab?.name || 'Lab Test',
             rate: rate,
             qty: 1,
-            amount: rate
+            amount: rate,
+            type: 'lab'
           });
         });
       } else {
@@ -529,20 +532,22 @@ const Invoice = () => {
       if (radiologyOrdersData && radiologyOrdersData.length > 0) {
         radiologyOrdersData.forEach((visitRadiology) => {
           console.log('Processing visit radiology test:', visitRadiology);
-          // Use default amount since radiology table doesn't have amount field yet
-          const defaultAmount = visitRadiology.radiology?.name?.includes('CT Brain') ? 4000 : 1000;
+          // Use actual cost from database
+          const rate = visitRadiology.radiology?.cost ? parseFloat(visitRadiology.radiology.cost) : 1000;
 
           console.log('Radiology test details:', {
             name: visitRadiology.radiology?.name,
-            defaultAmount: defaultAmount,
+            cost: visitRadiology.radiology?.cost,
+            rate: rate,
             id: visitRadiology.radiology?.id
           });
           services.push({
             srNo: srNo++,
             item: visitRadiology.radiology?.name || 'Radiology Procedure',
-            rate: defaultAmount,
+            rate: rate,
             qty: 1,
-            amount: defaultAmount
+            amount: rate,
+            type: 'radiology'
           });
         });
       } else {
@@ -552,7 +557,7 @@ const Invoice = () => {
       return services;
     }
 
-    // Default: show all charges (bill data + lab + radiology + mandatory services)
+    // Default: show all charges (bill data + lab + radiology + mandatory services + clinical services)
     // Don't add static General Ward - let mandatory services be the primary charges
     if (!billData?.bill_sections) {
       // Start with empty services array - mandatory services will be added later
@@ -567,7 +572,8 @@ const Invoice = () => {
             item: item.description || section.section_name,
             rate: item.rate || 0,
             qty: item.quantity || 1,
-            amount: item.amount || 0
+            amount: item.amount || 0,
+            type: 'other'
           });
         });
       } else {
@@ -577,14 +583,64 @@ const Invoice = () => {
           item: section.section_name,
           rate: section.total_amount || 0,
           qty: 1,
-          amount: section.total_amount || 0
+          amount: section.total_amount || 0,
+          type: 'other'
         });
       }
       });
     }
 
-    // Lab and radiology charges should only show when specifically selected from dropdown
-    // They are NOT included in "All Charges" view anymore
+    // NOW INCLUDING lab and radiology charges in "All Charges" view as SUMMARY LINES
+    // Calculate total lab charges and add as single line
+    console.log('Calculating total lab charges for All Charges view');
+    let totalLabCharges = 0;
+    if (labOrdersData && labOrdersData.length > 0) {
+      labOrdersData.forEach((visitLab) => {
+        const rate = (visitLab.lab?.private && visitLab.lab.private > 0) ? visitLab.lab.private : 100;
+        totalLabCharges += rate;
+      });
+
+      // Add single summary line for all lab charges
+      if (totalLabCharges > 0) {
+        console.log('Adding Laboratory Charges summary line:', totalLabCharges);
+        services.push({
+          srNo: srNo++,
+          item: 'Laboratory Charges',
+          rate: totalLabCharges,
+          qty: 1,
+          amount: totalLabCharges,
+          type: 'lab'
+        });
+      }
+    }
+
+    // Calculate total radiology charges and add as single line
+    console.log('Calculating total radiology charges for All Charges view');
+    let totalRadiologyCharges = 0;
+    if (radiologyOrdersData && radiologyOrdersData.length > 0) {
+      radiologyOrdersData.forEach((visitRadiology) => {
+        const rate = visitRadiology.radiology?.cost ? parseFloat(visitRadiology.radiology.cost) : 1000;
+        totalRadiologyCharges += rate;
+        console.log('Adding radiology to total:', {
+          name: visitRadiology.radiology?.name,
+          cost: visitRadiology.radiology?.cost,
+          rate: rate
+        });
+      });
+
+      // Add single summary line for all radiology charges
+      if (totalRadiologyCharges > 0) {
+        console.log('Adding Radiology Charges summary line:', totalRadiologyCharges);
+        services.push({
+          srNo: srNo++,
+          item: 'Radiology Charges',
+          rate: totalRadiologyCharges,
+          qty: 1,
+          amount: totalRadiologyCharges,
+          type: 'radiology'
+        });
+      }
+    }
 
     // Add mandatory services from junction table (actual saved services with correct rates)
     console.log('=== MANDATORY SERVICES INTEGRATION (JUNCTION TABLE) ===');
@@ -616,7 +672,8 @@ const Invoice = () => {
             item: mandatoryService.service_name,
             rate: rate,
             qty: quantity,
-            amount: amount
+            amount: amount,
+            type: 'other'
           });
         } else {
           console.log('Skipping mandatory service (rate = 0):', mandatoryService.service_name);
@@ -635,12 +692,12 @@ const Invoice = () => {
       console.log('Adding clinical services from junction table');
       clinicalServicesData.forEach((clinicalService) => {
         console.log('Processing saved clinical service:', clinicalService);
-        
+
         // Use rate_used from junction table (actual rate that was selected and saved)
         const rate = clinicalService.rate_used || clinicalService.amount || 0;
         const quantity = clinicalService.quantity || 1;
         const amount = clinicalService.amount || (rate * quantity);
-        
+
         console.log('Junction table clinical service data:', {
           name: clinicalService.service_name,
           rate: rate,
@@ -656,7 +713,8 @@ const Invoice = () => {
             item: clinicalService.service_name,
             rate: rate,
             qty: quantity,
-            amount: amount
+            amount: amount,
+            type: 'other'
           });
         } else {
           console.log('Skipping clinical service (rate = 0):', clinicalService.service_name);
@@ -725,9 +783,22 @@ const Invoice = () => {
     amountInWords: 'Rupee Thirteen Thousand Nine Hundred Three Only' // TODO: Implement number to words conversion
   };
 
-  // Calculate dynamic total based on filter selection
+  // Filter services based on hideLabRadiology state
+  const getVisibleServices = () => {
+    if (hideLabRadiology && chargeFilter === 'all') {
+      // Filter out lab and radiology services
+      return invoiceData.services.filter(service =>
+        service.type !== 'lab' && service.type !== 'radiology'
+      );
+    }
+    return invoiceData.services;
+  };
+
+  const visibleServices = getVisibleServices();
+
+  // Calculate dynamic total based on filter selection and visible services
   const calculateVisibleTotal = () => {
-    return invoiceData.services.reduce((total, service) => {
+    return visibleServices.reduce((total, service) => {
       // Ensure amount is converted to number to avoid string concatenation
       const amount = typeof service.amount === 'string' ? parseFloat(service.amount) || 0 : service.amount || 0;
       return total + amount;
@@ -967,10 +1038,10 @@ const Invoice = () => {
                 </tr>
               </thead>
               <tbody>
-                ${invoiceData.services.map((service) => {
+                ${visibleServices.map((service, index) => {
                   return `
                     <tr>
-                      <td>${service.srNo}</td>
+                      <td>${index + 1}</td>
                       <td class="item-column">${service.item}</td>
                       <td>${service.rate}</td>
                       <td>${service.qty}</td>
@@ -1121,6 +1192,16 @@ const Invoice = () => {
             >
               Show Pharmacy Charge
             </button>
+            <button
+              onClick={() => setHideLabRadiology(!hideLabRadiology)}
+              className={`px-4 py-2 text-white rounded transition-colors text-sm ${
+                hideLabRadiology
+                  ? 'bg-green-500 hover:bg-green-600'
+                  : 'bg-orange-500 hover:bg-orange-600'
+              }`}
+            >
+              {hideLabRadiology ? 'Show Lab/Radiology' : 'Hide Lab/Radiology'}
+            </button>
             <select
               value={chargeFilter}
               onChange={(e) => setChargeFilter(e.target.value)}
@@ -1144,10 +1225,10 @@ const Invoice = () => {
               </tr>
             </thead>
             <tbody>
-              {invoiceData.services.map((service) => {
+              {visibleServices.map((service, index) => {
                 return (
                   <tr key={service.srNo}>
-                    <td className="border border-gray-400 p-2 text-center">{service.srNo}</td>
+                    <td className="border border-gray-400 p-2 text-center">{index + 1}</td>
                     <td className="border border-gray-400 p-2">{service.item}</td>
                     <td className="border border-gray-400 p-2 text-center">{service.rate}</td>
                     <td className="border border-gray-400 p-2 text-center">{service.qty}</td>

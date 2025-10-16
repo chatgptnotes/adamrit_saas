@@ -47,7 +47,7 @@ import {
   Save,
   X
 } from 'lucide-react';
-import { useTestPanels } from '@/hooks/useLabData';
+import { useTestPanels, useLabSubspecialties } from '@/hooks/useLabData';
 import { useToast } from '@/hooks/use-toast';
 import LabTestFormBuilder from './LabTestFormBuilder';
 import TestConfigurationSection, { SubTest } from './TestConfigurationSection';
@@ -1362,6 +1362,41 @@ interface AddPanelFormProps {
 }
 
 const AddPanelForm: React.FC<AddPanelFormProps> = ({ onSubmit }) => {
+  const { subspecialties, loading: subspecialtiesLoading, error: subspecialtiesError } = useLabSubspecialties();
+
+  // Debug logging
+  console.log('🎯 [AddPanelForm] Hook data:', {
+    subspecialties,
+    loading: subspecialtiesLoading,
+    error: subspecialtiesError,
+    count: subspecialties?.length
+  });
+
+  // Test direct Supabase fetch
+  useEffect(() => {
+    const testFetch = async () => {
+      try {
+        console.log('🧪 [TEST] Direct Supabase fetch...');
+
+        // Test 1: Fetch all records
+        const { data: allData, error: allError } = await supabase
+          .from('lab_sub_speciality')
+          .select('*');
+        console.log('🧪 [TEST] All records:', { data: allData, error: allError, count: allData?.length });
+
+        // Test 2: Fetch with NOT NULL filter
+        const { data: filteredData, error: filteredError } = await supabase
+          .from('lab_sub_speciality')
+          .select('*')
+          .not('name', 'is', null);
+        console.log('🧪 [TEST] Filtered (not null):', { data: filteredData, error: filteredError, count: filteredData?.length });
+
+      } catch (err) {
+        console.error('🧪 [TEST] Direct fetch error:', err);
+      }
+    };
+    testFetch();
+  }, []);
   const [formData, setFormData] = useState<Omit<LabPanel, 'id'>>({
     testName: '',
     testCode: '',
@@ -1529,12 +1564,19 @@ const AddPanelForm: React.FC<AddPanelFormProps> = ({ onSubmit }) => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="TUMOR MARKER">TUMOR MARKER</SelectItem>
-                <SelectItem value="HEMATOLOGY">HEMATOLOGY</SelectItem>
-                <SelectItem value="BIOCHEMISTRY">BIOCHEMISTRY</SelectItem>
-                <SelectItem value="MICROBIOLOGY">MICROBIOLOGY</SelectItem>
-                <SelectItem value="IMMUNOLOGY">IMMUNOLOGY</SelectItem>
-                <SelectItem value="PATHOLOGY">PATHOLOGY</SelectItem>
+                {subspecialtiesLoading ? (
+                  <SelectItem value="loading" disabled>Loading...</SelectItem>
+                ) : subspecialtiesError ? (
+                  <SelectItem value="error" disabled>Error: {subspecialtiesError}</SelectItem>
+                ) : subspecialties && subspecialties.length > 0 ? (
+                  subspecialties.map((subspecialty) => (
+                    <SelectItem key={subspecialty.id} value={subspecialty.name}>
+                      {subspecialty.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="no-data" disabled>No subspecialties found</SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>
@@ -2004,6 +2046,16 @@ interface EditPanelFormProps {
 }
 
 const EditPanelForm: React.FC<EditPanelFormProps> = ({ panel, onSubmit }) => {
+  const { subspecialties, loading: subspecialtiesLoading, error: subspecialtiesError } = useLabSubspecialties();
+
+  // Debug logging
+  console.log('🎯 [EditPanelForm] Hook data:', {
+    subspecialties,
+    loading: subspecialtiesLoading,
+    error: subspecialtiesError,
+    count: subspecialties?.length
+  });
+
   const [formData, setFormData] = useState(panel);
   const [isLoadingSubTests, setIsLoadingSubTests] = useState(false);
   const [currentAttribute, setCurrentAttribute] = useState<TestAttribute>({
@@ -2252,12 +2304,19 @@ const EditPanelForm: React.FC<EditPanelFormProps> = ({ panel, onSubmit }) => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="TUMOR MARKER">TUMOR MARKER</SelectItem>
-                <SelectItem value="HEMATOLOGY">HEMATOLOGY</SelectItem>
-                <SelectItem value="BIOCHEMISTRY">BIOCHEMISTRY</SelectItem>
-                <SelectItem value="MICROBIOLOGY">MICROBIOLOGY</SelectItem>
-                <SelectItem value="IMMUNOLOGY">IMMUNOLOGY</SelectItem>
-                <SelectItem value="PATHOLOGY">PATHOLOGY</SelectItem>
+                {subspecialtiesLoading ? (
+                  <SelectItem value="loading" disabled>Loading...</SelectItem>
+                ) : subspecialtiesError ? (
+                  <SelectItem value="error" disabled>Error: {subspecialtiesError}</SelectItem>
+                ) : subspecialties && subspecialties.length > 0 ? (
+                  subspecialties.map((subspecialty) => (
+                    <SelectItem key={subspecialty.id} value={subspecialty.name}>
+                      {subspecialty.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="no-data" disabled>No subspecialties found</SelectItem>
+                )}
               </SelectContent>
             </Select>
           </div>

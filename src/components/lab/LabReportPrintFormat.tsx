@@ -6,9 +6,10 @@ import { Printer, Download } from 'lucide-react';
 interface LabTest {
   name: string;
   observedValue: string;
-  normalRange: string;
+  normalRange?: string;
   unit?: string;
   description?: string;
+  testType?: 'quantitative' | 'qualitative'; // New: Test type
 }
 
 interface LabReportPrintFormatProps {
@@ -23,23 +24,35 @@ interface LabReportPrintFormatProps {
   tests?: LabTest[];
 }
 
+// Preset Test Templates
+export const SEROLOGY_TESTS: LabTest[] = [
+  {
+    name: "HIV I & II",
+    observedValue: "Non - Reactive",
+    testType: "qualitative"
+  },
+  {
+    name: "HCV [ Hepatitis C virus ]",
+    observedValue: "Non - Reactive",
+    testType: "qualitative"
+  },
+  {
+    name: "HBsAg",
+    observedValue: "Non - Reactive",
+    testType: "qualitative"
+  }
+];
+
 const LabReportPrintFormat: React.FC<LabReportPrintFormatProps> = ({
   patientName = "John Doe",
   patientAge = "45",
   patientGender = "Male",
   patientId = "P001",
   reportDate = new Date().toLocaleDateString(),
-  reportType = "Report on BIOCHEMISTRY",
+  reportType = "Report on SEROLOGY",
   doctorName = "DR. ARUN AGRE",
   doctorQualification = "MD (PATHOLOGY)",
-  tests = [
-    {
-      name: "CRP QUANTITATIVE",
-      observedValue: "34 mg/L",
-      normalRange: "- Up to 6.0 mg/L",
-      description: "CRP is an acute phase reactant which is used in inflammatory disorders for monitoring course and effect of therapy. It is most useful as an indicator of activity in Rheumatoid arthritis, Rheumatic fever, tissue injury or necrosis and infections. As compared to ESR, CRP shows an earlier rise in inflammatory disorders which begins in 4-6 hrs, the intensity of the rise being higher than ESR and the recovery being earlier than ESR. Unlike ESR, CRP levels are not influenced by hematologic conditions like Anemia, Polycythemia etc."
-    }
-  ]
+  tests = SEROLOGY_TESTS
 }) => {
   
   const handlePrint = () => {
@@ -103,23 +116,46 @@ const LabReportPrintFormat: React.FC<LabReportPrintFormatProps> = ({
 
             {/* Test Results */}
             {tests.map((test, index) => (
-              <div key={index} className="border-b border-gray-300">
-                {/* Test Name Row */}
-                <div className="py-4">
-                  <div className="font-bold text-lg mb-2">{test.name}</div>
-                  <div className="grid grid-cols-3 items-center">
-                    <div className="italic font-medium">{test.name}</div>
-                    <div className="text-center font-bold">{test.observedValue}</div>
-                    <div className="text-center">{test.normalRange}</div>
+              <div key={index} className="border-b border-gray-300 py-3">
+                {/* Qualitative Test Format (Simple - Second Screenshot Style) */}
+                {test.testType === 'qualitative' ? (
+                  <div>
+                    {/* Test Heading */}
+                    <div className="font-bold text-base mb-3">{test.name}</div>
+
+                    {/* Test Name and Result in Single Row */}
+                    <div className="flex items-center justify-start gap-4 pl-4">
+                      <div className="italic text-sm flex-grow">{test.name}</div>
+                      <div className="font-bold border-2 border-black px-6 py-1 text-sm">
+                        {test.observedValue}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* Quantitative Test Format (Detailed Table Style) */
+                  <div>
+                    <div className="font-bold text-base mb-2">{test.name}</div>
+                    <div className="grid grid-cols-3 items-center py-2">
+                      <div className="italic text-sm pl-4">{test.name}</div>
+                      <div className="text-center font-bold">{test.observedValue}</div>
+                      <div className="text-center">{test.normalRange}</div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Description */}
                 {test.description && (
-                  <div className="pb-4">
-                    <p className="text-sm leading-relaxed text-justify">
+                  <div className="pt-2 pb-2">
+                    <p className="text-sm leading-relaxed text-justify pl-4">
                       {test.description}
                     </p>
+                  </div>
+                )}
+
+                {/* Comments Section (if needed) */}
+                {test.testType === 'qualitative' && (
+                  <div className="pl-4 pt-2">
+                    <div className="text-xs text-gray-600">Comments</div>
                   </div>
                 )}
               </div>

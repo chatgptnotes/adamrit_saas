@@ -1375,3 +1375,55 @@ export function useLabDashboard() {
     refetch: fetchDashboardData
   };
 }
+
+// Lab Subspecialties Hook
+export function useLabSubspecialties() {
+  const [subspecialties, setSubspecialties] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSubspecialties = async () => {
+      console.log('🔍 [DEBUG] Fetching lab subspecialties...');
+      setLoading(true);
+      setError(null);
+
+      try {
+        const { data, error: supabaseError } = await supabase
+          .from('lab_sub_speciality')
+          .select('*')
+          .not('name', 'is', null)  // Filter out null names
+          .order('name');
+
+        console.log('📊 [DEBUG] Supabase response:', { data, error: supabaseError });
+
+        if (supabaseError) {
+          console.error('❌ [DEBUG] Supabase error:', supabaseError);
+          throw supabaseError;
+        }
+
+        console.log('✅ [DEBUG] Subspecialties loaded:', data?.length || 0, 'items');
+        console.log('📋 [DEBUG] Subspecialties data:', data);
+        setSubspecialties(data || []);
+      } catch (err) {
+        console.error('❌ [DEBUG] Error fetching lab subspecialties:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch lab subspecialties');
+        setSubspecialties([]);
+      } finally {
+        setLoading(false);
+        console.log('🏁 [DEBUG] Fetch complete. Loading:', false);
+      }
+    };
+
+    fetchSubspecialties();
+  }, []);
+
+  console.log('🔄 [useLabSubspecialties] Returning:', {
+    subspecialties,
+    length: subspecialties?.length,
+    loading,
+    error
+  });
+
+  return { subspecialties, loading, error };
+}
