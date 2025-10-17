@@ -71,19 +71,60 @@ const Invoice = () => {
   const { data: paymentData } = useQuery({
     queryKey: ['invoice-payments', visitId],
     queryFn: async () => {
-      if (!visitId) return null;
+      console.log('=== FETCHING PAYMENTS FROM accounting_transactions TABLE ===');
+      console.log('visitId:', visitId);
 
-      const { data, error } = await supabase
+      if (!visitId) {
+        console.log('No visit ID found for payments');
+        return [];
+      }
+
+      // First get the UUID from visits table using visit_id string
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('Visit UUID query result for payments:', { visitData, visitError });
+
+      if (visitError || !visitData?.id) {
+        console.error('Could not find visit UUID for payments:', visitError);
+        return [];
+      }
+
+      const visitUUID = visitData.id;
+      console.log('Found visit UUID for payments:', visitUUID);
+
+      // Try querying accounting_transactions with UUID first
+      let { data, error } = await supabase
         .from('accounting_transactions')
         .select('*')
-        .eq('visit_id', visitId)
+        .eq('visit_id', visitUUID)
         .eq('transaction_type', 'payment');
+
+      console.log('Payments query with UUID result:', { data, error });
+
+      // If UUID query returns empty, try with string visit_id
+      if ((!data || data.length === 0) && !error) {
+        console.log('UUID query returned empty, trying with string visit_id...');
+        const result = await supabase
+          .from('accounting_transactions')
+          .select('*')
+          .eq('visit_id', visitId)
+          .eq('transaction_type', 'payment');
+
+        data = result.data;
+        error = result.error;
+        console.log('Payments query with string visit_id result:', { data, error });
+      }
 
       if (error) {
         console.error('Error fetching payment data:', error);
         return [];
       }
 
+      console.log('✅ Payments fetched:', data);
       return data || [];
     },
     enabled: !!visitId
@@ -93,20 +134,171 @@ const Invoice = () => {
   const { data: advanceData } = useQuery({
     queryKey: ['invoice-advances', visitId],
     queryFn: async () => {
-      if (!visitId) return null;
+      console.log('=== FETCHING ADVANCES FROM accounting_transactions TABLE ===');
+      console.log('visitId:', visitId);
 
-      const { data, error } = await supabase
+      if (!visitId) {
+        console.log('No visit ID found for advances');
+        return [];
+      }
+
+      // First get the UUID from visits table using visit_id string
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('Visit UUID query result for advances:', { visitData, visitError });
+
+      if (visitError || !visitData?.id) {
+        console.error('Could not find visit UUID for advances:', visitError);
+        return [];
+      }
+
+      const visitUUID = visitData.id;
+      console.log('Found visit UUID for advances:', visitUUID);
+
+      // Try querying accounting_transactions with UUID first
+      let { data, error } = await supabase
         .from('accounting_transactions')
         .select('*')
-        .eq('visit_id', visitId)
+        .eq('visit_id', visitUUID)
         .eq('transaction_type', 'advance');
+
+      console.log('Advances query with UUID result:', { data, error });
+
+      // If UUID query returns empty, try with string visit_id
+      if ((!data || data.length === 0) && !error) {
+        console.log('UUID query returned empty, trying with string visit_id...');
+        const result = await supabase
+          .from('accounting_transactions')
+          .select('*')
+          .eq('visit_id', visitId)
+          .eq('transaction_type', 'advance');
+
+        data = result.data;
+        error = result.error;
+        console.log('Advances query with string visit_id result:', { data, error });
+      }
 
       if (error) {
         console.error('Error fetching advance data:', error);
         return [];
       }
 
+      console.log('✅ Advances fetched:', data);
       return data || [];
+    },
+    enabled: !!visitId
+  });
+
+  // Fetch advance payment data from advance_payment table (same as Financial Summary)
+  const { data: advancePaymentData } = useQuery({
+    queryKey: ['invoice-advance-payment', visitId],
+    queryFn: async () => {
+      console.log('=== FETCHING ADVANCE PAYMENT FROM advance_payment TABLE ===');
+      console.log('visitId:', visitId);
+
+      if (!visitId) {
+        console.log('No visit ID found for advance payment');
+        return [];
+      }
+
+      try {
+        // Fetch advance payments with exact visitId match and ACTIVE status
+        const { data: exactMatch, error: exactError } = await supabase
+          .from('advance_payment')
+          .select('*')
+          .eq('visit_id', visitId)
+          .eq('status', 'ACTIVE');
+
+        console.log('Advance payment query result:', { exactMatch, exactError });
+
+        if (exactError) {
+          console.error('Error fetching advance payment data:', exactError);
+          return [];
+        }
+
+        // Calculate totals
+        let totalPaid = 0;
+        let totalRefunded = 0;
+
+        if (exactMatch && exactMatch.length > 0) {
+          exactMatch.forEach(record => {
+            const amount = parseFloat(record.advance_amount) || 0;
+            const refunded = parseFloat(record.returned_amount) || 0;
+
+            if (record.is_refund) {
+              totalRefunded += refunded;
+            } else {
+              totalPaid += amount;
+            }
+          });
+
+          console.log('✅ Advance payment totals:', {
+            total_paid: totalPaid,
+            total_refunded: totalRefunded,
+            net_advance: totalPaid - totalRefunded
+          });
+        }
+
+        return exactMatch || [];
+      } catch (error) {
+        console.error('Exception fetching advance payment:', error);
+        return [];
+      }
+    },
+    enabled: !!visitId
+  });
+
+  // Fetch discount from visit_discounts table (same as Final Bill)
+  const { data: discountData } = useQuery({
+    queryKey: ['invoice-discount', visitId],
+    queryFn: async () => {
+      console.log('=== FETCHING DISCOUNT FROM visit_discounts TABLE ===');
+      console.log('visitId:', visitId);
+
+      if (!visitId) {
+        console.log('No visit ID found for discount');
+        return 0;
+      }
+
+      // First get the UUID from visits table using visit_id string
+      const { data: visitData, error: visitError } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('visit_id', visitId)
+        .single();
+
+      console.log('Visit UUID query result for discount:', { visitData, visitError });
+
+      if (visitError || !visitData?.id) {
+        console.error('Could not find visit UUID for discount:', visitError);
+        return 0;
+      }
+
+      const visitUUID = visitData.id;
+      console.log('Found visit UUID for discount:', visitUUID);
+
+      // Fetch discount from visit_discounts table
+      const { data, error } = await supabase
+        .from('visit_discounts')
+        .select('discount_amount')
+        .eq('visit_id', visitUUID)
+        .maybeSingle();
+
+      console.log('Discount query result:', { data, error });
+
+      if (error) {
+        console.error('Error fetching discount:', error);
+        return 0;
+      }
+
+      const discountAmount = data?.discount_amount || 0;
+      console.log('✅ Discount fetched from visit_discounts:', discountAmount);
+
+      return discountAmount;
     },
     enabled: !!visitId
   });
@@ -152,6 +344,10 @@ const Invoice = () => {
             id,
             name,
             private,
+            "NABH_rates_in_rupee",
+            "Non-NABH_rates_in_rupee",
+            bhopal_nabh_rate,
+            bhopal_non_nabh_rate,
             category,
             description
           )
@@ -500,19 +696,45 @@ const Invoice = () => {
 
     // If filter is set to lab or radiology, show only that data
     if (chargeFilter === 'lab') {
-      console.log('Creating lab services, labOrdersData:', labOrdersData);
-      // Show visit labs data (Service Selection)
+      console.log('Creating lab services (with rate recalculation), labOrdersData:', labOrdersData);
+
       if (labOrdersData && labOrdersData.length > 0) {
+        // Get patient info to determine correct rate type
+        const patientType = (visitData?.patient_type || visitData?.patients?.patient_type || '').toLowerCase().trim();
+        const corporate = (visitData?.patients?.corporate || '').toLowerCase().trim();
+
+        const hasCorporate = corporate.length > 0 && corporate !== 'private';
+        const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+        const usesNonNABHRate = hasCorporate && (corporate.includes('cghs') || corporate.includes('echs') || corporate.includes('esic'));
+        const usesBhopaliNABHRate = hasCorporate && (corporate.includes('mp police') || corporate.includes('ordnance factory'));
+        const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
         labOrdersData.forEach((visitLab) => {
-          console.log('Processing visit lab:', visitLab);
-          // Ensure amounts are numbers, not strings
-          const rate = (visitLab.lab?.private && visitLab.lab.private > 0) ? visitLab.lab.private : 100;
+          const labDetail = visitLab.lab;
+          const quantity = visitLab.quantity || 1;
+
+          // Recalculate rate based on patient type
+          let correctUnitRate = 100;
+          if (isPrivatePatient && labDetail?.private && labDetail.private > 0) {
+            correctUnitRate = labDetail.private;
+          } else if (usesNonNABHRate && labDetail?.['Non-NABH_rates_in_rupee'] && labDetail['Non-NABH_rates_in_rupee'] > 0) {
+            correctUnitRate = labDetail['Non-NABH_rates_in_rupee'];
+          } else if (usesBhopaliNABHRate && labDetail?.bhopal_nabh_rate && labDetail.bhopal_nabh_rate > 0) {
+            correctUnitRate = labDetail.bhopal_nabh_rate;
+          } else if (usesNABHRate && labDetail?.['NABH_rates_in_rupee'] && labDetail['NABH_rates_in_rupee'] > 0) {
+            correctUnitRate = labDetail['NABH_rates_in_rupee'];
+          } else if (labDetail?.private && labDetail.private > 0) {
+            correctUnitRate = labDetail.private;
+          }
+
+          const finalCost = correctUnitRate * quantity;
+
           services.push({
             srNo: srNo++,
-            item: visitLab.lab?.name || 'Lab Test',
-            rate: rate,
-            qty: 1,
-            amount: rate,
+            item: labDetail?.name || 'Lab Test',
+            rate: correctUnitRate,
+            qty: quantity,
+            amount: finalCost,
             type: 'lab'
           });
         });
@@ -591,27 +813,80 @@ const Invoice = () => {
     }
 
     // NOW INCLUDING lab and radiology charges in "All Charges" view as SUMMARY LINES
-    // Calculate total lab charges and add as single line
-    console.log('Calculating total lab charges for All Charges view');
+    // Calculate lab charges by recalculating rates dynamically (same logic as Final Bill)
+    console.log('=== CALCULATING LABORATORY CHARGES (DYNAMIC RATE CALCULATION) ===');
+    console.log('labOrdersData:', labOrdersData);
+    console.log('visitData patient info:', visitData?.patients);
+
     let totalLabCharges = 0;
+
     if (labOrdersData && labOrdersData.length > 0) {
-      labOrdersData.forEach((visitLab) => {
-        const rate = (visitLab.lab?.private && visitLab.lab.private > 0) ? visitLab.lab.private : 100;
-        totalLabCharges += rate;
+      // Get patient info to determine correct rate type
+      const patientType = (visitData?.patient_type || visitData?.patients?.patient_type || '').toLowerCase().trim();
+      const corporate = (visitData?.patients?.corporate || '').toLowerCase().trim();
+
+      // Corporate field takes priority - check if patient has a corporate panel first
+      const hasCorporate = corporate.length > 0 && corporate !== 'private';
+
+      // Patient is private ONLY if they don't have a corporate panel
+      const isPrivatePatient = !hasCorporate && (patientType === 'private' || corporate === 'private');
+
+      // Check if corporate qualifies for Non-NABH rates (CGHS/ECHS/ESIC)
+      const usesNonNABHRate = hasCorporate &&
+        (corporate.includes('cghs') ||
+        corporate.includes('echs') ||
+        corporate.includes('esic'));
+
+      // Check if corporate qualifies for Bhopal NABH rates
+      const usesBhopaliNABHRate = hasCorporate &&
+        (corporate.includes('mp police') ||
+        corporate.includes('ordnance factory') ||
+        corporate.includes('ordnance factory itarsi'));
+
+      // Check if patient has other corporate
+      const usesNABHRate = hasCorporate && !usesNonNABHRate && !usesBhopaliNABHRate;
+
+      console.log('🔍 Patient Type Determination:', {
+        patientType,
+        corporate,
+        isPrivatePatient,
+        hasCorporate,
+        usesNonNABHRate,
+        usesBhopaliNABHRate,
+        usesNABHRate
       });
 
-      // Add single summary line for all lab charges
-      if (totalLabCharges > 0) {
-        console.log('Adding Laboratory Charges summary line:', totalLabCharges);
-        services.push({
-          srNo: srNo++,
-          item: 'Laboratory Charges',
-          rate: totalLabCharges,
-          qty: 1,
-          amount: totalLabCharges,
-          type: 'lab'
+      // USE STORED COST from visit_labs table (same as Final Bill)
+      labOrdersData.forEach((visitLab, index) => {
+        const labDetail = visitLab.lab;
+
+        // Use the stored cost from visit_labs table instead of recalculating
+        const storedCost = visitLab.cost || 0;
+
+        console.log(`Lab ${index + 1}: ${labDetail?.name}`, {
+          storedCost: storedCost,
+          usingSavedCost: true
         });
-      }
+
+        totalLabCharges += storedCost;
+      });
+
+      console.log('✅ Total lab charges (using stored costs):', totalLabCharges);
+    }
+
+    // Add single summary line for all lab charges if total > 0
+    if (totalLabCharges > 0) {
+      console.log(`📊 Adding Laboratory Charges summary line: ₹${totalLabCharges}`);
+      services.push({
+        srNo: srNo++,
+        item: 'Laboratory Charges',
+        rate: totalLabCharges,
+        qty: 1,
+        amount: totalLabCharges,
+        type: 'lab'
+      });
+    } else {
+      console.warn('⚠️ Total lab charges is 0! No lab tests found or all rates are 0.');
     }
 
     // Calculate total radiology charges and add as single line
@@ -729,18 +1004,59 @@ const Invoice = () => {
 
   // Calculate actual financial amounts from database
   const calculateActualAmounts = () => {
-    const totalBillAmount = billData?.total_amount || 0;
+    console.log('=== CALCULATING FINANCIAL AMOUNTS ===');
 
-    // Calculate total payments (including advances)
+    const totalBillAmount = billData?.total_amount || 0;
+    console.log('Total Bill Amount:', totalBillAmount);
+
+    // Calculate total payments from advance_payment table (primary source)
+    let advancePaymentTotal = 0;
+    let advancePaymentRefunded = 0;
+
+    if (advancePaymentData && advancePaymentData.length > 0) {
+      advancePaymentData.forEach(payment => {
+        const amount = parseFloat(payment.advance_amount) || 0;
+        const returnedAmount = parseFloat(payment.returned_amount) || 0;
+
+        if (payment.is_refund) {
+          advancePaymentRefunded += returnedAmount;
+        } else {
+          advancePaymentTotal += amount;
+        }
+      });
+    }
+
+    const netAdvancePayment = advancePaymentTotal - advancePaymentRefunded;
+
+    console.log('💵 Advance Payment Data:', advancePaymentData);
+    console.log('💵 Advance Payment Total:', advancePaymentTotal);
+    console.log('💵 Advance Payment Refunded:', advancePaymentRefunded);
+    console.log('💵 Net Advance Payment:', netAdvancePayment);
+
+    // Fallback: Calculate total payments from accounting_transactions (if no advance_payment data)
+    console.log('Payment Data (accounting_transactions):', paymentData);
+    console.log('Advance Data (accounting_transactions):', advanceData);
+
     const totalPayments = (paymentData || []).reduce((sum, payment) => sum + (payment.amount || 0), 0);
     const totalAdvances = (advanceData || []).reduce((sum, advance) => sum + (advance.amount || 0), 0);
-    const totalAmountPaid = totalPayments + totalAdvances;
+    const accountingTransactionsTotal = totalPayments + totalAdvances;
 
-    // Get discount from bill data or calculate from accounting transactions
-    const discountAmount = billData?.discount || 0;
+    console.log('💵 Total Payments (accounting_transactions):', totalPayments);
+    console.log('💵 Total Advances (accounting_transactions):', totalAdvances);
+    console.log('💵 Total from accounting_transactions:', accountingTransactionsTotal);
+
+    // Use advance_payment data if available, otherwise fall back to accounting_transactions
+    const totalAmountPaid = netAdvancePayment > 0 ? netAdvancePayment : accountingTransactionsTotal;
+
+    console.log('💵 FINAL Total Amount Paid:', totalAmountPaid);
+
+    // Get discount from visit_discounts table (same as Final Bill)
+    const discountAmount = discountData || 0;
+    console.log('💰 Using discount from visit_discounts table:', discountAmount);
 
     // Calculate balance
     const balance = totalBillAmount - totalAmountPaid - discountAmount;
+    console.log('💳 Balance:', balance);
 
     return {
       total: totalBillAmount,

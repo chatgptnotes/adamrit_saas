@@ -123,7 +123,7 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
   }
 
   return (
-    <div className="bg-white p-4" style={{ fontFamily: 'Arial, sans-serif', fontSize: '12px' }}>
+    <div className="bg-white p-4" style={{ fontFamily: 'Arial, sans-serif', fontSize: '11px', maxWidth: '210mm', margin: '0 auto' }}>
       <style>{`
         * {
           box-sizing: border-box;
@@ -137,11 +137,12 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
         .ts-table th,
         .ts-table td {
           border: 1px solid #000;
-          padding: 4px 6px;
+          padding: 3px 4px;
           text-align: left;
           overflow: visible;
           word-wrap: break-word;
           vertical-align: middle;
+          font-size: 11px;
         }
         .ts-table th {
           font-weight: bold;
@@ -150,32 +151,32 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
         }
         .ts-header {
           text-align: center;
-          font-size: 16px;
+          font-size: 14px;
           font-weight: bold;
           text-decoration: underline;
-          margin-bottom: 8px;
+          margin-bottom: 6px;
         }
         .ts-time-box {
           display: inline-block;
-          width: 40px;
-          height: 30px;
+          width: 35px;
+          height: 26px;
           border: 1px solid #000;
           margin: 1px;
           text-align: center;
-          padding: 2px;
-          font-size: 10px;
+          padding: 1px;
+          font-size: 9px;
           vertical-align: top;
         }
         .ts-time-label {
-          font-size: 9px;
+          font-size: 8px;
           display: block;
           line-height: 1.1;
         }
 
         @media print {
           @page {
-            size: A4;
-            margin: 10mm;
+            size: A4 portrait;
+            margin: 12mm 10mm;
           }
 
           * {
@@ -183,35 +184,88 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
             print-color-adjust: exact !important;
           }
 
-          body {
+          html, body {
             background: white !important;
             margin: 0 !important;
             padding: 0 !important;
+            width: 210mm !important;
+            max-width: 210mm !important;
+            height: auto !important;
           }
 
-          .no-print {
+          .no-print, .print\\:hidden {
             display: none !important;
+          }
+
+          /* Hide dialog overlay and make dialog static */
+          [data-radix-portal] {
+            position: static !important;
+            width: 100% !important;
+            height: auto !important;
+          }
+
+          [data-radix-portal] > div:first-child {
+            display: none !important;
+          }
+
+          /* Ensure dialog content is visible but without dialog styling */
+          [role="dialog"] {
+            display: block !important;
+            position: static !important;
+            max-width: 210mm !important;
+            width: 210mm !important;
+            max-height: none !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+            border: none !important;
+            background: white !important;
+            padding: 0 !important;
+            margin: 0 auto !important;
+            transform: none !important;
+          }
+
+          /* Hide dialog header (with close button and title) */
+          [role="dialog"] > div:first-child,
+          [role="dialog"] > div > div:has(button),
+          [role="dialog"] button {
+            display: none !important;
+          }
+
+          /* Remove padding from main container in print */
+          .bg-white {
+            padding: 8px !important;
+            margin: 0 auto !important;
+            max-width: 210mm !important;
+            width: 100% !important;
+            display: block !important;
+            visibility: visible !important;
           }
 
           .ts-header {
             page-break-after: avoid;
             page-break-inside: avoid;
+            font-size: 13px !important;
+            margin-bottom: 4px !important;
+            font-weight: bold !important;
           }
 
           .ts-table {
             page-break-inside: avoid;
             table-layout: fixed !important;
             width: 100% !important;
+            max-width: 100% !important;
             border: 2px solid #000 !important;
+            border-collapse: collapse !important;
+            margin-bottom: 2px !important;
           }
 
           .ts-table th,
           .ts-table td {
             border: 1px solid #000 !important;
-            padding: 3px 4px !important;
-            font-size: 11px !important;
-            line-height: 1.3 !important;
-            overflow: visible !important;
+            padding: 2px 3px !important;
+            font-size: 9px !important;
+            line-height: 1.1 !important;
+            overflow: hidden !important;
             word-wrap: break-word !important;
             page-break-inside: avoid;
           }
@@ -219,14 +273,15 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
           .ts-table th {
             background-color: #f0f0f0 !important;
             font-weight: bold !important;
+            text-align: center !important;
           }
 
           /* Fixed column widths for medication table */
           .ts-table thead tr th:nth-child(1) {
-            width: 5% !important;
+            width: 6% !important;
           }
           .ts-table thead tr th:nth-child(2) {
-            width: 28% !important;
+            width: 26% !important;
           }
           .ts-table thead tr th:nth-child(3) {
             width: 8% !important;
@@ -235,7 +290,7 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
             width: 8% !important;
           }
           .ts-table thead tr th:nth-child(5) {
-            width: 33% !important;
+            width: 34% !important;
           }
           .ts-table thead tr th:nth-child(6) {
             width: 18% !important;
@@ -244,20 +299,23 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
           /* Time boxes layout */
           .ts-time-box {
             display: inline-block !important;
-            width: 38px !important;
-            height: 28px !important;
+            width: 32px !important;
+            height: 24px !important;
             border: 1px solid #000 !important;
-            margin: 0 1px !important;
-            padding: 1px !important;
-            font-size: 8px !important;
-            vertical-align: top !important;
+            margin: 0 0.5px !important;
+            padding: 1px 0 !important;
+            font-size: 7px !important;
+            vertical-align: middle !important;
             box-sizing: border-box !important;
+            text-align: center !important;
           }
 
           .ts-time-label {
-            font-size: 8px !important;
+            font-size: 7px !important;
             line-height: 1 !important;
             display: block !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
 
           /* Prevent page breaks inside sections */
@@ -268,21 +326,36 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
 
           /* Small text styling */
           small {
-            font-size: 9px !important;
+            font-size: 8px !important;
           }
 
           /* Patient info table */
-          .ts-table tbody tr td:nth-child(1) {
-            width: 20% !important;
+          .patient-info-table td:nth-child(1) {
+            width: 22% !important;
           }
-          .ts-table tbody tr td:nth-child(2) {
-            width: 30% !important;
+          .patient-info-table td:nth-child(2) {
+            width: 28% !important;
           }
-          .ts-table tbody tr td:nth-child(3) {
-            width: 20% !important;
+          .patient-info-table td:nth-child(3) {
+            width: 22% !important;
           }
-          .ts-table tbody tr td:nth-child(4) {
-            width: 30% !important;
+          .patient-info-table td:nth-child(4) {
+            width: 28% !important;
+          }
+
+          /* Allow sections to flow naturally */
+          .date-section {
+            page-break-inside: avoid !important;
+            margin-bottom: 8px !important;
+          }
+
+          .date-section:not(:last-child) {
+            page-break-after: auto !important;
+          }
+
+          /* Reduce spacing for bottom section tables in print */
+          .date-section table[style*="marginTop"] {
+            margin-top: 2px !important;
           }
         }
       `}</style>
@@ -290,7 +363,7 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
       <div className="ts-header">TREATMENT SHEET</div>
 
       {/* Patient Info Table */}
-      <table className="ts-table mb-2">
+      <table className="ts-table patient-info-table mb-2">
         <tbody>
           <tr>
             <td style={{ width: '20%' }}><strong>Name Of the Patient :</strong></td>
@@ -345,12 +418,12 @@ const TreatmentSheetPrintView: React.FC<TreatmentSheetPrintViewProps> = ({ visit
         });
 
         return Object.entries(groupedByDate).map(([dateKey, meds], groupIdx) => (
-          <div key={groupIdx} style={{ marginBottom: '20px', pageBreakAfter: 'always' }}>
+          <div key={groupIdx} className="date-section" style={{ marginBottom: '20px' }}>
             {groupIdx > 0 && (
               <>
                 <div className="ts-header" style={{ marginTop: '20px' }}>TREATMENT SHEET</div>
                 {/* Repeat Patient Info Table for each date */}
-                <table className="ts-table mb-2">
+                <table className="ts-table patient-info-table mb-2">
                   <tbody>
                     <tr>
                       <td style={{ width: '20%' }}><strong>Name Of the Patient :</strong></td>

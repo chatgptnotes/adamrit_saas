@@ -154,7 +154,7 @@ const PharmacyBilling: React.FC = () => {
         const mappedData = (data || []).map(item => ({
           id: item.id,
           name: item.name,
-          generic_name: item.generic_name,
+          generic_name: item.generic_name || '',
           strength: '',
           dosage: item.dosage || '',
           stock: 0,

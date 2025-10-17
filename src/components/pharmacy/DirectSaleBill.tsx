@@ -67,7 +67,7 @@ const DirectSaleBill: React.FC = () => {
   const [totalAmount, setTotalAmount] = useState('Rs');
   const [netAmount, setNetAmount] = useState('Rs');
   const [completedBill, setCompletedBill] = useState<CompletedBill | null>(null);
-  const [medicationSuggestions, setMedicationSuggestions] = useState<{[key: string]: Array<{id: string, name: string, item_code?: string}>}>({});
+  const [medicationSuggestions, setMedicationSuggestions] = useState<{[key: string]: Array<{id: string, name: string, generic_name?: string, category?: string, dosage?: string}>}>({});
   const [showMedicationResults, setShowMedicationResults] = useState<{[key: string]: boolean}>({});
   const [dropdownPosition, setDropdownPosition] = useState<{[key: string]: {top: number, left: number, width: number}}>({});
   const inputRefs = useRef<{[key: string]: HTMLInputElement | null}>({});
@@ -183,26 +183,38 @@ const DirectSaleBill: React.FC = () => {
     }
 
     try {
-      console.log('Searching medications for:', searchTerm);
+      console.log('🔍 Searching medications for:', searchTerm, 'medicineId:', medicineId);
       const { data, error } = await supabase
         .from('medication')
-        .select('id, name, item_code')
+        .select('id, name, generic_name, category, dosage')
         .ilike('name', `%${searchTerm}%`)
         .limit(10);
 
       if (error) {
-        console.error('Error searching medications:', error);
+        console.error('❌ Error searching medications:', error);
         throw error;
       }
 
-      console.log('Medication search results:', data);
-      setMedicationSuggestions(prev => ({ ...prev, [medicineId]: data || [] }));
+      console.log('✅ Medication search results:', data);
+      console.log('📊 Number of results:', data?.length);
+      setMedicationSuggestions(prev => {
+        const updated = { ...prev, [medicineId]: data || [] };
+        console.log('💾 Updated medication suggestions:', updated);
+        return updated;
+      });
 
       if (data && data.length > 0) {
-        setShowMedicationResults(prev => ({ ...prev, [medicineId]: true }));
+        console.log('👁️ Setting showMedicationResults to true for:', medicineId);
+        setShowMedicationResults(prev => {
+          const updated = { ...prev, [medicineId]: true };
+          console.log('👁️ Updated showMedicationResults:', updated);
+          return updated;
+        });
+      } else {
+        console.log('⚠️ No results found for:', searchTerm);
       }
     } catch (error: any) {
-      console.error('Error searching medications:', error);
+      console.error('❌ Error searching medications:', error);
       toast({
         title: "Error",
         description: "Failed to search medications",
@@ -1061,16 +1073,15 @@ const DirectSaleBill: React.FC = () => {
                 onMouseDown={(e) => {
                   e.preventDefault();
                   updateRow(medicine.id, 'itemName', medication.name);
-                  if (medication.item_code) {
-                    updateRow(medicine.id, 'itemCode', medication.item_code);
-                  }
                   setShowMedicationResults(prev => ({ ...prev, [medicine.id]: false }));
                 }}
               >
                 <div className="font-medium text-gray-900">{medication.name}</div>
-                {medication.item_code && (
-                  <div className="text-sm text-gray-600">Code: {medication.item_code}</div>
-                )}
+                <div className="flex gap-3 text-sm text-gray-600 mt-1">
+                  {medication.generic_name && <span>{medication.generic_name}</span>}
+                  {medication.dosage && <span>• {medication.dosage}</span>}
+                  {medication.category && <span>• {medication.category}</span>}
+                </div>
               </div>
             ))}
           </div>
