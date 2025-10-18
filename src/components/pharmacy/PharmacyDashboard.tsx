@@ -101,6 +101,8 @@ const PharmacyDashboard: React.FC = () => {
           <TabsTrigger value="view_sales">View Sales</TabsTrigger>
             <TabsTrigger value="stock-mgmt">Stock Mgmt</TabsTrigger>
           <TabsTrigger value="treatment-sheet">Treatment Sheet</TabsTrigger>
+          <TabsTrigger value="manufacturer">Manufacturer</TabsTrigger>
+          <TabsTrigger value="supplier">Supplier</TabsTrigger>
           </div>
         </TabsList>
 
@@ -400,6 +402,10 @@ const PharmacyDashboard: React.FC = () => {
 
         <TabsContent value="manufacturer">
           <SupplierMaster activeTab="manufacturer" />
+        </TabsContent>
+
+        <TabsContent value="supplier">
+          <SupplierMaster activeTab="supplier" />
         </TabsContent>
 
         <TabsContent value="view_sales">
