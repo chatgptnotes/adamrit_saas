@@ -40,6 +40,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { MedicineMaster, ManufacturerCompany, Supplier } from '@/types/medicine';
+import { useAuth } from '@/contexts/AuthContext';
 
 const MedicineItems: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -51,6 +52,7 @@ const MedicineItems: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
   const { toast } = useToast();
+  const { hospitalConfig } = useAuth();
 
   const fetchMedicines = async () => {
     setLoading(true);
@@ -61,6 +63,7 @@ const MedicineItems: React.FC = () => {
         manufacturer:manufacturer_companies(id, name)
       `)
       .eq('is_deleted', false)
+      .eq('hospital_name', hospitalConfig.fullName)
       .order('medicine_name');
 
     if (error) {
@@ -175,6 +178,7 @@ const MedicineItems: React.FC = () => {
                 <DialogTitle>Add New Medicine</DialogTitle>
               </DialogHeader>
               <AddMedicineForm
+                hospitalName={hospitalConfig.fullName}
                 onSuccess={() => {
                   setIsAddDialogOpen(false);
                   fetchMedicines();
@@ -382,6 +386,7 @@ const MedicineItems: React.FC = () => {
           {selectedMedicine && (
             <EditMedicineForm
               medicine={selectedMedicine}
+              hospitalName={hospitalConfig.fullName}
               onSuccess={() => {
                 setIsEditDialogOpen(false);
                 setSelectedMedicine(null);
@@ -400,7 +405,7 @@ const MedicineItems: React.FC = () => {
 };
 
 // Add Medicine Form Component
-const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
+const AddMedicineForm: React.FC<{ hospitalName: string; onSuccess: () => void }> = ({ hospitalName, onSuccess }) => {
   const { toast } = useToast();
   const [manufacturers, setManufacturers] = useState<ManufacturerCompany[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -465,6 +470,7 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
           selling_price: formData.selling_price ? parseFloat(formData.selling_price) : 0,
           mrp_price: formData.mrp_price ? parseFloat(formData.mrp_price) : 0,
           expiry_date: formData.expiry_date || null,
+          hospital_name: hospitalName,
         }
       ]);
 
@@ -673,9 +679,10 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
 // Edit Medicine Form Component
 const EditMedicineForm: React.FC<{
   medicine: MedicineMaster;
+  hospitalName: string;
   onSuccess: () => void;
   onCancel: () => void;
-}> = ({ medicine, onSuccess, onCancel }) => {
+}> = ({ medicine, hospitalName, onSuccess, onCancel }) => {
   const { toast } = useToast();
   const [manufacturers, setManufacturers] = useState<ManufacturerCompany[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -739,6 +746,7 @@ const EditMedicineForm: React.FC<{
         selling_price: formData.selling_price ? parseFloat(formData.selling_price) : 0,
         mrp_price: formData.mrp_price ? parseFloat(formData.mrp_price) : 0,
         expiry_date: formData.expiry_date || null,
+        hospital_name: hospitalName,
       })
       .eq('id', medicine.id);
 
