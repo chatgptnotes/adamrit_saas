@@ -2761,14 +2761,30 @@ const FinalBill = () => {
         return;
       }
 
+      // Fetch the final payment record to get its created_at timestamp
+      const { data: paymentData, error: fetchError } = await supabase
+        .from('final_payments')
+        .select('created_at')
+        .eq('visit_id', visitId)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching final payment timestamp:', fetchError);
+        toast.error('Failed to fetch payment timestamp');
+        return;
+      }
+
+      const dischargeTimestamp = paymentData?.created_at || new Date().toISOString();
+
       // Log discharge update
       console.log('💾 Starting discharge update for visitId:', visitId);
+      console.log('📅 Using final payment timestamp as discharge date:', dischargeTimestamp);
 
-      // Update visit discharge status and discharge date with timestamp
+      // Update visit discharge status and discharge date with final payment timestamp
       const { error: visitError } = await supabase
         .from('visits')
         .update({
-          discharge_date: new Date().toISOString(), // Set discharge date and time (full timestamp)
+          discharge_date: dischargeTimestamp, // Set discharge date to final payment timestamp
           discharge_mode: finalPaymentReason.toLowerCase().includes('death') ? 'death' :
                          finalPaymentReason.toLowerCase().includes('dama') ? 'dama' : 'recovery',
           bill_paid: true,

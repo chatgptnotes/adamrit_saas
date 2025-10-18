@@ -45,6 +45,7 @@ interface Visit {
   condonation_delay_submission: string | null;
   billing_status: string | null;
   patient_type: string | null;
+  discharge_summary_status: string | null;
   patients: {
     id: string;
     patients_id: string;
@@ -119,6 +120,9 @@ const DischargedPatients = () => {
             insurance_person_no,
             hospital_name,
             corporate
+          ),
+          ipd_discharge_summary!visit_id(
+            status
           )
         `)
         .not('discharge_date', 'is', null) // Only show discharged patients
@@ -163,8 +167,23 @@ const DischargedPatients = () => {
         throw error;
       }
 
-      console.log(`🏥 Found ${data?.length || 0} discharged patients (IPD, IPD (Inpatient) & Emergency) for hospital:`, hospitalConfig?.name);
-      return data as Visit[];
+      // Process data to extract discharge summary status
+      const processedData = data?.map((visit: any) => {
+        // Get the latest discharge summary status
+        const dischargeSummary = Array.isArray(visit.ipd_discharge_summary)
+          ? visit.ipd_discharge_summary[0]
+          : visit.ipd_discharge_summary;
+
+        return {
+          ...visit,
+          discharge_summary_status: dischargeSummary?.status || null,
+          // Remove the nested discharge summary object to keep the data structure clean
+          ipd_discharge_summary: undefined
+        };
+      });
+
+      console.log(`🏥 Found ${processedData?.length || 0} discharged patients (IPD, IPD (Inpatient) & Emergency) for hospital:`, hospitalConfig?.name);
+      return processedData as Visit[];
     },
     staleTime: 30000, // 30 seconds
     refetchInterval: 60000, // Refetch every minute
@@ -173,6 +192,7 @@ const DischargedPatients = () => {
   // Apply client-side filtering to avoid PostgREST parsing issues
   const filteredVisits = visits?.filter(visit => {
     // Filter 1: Only show fully discharged patients
+    // Patient automatically gets discharge_date and status='discharged' when Final Payment is completed
     if (visit.status?.toLowerCase() !== 'discharged') return false;
 
     // Filter 2: Apply search if provided
@@ -434,7 +454,7 @@ const DischargedPatients = () => {
               <p className="text-gray-500">
                 {searchTerm || statusFilter !== 'all' || patientTypeFilter !== 'all' || billingStatusFilter !== 'all' || corporateFilter !== 'all'
                   ? 'Try adjusting your filters or search terms.'
-                  : 'No inpatients (IPD/Emergency) have been discharged yet.'}
+                  : 'No discharged inpatients (IPD/Emergency) found.'}
               </p>
             </div>
           ) : (

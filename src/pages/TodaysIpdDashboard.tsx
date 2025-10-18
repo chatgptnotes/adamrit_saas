@@ -59,7 +59,7 @@ const TodaysIpdDashboard = () => {
   const [originalComments, setOriginalComments] = useState<Record<string, string>>({});
   const [savingComments, setSavingComments] = useState<Record<string, boolean>>({});
   const [savedComments, setSavedComments] = useState<Record<string, boolean>>({});
-  const [sortBy, setSortBy] = useState<'sr_no' | 'sr_no_desc' | 'latest' | 'oldest' | 'name_asc' | 'name_desc' | 'visit_id_asc' | 'visit_id_desc'>('sr_no');
+  const [sortBy, setSortBy] = useState<'sr_no' | 'sr_no_desc' | 'latest' | 'oldest' | 'name_asc' | 'name_desc' | 'visit_id_asc' | 'visit_id_desc'>('latest');
   const navigate = useNavigate();
 
   const { diagnoses, updatePatient } = usePatients();
