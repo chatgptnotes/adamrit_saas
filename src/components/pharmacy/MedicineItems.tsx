@@ -1,4 +1,4 @@
-// Medicine Items Management Component
+// Medicine Items Management Component - Medicine Master
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,13 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Plus,
   Search,
   Package,
@@ -32,24 +39,14 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-
-interface Medicine {
-  id: string;
-  name: string;
-  generic_name?: string;
-  category?: string;
-  dosage?: string;
-  description?: string;
-  created_at?: string;
-  updated_at?: string;
-}
+import { MedicineMaster, ManufacturerCompany, Supplier } from '@/types/medicine';
 
 const MedicineItems: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
-  const [medicines, setMedicines] = useState<Medicine[]>([]);
+  const [selectedMedicine, setSelectedMedicine] = useState<MedicineMaster | null>(null);
+  const [medicines, setMedicines] = useState<MedicineMaster[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
@@ -58,9 +55,14 @@ const MedicineItems: React.FC = () => {
   const fetchMedicines = async () => {
     setLoading(true);
     const { data, error } = await supabase
-      .from('medication')
-      .select('*')
-      .order('name');
+      .from('medicine_master')
+      .select(`
+        *,
+        manufacturer:manufacturer_companies(id, name)
+      `)
+      .eq('is_deleted', false)
+      .order('medicine_name');
+
     if (error) {
       console.error('Error fetching medicines:', error);
       toast({
@@ -84,8 +86,9 @@ const MedicineItems: React.FC = () => {
       return;
     }
 
+    // Hard delete - permanently remove from database
     const { error } = await supabase
-      .from('medication')
+      .from('medicine_master')
       .delete()
       .eq('id', id);
 
@@ -105,17 +108,16 @@ const MedicineItems: React.FC = () => {
     }
   };
 
-  const handleEdit = (medicine: Medicine) => {
+  const handleEdit = (medicine: MedicineMaster) => {
     setSelectedMedicine(medicine);
     setIsEditDialogOpen(true);
   };
 
   const filteredMedicines = medicines.filter(medicine => {
     const searchLower = searchTerm.toLowerCase();
-    return medicine.name?.toLowerCase().includes(searchLower) ||
+    return medicine.medicine_name?.toLowerCase().includes(searchLower) ||
            medicine.generic_name?.toLowerCase().includes(searchLower) ||
-           medicine.category?.toLowerCase().includes(searchLower) ||
-           medicine.dosage?.toLowerCase().includes(searchLower);
+           medicine.batch_number?.toLowerCase().includes(searchLower);
   });
 
   // Pagination calculations
@@ -128,6 +130,16 @@ const MedicineItems: React.FC = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
+
+  const formatPrice = (price: number | undefined | null) => {
+    if (price === undefined || price === null) return '₹0.00';
+    return `₹${price.toFixed(2)}`;
+  };
+
+  const formatDate = (date: string | undefined | null) => {
+    if (!date) return 'N/A';
+    return new Date(date).toLocaleDateString('en-IN');
+  };
 
   return (
     <div className="space-y-6">
@@ -158,7 +170,7 @@ const MedicineItems: React.FC = () => {
                 Add Medicine
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Add New Medicine</DialogTitle>
               </DialogHeader>
@@ -192,7 +204,7 @@ const MedicineItems: React.FC = () => {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <Input
-              placeholder="Search medicines by name, code, or barcode..."
+              placeholder="Search medicines by name, generic name, or batch number..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
@@ -213,22 +225,29 @@ const MedicineItems: React.FC = () => {
                 <TableRow>
                   <TableHead>Medicine Name</TableHead>
                   <TableHead>Generic Name</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Dosage Form</TableHead>
-                  <TableHead>Description</TableHead>
+                  <TableHead>Manufacturer</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead>Batch No.</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Tablets/Pieces</TableHead>
+                  <TableHead>Purchase Price</TableHead>
+                  <TableHead>Selling Price</TableHead>
+                  <TableHead>MRP</TableHead>
+                  <TableHead>Expiry Date</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8">
+                    <TableCell colSpan={13} className="text-center py-8">
                       Loading medicines...
                     </TableCell>
                   </TableRow>
                 ) : paginatedMedicines.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8">
+                    <TableCell colSpan={13} className="text-center py-8">
                       <div className="flex flex-col items-center gap-2">
                         <Package className="h-8 w-8 text-muted-foreground" />
                         <p className="text-muted-foreground">
@@ -241,19 +260,35 @@ const MedicineItems: React.FC = () => {
                   </TableRow>
                 ) : (
                   paginatedMedicines.map((medicine) => {
+                    const isExpiringSoon = medicine.expiry_date &&
+                      new Date(medicine.expiry_date) <= new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+                    const isExpired = medicine.expiry_date &&
+                      new Date(medicine.expiry_date) < new Date();
+
                     return (
                       <TableRow key={medicine.id}>
-                        <TableCell className="font-medium">{medicine.name}</TableCell>
+                        <TableCell className="font-medium">{medicine.medicine_name}</TableCell>
                         <TableCell>{medicine.generic_name || 'N/A'}</TableCell>
+                        <TableCell>{medicine.manufacturer?.name || 'N/A'}</TableCell>
+                        <TableCell>{medicine.supplier?.supplier_name || 'N/A'}</TableCell>
+                        <TableCell>{medicine.batch_number || 'N/A'}</TableCell>
+                        <TableCell>{medicine.type || 'N/A'}</TableCell>
                         <TableCell>
-                          {medicine.category ? (
-                            <Badge variant="outline">{medicine.category}</Badge>
-                          ) : (
-                            'N/A'
-                          )}
+                          <Badge variant={medicine.quantity && medicine.quantity < 50 ? "destructive" : "outline"}>
+                            {medicine.quantity || 0}
+                          </Badge>
                         </TableCell>
-                        <TableCell>{medicine.dosage || 'N/A'}</TableCell>
-                        <TableCell className="max-w-xs truncate">{medicine.description || 'N/A'}</TableCell>
+                        <TableCell>{medicine.tablets_pieces || 0}</TableCell>
+                        <TableCell>{formatPrice(medicine.purchase_price)}</TableCell>
+                        <TableCell>{formatPrice(medicine.selling_price)}</TableCell>
+                        <TableCell>{formatPrice(medicine.mrp_price)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={isExpired ? "destructive" : isExpiringSoon ? "default" : "outline"}
+                          >
+                            {formatDate(medicine.expiry_date)}
+                          </Badge>
+                        </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
                             <Button
@@ -266,7 +301,7 @@ const MedicineItems: React.FC = () => {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleDelete(medicine.id, medicine.name)}
+                              onClick={() => handleDelete(medicine.id, medicine.medicine_name)}
                             >
                               <Trash2 className="h-3 w-3 text-red-600" />
                             </Button>
@@ -298,14 +333,12 @@ const MedicineItems: React.FC = () => {
                 </Button>
                 <div className="flex items-center gap-1">
                   {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                    // Show first page, last page, current page, and pages around current
                     const showPage =
                       page === 1 ||
                       page === totalPages ||
                       (page >= currentPage - 1 && page <= currentPage + 1);
 
                     if (!showPage) {
-                      // Show ellipsis
                       if (page === currentPage - 2 || page === currentPage + 2) {
                         return <span key={page} className="px-2">...</span>;
                       }
@@ -342,7 +375,7 @@ const MedicineItems: React.FC = () => {
 
       {/* Edit Medicine Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Medicine</DialogTitle>
           </DialogHeader>
@@ -369,26 +402,69 @@ const MedicineItems: React.FC = () => {
 // Add Medicine Form Component
 const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const { toast } = useToast();
+  const [manufacturers, setManufacturers] = useState<ManufacturerCompany[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [formData, setFormData] = useState({
-    name: '',
+    medicine_name: '',
     generic_name: '',
-    category: '',
-    dosage: 'Tablet',
-    description: '',
+    manufacturer_id: '',
+    supplier_id: '',
+    quantity: '',
+    tablets_pieces: '',
+    batch_number: '',
+    type: '',
+    purchase_price: '',
+    selling_price: '',
+    mrp_price: '',
+    expiry_date: '',
   });
+
+  useEffect(() => {
+    // Fetch manufacturers
+    const fetchManufacturers = async () => {
+      const { data, error } = await supabase
+        .from('manufacturer_companies')
+        .select('*')
+        .order('name');
+      if (!error && data) {
+        setManufacturers(data);
+      }
+    };
+
+    // Fetch suppliers
+    const fetchSuppliers = async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('*')
+        .order('supplier_name');
+      if (!error && data) {
+        setSuppliers(data);
+      }
+    };
+
+    fetchManufacturers();
+    fetchSuppliers();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const { error } = await supabase
-      .from('medication')
+      .from('medicine_master')
       .insert([
         {
-          name: formData.name,
+          medicine_name: formData.medicine_name,
           generic_name: formData.generic_name || null,
-          category: formData.category || null,
-          dosage: formData.dosage || null,
-          description: formData.description || null,
+          manufacturer_id: formData.manufacturer_id ? parseInt(formData.manufacturer_id) : null,
+          supplier_id: formData.supplier_id ? parseInt(formData.supplier_id) : null,
+          quantity: formData.quantity ? parseInt(formData.quantity) : 0,
+          tablets_pieces: formData.tablets_pieces ? parseInt(formData.tablets_pieces) : 0,
+          batch_number: formData.batch_number || null,
+          type: formData.type || null,
+          purchase_price: formData.purchase_price ? parseFloat(formData.purchase_price) : 0,
+          selling_price: formData.selling_price ? parseFloat(formData.selling_price) : 0,
+          mrp_price: formData.mrp_price ? parseFloat(formData.mrp_price) : 0,
+          expiry_date: formData.expiry_date || null,
         }
       ]);
 
@@ -409,60 +485,185 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="text-sm font-medium">Medicine Name *</label>
-          <Input
-            required
-            value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder="Enter medicine name"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Generic Name</label>
-          <Input
-            value={formData.generic_name}
-            onChange={(e) => setFormData(prev => ({ ...prev, generic_name: e.target.value }))}
-            placeholder="Enter generic name"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Category</label>
-          <Input
-            value={formData.category}
-            onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-            placeholder="Enter category"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Dosage Form</label>
-          <select
-            className="w-full p-2 border rounded"
-            value={formData.dosage}
-            onChange={(e) => setFormData(prev => ({ ...prev, dosage: e.target.value }))}
-          >
-            <option value="Tablet">Tablet</option>
-            <option value="Capsule">Capsule</option>
-            <option value="Syrup">Syrup</option>
-            <option value="Injection">Injection</option>
-            <option value="Ointment">Ointment</option>
-            <option value="Drop">Drop</option>
-            <option value="Cream">Cream</option>
-            <option value="Suspension">Suspension</option>
-          </select>
-        </div>
-        <div className="col-span-2">
-          <label className="text-sm font-medium">Description</label>
-          <Input
-            value={formData.description}
-            onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-            placeholder="Enter description"
-          />
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Basic Information */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Basic Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium">Medicine Name *</label>
+            <Input
+              required
+              value={formData.medicine_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, medicine_name: e.target.value }))}
+              placeholder="Enter medicine name"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Generic Name</label>
+            <Input
+              value={formData.generic_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, generic_name: e.target.value }))}
+              placeholder="Enter generic name"
+            />
+          </div>
         </div>
       </div>
-      <div className="flex justify-end gap-2">
+
+      {/* Manufacturer & Supplier */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Manufacturer & Supplier</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium">Manufacturer</label>
+            <Select
+              value={formData.manufacturer_id}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, manufacturer_id: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select manufacturer" />
+              </SelectTrigger>
+              <SelectContent>
+                {manufacturers.map((manufacturer) => (
+                  <SelectItem key={manufacturer.id} value={manufacturer.id.toString()}>
+                    {manufacturer.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Supplier</label>
+            <Select
+              value={formData.supplier_id}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, supplier_id: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                {suppliers.map((supplier) => (
+                  <SelectItem key={supplier.id} value={supplier.id.toString()}>
+                    {supplier.supplier_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Stock Information */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Stock Information</h3>
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <label className="text-sm font-medium">Quantity</label>
+            <Input
+              type="number"
+              value={formData.quantity}
+              onChange={(e) => setFormData(prev => ({ ...prev, quantity: e.target.value }))}
+              placeholder="Enter quantity"
+              min="0"
+            />
+            <p className="text-xs text-muted-foreground mt-1">e.g., Number of strips, bottles, or boxes</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Tablets/Pieces</label>
+            <Input
+              type="number"
+              value={formData.tablets_pieces}
+              onChange={(e) => setFormData(prev => ({ ...prev, tablets_pieces: e.target.value }))}
+              placeholder="Enter tablets/pieces"
+              min="0"
+            />
+            <p className="text-xs text-muted-foreground mt-1">e.g., Number of tablets/pieces in one quantity unit</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Batch Number</label>
+            <Input
+              value={formData.batch_number}
+              onChange={(e) => setFormData(prev => ({ ...prev, batch_number: e.target.value }))}
+              placeholder="Enter batch number"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Type</label>
+            <Select
+              value={formData.type}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Injection">Injection</SelectItem>
+                <SelectItem value="Vial">Vial</SelectItem>
+                <SelectItem value="Syrup">Syrup</SelectItem>
+                <SelectItem value="Syringe">Syringe</SelectItem>
+                <SelectItem value="Tablets">Tablets</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Pricing Information */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Pricing Information</h3>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="text-sm font-medium">Purchase Price (₹)</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.purchase_price}
+              onChange={(e) => setFormData(prev => ({ ...prev, purchase_price: e.target.value }))}
+              placeholder="0.00"
+              min="0"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Selling Price (₹)</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.selling_price}
+              onChange={(e) => setFormData(prev => ({ ...prev, selling_price: e.target.value }))}
+              placeholder="0.00"
+              min="0"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">MRP (₹)</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.mrp_price}
+              onChange={(e) => setFormData(prev => ({ ...prev, mrp_price: e.target.value }))}
+              placeholder="0.00"
+              min="0"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Expiry Date */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Expiry Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium">Expiry Date</label>
+            <Input
+              type="date"
+              value={formData.expiry_date}
+              onChange={(e) => setFormData(prev => ({ ...prev, expiry_date: e.target.value }))}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4 border-t">
         <Button type="submit">Add Medicine</Button>
       </div>
     </form>
@@ -471,30 +672,73 @@ const AddMedicineForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => 
 
 // Edit Medicine Form Component
 const EditMedicineForm: React.FC<{
-  medicine: Medicine;
+  medicine: MedicineMaster;
   onSuccess: () => void;
   onCancel: () => void;
 }> = ({ medicine, onSuccess, onCancel }) => {
   const { toast } = useToast();
+  const [manufacturers, setManufacturers] = useState<ManufacturerCompany[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [formData, setFormData] = useState({
-    name: medicine.name || '',
+    medicine_name: medicine.medicine_name || '',
     generic_name: medicine.generic_name || '',
-    category: medicine.category || '',
-    dosage: medicine.dosage || 'Tablet',
-    description: medicine.description || '',
+    manufacturer_id: medicine.manufacturer_id?.toString() || '',
+    supplier_id: medicine.supplier_id?.toString() || '',
+    quantity: medicine.quantity?.toString() || '',
+    tablets_pieces: medicine.tablets_pieces?.toString() || '',
+    batch_number: medicine.batch_number || '',
+    type: medicine.type || '',
+    purchase_price: medicine.purchase_price?.toString() || '',
+    selling_price: medicine.selling_price?.toString() || '',
+    mrp_price: medicine.mrp_price?.toString() || '',
+    expiry_date: medicine.expiry_date || '',
   });
+
+  useEffect(() => {
+    // Fetch manufacturers
+    const fetchManufacturers = async () => {
+      const { data, error } = await supabase
+        .from('manufacturer_companies')
+        .select('*')
+        .order('name');
+      if (!error && data) {
+        setManufacturers(data);
+      }
+    };
+
+    // Fetch suppliers
+    const fetchSuppliers = async () => {
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('*')
+        .order('supplier_name');
+      if (!error && data) {
+        setSuppliers(data);
+      }
+    };
+
+    fetchManufacturers();
+    fetchSuppliers();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const { error } = await supabase
-      .from('medication')
+      .from('medicine_master')
       .update({
-        name: formData.name,
+        medicine_name: formData.medicine_name,
         generic_name: formData.generic_name || null,
-        category: formData.category || null,
-        dosage: formData.dosage || null,
-        description: formData.description || null,
+        manufacturer_id: formData.manufacturer_id ? parseInt(formData.manufacturer_id) : null,
+        supplier_id: formData.supplier_id ? parseInt(formData.supplier_id) : null,
+        quantity: formData.quantity ? parseInt(formData.quantity) : 0,
+        tablets_pieces: formData.tablets_pieces ? parseInt(formData.tablets_pieces) : 0,
+        batch_number: formData.batch_number || null,
+        type: formData.type || null,
+        purchase_price: formData.purchase_price ? parseFloat(formData.purchase_price) : 0,
+        selling_price: formData.selling_price ? parseFloat(formData.selling_price) : 0,
+        mrp_price: formData.mrp_price ? parseFloat(formData.mrp_price) : 0,
+        expiry_date: formData.expiry_date || null,
       })
       .eq('id', medicine.id);
 
@@ -515,60 +759,185 @@ const EditMedicineForm: React.FC<{
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="text-sm font-medium">Medicine Name *</label>
-          <Input
-            required
-            value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-            placeholder="Enter medicine name"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Generic Name</label>
-          <Input
-            value={formData.generic_name}
-            onChange={(e) => setFormData(prev => ({ ...prev, generic_name: e.target.value }))}
-            placeholder="Enter generic name"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Category</label>
-          <Input
-            value={formData.category}
-            onChange={(e) => setFormData(prev => ({ ...prev, category: e.target.value }))}
-            placeholder="Enter category"
-          />
-        </div>
-        <div>
-          <label className="text-sm font-medium">Dosage Form</label>
-          <select
-            className="w-full p-2 border rounded"
-            value={formData.dosage}
-            onChange={(e) => setFormData(prev => ({ ...prev, dosage: e.target.value }))}
-          >
-            <option value="Tablet">Tablet</option>
-            <option value="Capsule">Capsule</option>
-            <option value="Syrup">Syrup</option>
-            <option value="Injection">Injection</option>
-            <option value="Ointment">Ointment</option>
-            <option value="Drop">Drop</option>
-            <option value="Cream">Cream</option>
-            <option value="Suspension">Suspension</option>
-          </select>
-        </div>
-        <div className="col-span-2">
-          <label className="text-sm font-medium">Description</label>
-          <Input
-            value={formData.description}
-            onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-            placeholder="Enter description"
-          />
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Basic Information */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Basic Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium">Medicine Name *</label>
+            <Input
+              required
+              value={formData.medicine_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, medicine_name: e.target.value }))}
+              placeholder="Enter medicine name"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Generic Name</label>
+            <Input
+              value={formData.generic_name}
+              onChange={(e) => setFormData(prev => ({ ...prev, generic_name: e.target.value }))}
+              placeholder="Enter generic name"
+            />
+          </div>
         </div>
       </div>
-      <div className="flex justify-end gap-2">
+
+      {/* Manufacturer & Supplier */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Manufacturer & Supplier</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium">Manufacturer</label>
+            <Select
+              value={formData.manufacturer_id}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, manufacturer_id: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select manufacturer" />
+              </SelectTrigger>
+              <SelectContent>
+                {manufacturers.map((manufacturer) => (
+                  <SelectItem key={manufacturer.id} value={manufacturer.id.toString()}>
+                    {manufacturer.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Supplier</label>
+            <Select
+              value={formData.supplier_id}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, supplier_id: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                {suppliers.map((supplier) => (
+                  <SelectItem key={supplier.id} value={supplier.id.toString()}>
+                    {supplier.supplier_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Stock Information */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Stock Information</h3>
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <label className="text-sm font-medium">Quantity</label>
+            <Input
+              type="number"
+              value={formData.quantity}
+              onChange={(e) => setFormData(prev => ({ ...prev, quantity: e.target.value }))}
+              placeholder="Enter quantity"
+              min="0"
+            />
+            <p className="text-xs text-muted-foreground mt-1">e.g., Number of strips, bottles, or boxes</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Tablets/Pieces</label>
+            <Input
+              type="number"
+              value={formData.tablets_pieces}
+              onChange={(e) => setFormData(prev => ({ ...prev, tablets_pieces: e.target.value }))}
+              placeholder="Enter tablets/pieces"
+              min="0"
+            />
+            <p className="text-xs text-muted-foreground mt-1">e.g., Number of tablets/pieces in one quantity unit</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Batch Number</label>
+            <Input
+              value={formData.batch_number}
+              onChange={(e) => setFormData(prev => ({ ...prev, batch_number: e.target.value }))}
+              placeholder="Enter batch number"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Type</label>
+            <Select
+              value={formData.type}
+              onValueChange={(value) => setFormData(prev => ({ ...prev, type: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Injection">Injection</SelectItem>
+                <SelectItem value="Vial">Vial</SelectItem>
+                <SelectItem value="Syrup">Syrup</SelectItem>
+                <SelectItem value="Syringe">Syringe</SelectItem>
+                <SelectItem value="Tablets">Tablets</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Pricing Information */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Pricing Information</h3>
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className="text-sm font-medium">Purchase Price (₹)</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.purchase_price}
+              onChange={(e) => setFormData(prev => ({ ...prev, purchase_price: e.target.value }))}
+              placeholder="0.00"
+              min="0"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Selling Price (₹)</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.selling_price}
+              onChange={(e) => setFormData(prev => ({ ...prev, selling_price: e.target.value }))}
+              placeholder="0.00"
+              min="0"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">MRP (₹)</label>
+            <Input
+              type="number"
+              step="0.01"
+              value={formData.mrp_price}
+              onChange={(e) => setFormData(prev => ({ ...prev, mrp_price: e.target.value }))}
+              placeholder="0.00"
+              min="0"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Expiry Date */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Expiry Information</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-sm font-medium">Expiry Date</label>
+            <Input
+              type="date"
+              value={formData.expiry_date}
+              onChange={(e) => setFormData(prev => ({ ...prev, expiry_date: e.target.value }))}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4 border-t">
         <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
         <Button type="submit">Update Medicine</Button>
       </div>
