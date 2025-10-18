@@ -141,27 +141,28 @@ const PharmacyBilling: React.FC = () => {
 
       setIsSearching(true);
       const { data, error } = await supabase
-        .from('medication')
-        .select('id, name, generic_name, category, dosage, description')
-        .or(`name.ilike.%${debouncedSearchTerm}%,generic_name.ilike.%${debouncedSearchTerm}%`)
+        .from('medicine_master')
+        .select('id, medicine_name, generic_name, type, batch_number, quantity, selling_price, mrp_price, expiry_date')
+        .eq('is_deleted', false)
+        .or(`medicine_name.ilike.%${debouncedSearchTerm}%,generic_name.ilike.%${debouncedSearchTerm}%`)
         .limit(10);
 
       if (error) {
         console.error('Error searching for medicines:', error);
         setSearchResults([]);
       } else {
-        // Map medication fields to expected format
+        // Map medicine_master fields to expected format
         const mappedData = (data || []).map(item => ({
           id: item.id,
-          name: item.name,
+          name: item.medicine_name,
           generic_name: item.generic_name || '',
           strength: '',
-          dosage: item.dosage || '',
-          stock: 0,
-          price_per_strip: 0,
+          dosage: item.type || '',
+          stock: item.quantity || 0,
+          price_per_strip: item.selling_price || 0,
           item_code: '',
-          batch_number: 'BATCH-001',
-          expiry_date: ''
+          batch_number: item.batch_number || 'BATCH-001',
+          expiry_date: item.expiry_date || ''
         }));
         setSearchResults(mappedData);
       }
@@ -644,6 +645,70 @@ const PharmacyBilling: React.FC = () => {
     }
 
     console.log('✅ Sale saved successfully! Sale ID:', response.sale_id);
+
+    // Deduct stock from medicine_master table
+    console.log('=== UPDATING STOCK IN MEDICINE_MASTER ===');
+    console.log('Cart items to process:', cart.length);
+    console.log('Cart data:', JSON.stringify(cart.map(item => ({
+      medicine_id: item.medicine_id,
+      medicine_name: item.medicine_name,
+      quantity: item.quantity
+    })), null, 2));
+
+    for (const item of cart) {
+      try {
+        console.log(`\n🔄 Processing medicine: ${item.medicine_name} (ID: ${item.medicine_id})`);
+
+        // Get current stock first
+        const { data: currentMedicine, error: fetchError } = await supabase
+          .from('medicine_master')
+          .select('quantity, medicine_name')
+          .eq('id', item.medicine_id)
+          .single();
+
+        if (fetchError) {
+          console.error(`❌ Error fetching stock for medicine ${item.medicine_id}:`, fetchError);
+          alert(`Error: Could not fetch stock for ${item.medicine_name}. Error: ${fetchError.message}`);
+          continue;
+        }
+
+        if (!currentMedicine) {
+          console.error(`❌ Medicine not found in medicine_master table: ${item.medicine_id}`);
+          alert(`Error: Medicine ${item.medicine_name} not found in medicine_master table`);
+          continue;
+        }
+
+        const newQuantity = (currentMedicine.quantity || 0) - item.quantity;
+
+        console.log(`📊 Stock Update Details:`);
+        console.log(`  Medicine: ${currentMedicine.medicine_name}`);
+        console.log(`  Current Stock: ${currentMedicine.quantity}`);
+        console.log(`  Sold Quantity: ${item.quantity}`);
+        console.log(`  New Stock: ${newQuantity}`);
+
+        // Update the stock in medicine_master
+        const { data: updateData, error: updateError } = await supabase
+          .from('medicine_master')
+          .update({
+            quantity: newQuantity,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', item.medicine_id)
+          .select();
+
+        if (updateError) {
+          console.error(`❌ Error updating stock for medicine ${item.medicine_id}:`, updateError);
+          alert(`Error updating stock for ${item.medicine_name}: ${updateError.message}`);
+        } else {
+          console.log(`✅ Stock updated successfully for ${currentMedicine.medicine_name}`);
+          console.log(`Updated data:`, updateData);
+        }
+      } catch (error: any) {
+        console.error('❌ Exception in stock update:', error);
+        alert(`Exception during stock update for ${item.medicine_name}: ${error.message}`);
+      }
+    }
+    console.log('=== STOCK UPDATE COMPLETE ===\n');
 
     setCompletedSale(sale);
     setIsProcessingPayment(false);
