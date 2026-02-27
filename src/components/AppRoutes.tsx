@@ -5,6 +5,7 @@ import { lazy, Suspense } from "react";
 import LandingPage from "../pages/LandingPage";
 import Index from "../pages/Index";
 import NotFound from "../pages/NotFound";
+import RoleBasedDashboard from "./dashboards/RoleBasedDashboard";
 import PatientDashboard from "../pages/PatientDashboard";
 import PatientOverview from "../pages/PatientOverview";
 import TodaysIpdDashboard from "../pages/TodaysIpdDashboard";
@@ -107,8 +108,8 @@ export const AppRoutes = () => {
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/dashboard" element={<Index />} />
+        <Route path="/" element={<TodaysIpdDashboard />} />
+        <Route path="/dashboard" element={<TodaysIpdDashboard />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/signup-simple" element={<SimpleSignup />} />

@@ -30,6 +30,46 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
   return useMemo(() => 
     menuItems
       .filter(item => {
+        const role = user?.role;
+
+        // 🔒 ROLE-BASED ACCESS CONTROL (as per requirements)
+        
+        // Lab users: IPD Dashboard, OPD Dashboard, Lab Dashboard, Patient Dashboard, Currently Admitted
+        if (role === 'lab') {
+          const labAllowedItems = ['IPD Dashboard', 'Today\'s OPD', 'Lab', 'Patient Dashboard', 'Currently Admitted'];
+          return labAllowedItems.includes(item.title);
+        }
+
+        // Reception users: IPD Dashboard, OPD Dashboard, Dashboard, Patient Dashboard, Currently Admitted
+        if (role === 'reception') {
+          const receptionAllowedItems = ['IPD Dashboard', 'Today\'s OPD', 'Dashboard', 'Patient Dashboard', 'Currently Admitted'];
+          return receptionAllowedItems.includes(item.title);
+        }
+
+        // Pharmacy users: IPD Dashboard, OPD Dashboard, Dashboard, Patient Dashboard, Currently Admitted, Pharmacy
+        if (role === 'pharmacy') {
+          const pharmacyAllowedItems = ['IPD Dashboard', 'Today\'s OPD', 'Dashboard', 'Patient Dashboard', 'Currently Admitted', 'Pharmacy'];
+          return pharmacyAllowedItems.includes(item.title);
+        }
+
+        // Radiology users: Show radiology-specific items
+        if (role === 'radiology') {
+          const radiologyAllowedItems = ['IPD Dashboard', 'Today\'s OPD', 'Radiology', 'Patient Dashboard', 'Currently Admitted'];
+          return radiologyAllowedItems.includes(item.title);
+        }
+
+        // Nurse users: Show patient care related items
+        if (role === 'nurse') {
+          const nurseAllowedItems = ['IPD Dashboard', 'Patient Dashboard', 'Currently Admitted', 'Today\'s OPD', 'Patients'];
+          return nurseAllowedItems.includes(item.title);
+        }
+
+        // Doctor users: Show clinical items
+        if (role === 'doctor') {
+          const doctorAllowedItems = ['IPD Dashboard', 'Patient Dashboard', 'Currently Admitted', 'Today\'s OPD', 'Patients', 'Diagnoses', 'Lab', 'Radiology'];
+          return doctorAllowedItems.includes(item.title);
+        }
+
         // Hide Users tab for non-admins
         if (item.title === "Users" && !canManageUsers) {
           return false;
@@ -37,8 +77,7 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
 
         // Hide Corporate Receipts for non-authorized roles (superadmin & marketing_manager only)
         if (item.title === "Corporate Receipts") {
-          const role = user?.role;
-          if (role !== 'superadmin' && role !== 'marketing_manager') {
+          if (role !== 'superadmin' && role !== 'super_admin' && role !== 'marketing_manager') {
             return false;
           }
         }

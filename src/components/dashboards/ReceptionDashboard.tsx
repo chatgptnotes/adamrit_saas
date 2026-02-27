@@ -7,7 +7,6 @@ import { getRoleDisplayName } from '@/utils/permissions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Users, Calendar, DollarSign, FileText, Plus } from 'lucide-react';
-import { ProtectedButton } from '../ProtectedButton';
 
 export default function ReceptionDashboard() {
   const { user } = useAuth();
@@ -75,16 +74,14 @@ export default function ReceptionDashboard() {
           <CardTitle>Quick Actions</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <ProtectedButton
-            module="patients"
-            action="create"
+          <Button
             variant="outline"
             className="h-24 flex flex-col gap-2"
             onClick={() => (window.location.href = '/patients')}
           >
             <Plus className="h-6 w-6" />
             Register Patient
-          </ProtectedButton>
+          </Button>
 
           <Button
             variant="outline"
@@ -95,9 +92,7 @@ export default function ReceptionDashboard() {
             New OPD Visit
           </Button>
 
-          <ProtectedButton
-            module="billing"
-            action="create"
+          <Button
             variant="outline"
             className="h-24 flex flex-col gap-2"
             onClick={() => (window.location.href = '/billing')}

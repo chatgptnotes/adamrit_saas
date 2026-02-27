@@ -1,14 +1,33 @@
-
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Search, User } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Search, User, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
+import bcrypt from 'bcryptjs';
 
 const Users = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const { user: currentUser } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Form state
+  const [newUser, setNewUser] = useState({
+    email: '',
+    password: '',
+    role: 'user' as 'super_admin' | 'admin' | 'reception' | 'lab' | 'radiology' | 'pharmacy' | 'doctor' | 'nurse' | 'accountant' | 'user',
+    hospital_type: 'hope' as 'hope' | 'ayushman'
+  });
 
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['users'],
@@ -16,7 +35,7 @@ const Users = () => {
       const { data, error } = await supabase
         .from('User')
         .select('*')
-        .order('email');
+        .order('created_at', { ascending: false });
       
       if (error) {
         console.error('Error fetching users:', error);
@@ -27,10 +46,107 @@ const Users = () => {
     }
   });
 
+  // Create user mutation
+  const createUserMutation = useMutation({
+    mutationFn: async (userData: typeof newUser) => {
+      // Hash password
+      const hashedPassword = await bcrypt.hash(userData.password, 10);
+
+      const { data, error } = await supabase
+        .from('User')
+        .insert([{
+          email: userData.email.toLowerCase().trim(),
+          password: hashedPassword,
+          role: userData.role,
+          hospital_type: userData.hospital_type
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast({
+        title: 'Success',
+        description: 'User created successfully!',
+      });
+      setIsCreateDialogOpen(false);
+      setNewUser({ email: '', password: '', role: 'user', hospital_type: 'hope' });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to create user',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  // Delete user mutation
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const { error } = await supabase
+        .from('User')
+        .delete()
+        .eq('id', userId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast({
+        title: 'Success',
+        description: 'User deleted successfully!',
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete user',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  const handleCreateUser = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Validation
+    if (!newUser.email || !newUser.password) {
+      toast({
+        title: 'Validation Error',
+        description: 'Email and password are required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (newUser.password.length < 6) {
+      toast({
+        title: 'Validation Error',
+        description: 'Password must be at least 6 characters',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    createUserMutation.mutate(newUser);
+  };
+
+  const handleDeleteUser = (userId: string, userEmail: string) => {
+    if (confirm(`Are you sure you want to delete user: ${userEmail}?`)) {
+      deleteUserMutation.mutate(userId);
+    }
+  };
+
   const filteredUsers = users.filter(user =>
     user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.role?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'super_admin';
 
   if (isLoading) {
     return (
@@ -57,8 +173,8 @@ const Users = () => {
           </p>
         </div>
 
-        <div className="mb-6 flex justify-center">
-          <div className="relative max-w-sm w-full">
+        <div className="mb-6 flex justify-between items-center gap-4">
+          <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <Input
               placeholder="Search users..."
@@ -67,6 +183,104 @@ const Users = () => {
               className="pl-10"
             />
           </div>
+
+          {isSuperAdmin && (
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create User
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <form onSubmit={handleCreateUser}>
+                  <DialogHeader>
+                    <DialogTitle>Create New User</DialogTitle>
+                    <DialogDescription>
+                      Add a new user to the system with role and hospital assignment.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="user@example.com"
+                        value={newUser.email}
+                        onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="password">Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Minimum 6 characters"
+                          value={newUser.password}
+                          onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                          required
+                          minLength={6}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        >
+                          {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="role">Role</Label>
+                      <Select value={newUser.role} onValueChange={(value: any) => setNewUser({ ...newUser, role: value })}>
+                        <SelectTrigger id="role">
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="super_admin">Super Admin</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="reception">Reception</SelectItem>
+                          <SelectItem value="lab">Lab</SelectItem>
+                          <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                          <SelectItem value="radiology">Radiology</SelectItem>
+                          <SelectItem value="doctor">Doctor</SelectItem>
+                          <SelectItem value="nurse">Nurse</SelectItem>
+                          <SelectItem value="accountant">Accountant</SelectItem>
+                          <SelectItem value="user">User</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="hospital_type">Hospital Type</Label>
+                      <Select value={newUser.hospital_type} onValueChange={(value: any) => setNewUser({ ...newUser, hospital_type: value })}>
+                        <SelectTrigger id="hospital_type">
+                          <SelectValue placeholder="Select hospital" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hope">Hope Hospital</SelectItem>
+                          <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={createUserMutation.isPending}>
+                      {createUserMutation.isPending ? 'Creating...' : 'Create User'}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -74,19 +288,33 @@ const Users = () => {
             <Card key={user.id} className="hover:shadow-md transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span className="text-lg">{user.email}</span>
-                  <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                  <span className="text-lg truncate">{user.email}</span>
+                  <Badge variant={user.role === 'admin' || user.role === 'super_admin' ? 'default' : 'secondary'}>
                     {user.role}
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground">
-                  <p><span className="font-semibold">ID:</span> {user.id}</p>
+                <div className="text-sm text-muted-foreground space-y-1">
+                  <p><span className="font-semibold">Hospital:</span> {user.hospital_type || 'hope'}</p>
                   {user.created_at && (
                     <p><span className="font-semibold">Created:</span> {new Date(user.created_at).toLocaleDateString()}</p>
                   )}
                 </div>
+                {isSuperAdmin && user.id !== currentUser?.id && (
+                  <div className="mt-4">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={() => handleDeleteUser(user.id, user.email)}
+                      disabled={deleteUserMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete User
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

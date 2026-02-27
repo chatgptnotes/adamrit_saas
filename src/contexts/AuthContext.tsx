@@ -7,14 +7,14 @@ interface User {
   id?: string;
   email: string;
   username: string;
-  role: 'superadmin' | 'admin' | 'doctor' | 'nurse' | 'user' | 'marketing_manager';
+  role: 'super_admin' | 'admin' | 'reception' | 'lab' | 'radiology' | 'pharmacy' | 'doctor' | 'nurse' | 'accountant' | 'user' | 'superadmin' | 'marketing_manager';
   hospitalType: HospitalType;
 }
 
 interface AuthContextType {
   user: User | null;
   login: (credentials: { email: string; password: string }) => Promise<boolean>;
-  signup: (userData: { email: string; password: string; role: 'superadmin' | 'admin' | 'doctor' | 'nurse' | 'user' | 'marketing_manager'; hospitalType: HospitalType }) => Promise<{ success: boolean; error?: string }>;
+  signup: (userData: { email: string; password: string; role: 'super_admin' | 'admin' | 'reception' | 'lab' | 'radiology' | 'pharmacy' | 'doctor' | 'nurse' | 'accountant' | 'user' | 'superadmin' | 'marketing_manager'; hospitalType: HospitalType }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
   isSuperAdmin: boolean;
@@ -80,6 +80,33 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const login = async (credentials: { email: string; password: string }): Promise<boolean> => {
     try {
       console.log('🔐 Login attempt for:', credentials.email);
+
+      // 🧪 TEMPORARY MOCK LOGIN (for testing when Supabase is down)
+      // Remove this block when Supabase is back online
+      if (import.meta.env.DEV) {
+        const MOCK_USERS: Record<string, { role: User['role']; password: string }> = {
+          'lab@hopehospital.com': { role: 'lab', password: 'Lab@Hope123' },
+          'pharmacy@hopehospital.com': { role: 'pharmacy', password: 'Pharma@Hope123' },
+          'reception1@hopehospital.com': { role: 'reception', password: 'Reception@123' },
+          'admin@hopehospital.com': { role: 'admin', password: 'Admin@Hope123' },
+          'doctor1@hopehospital.com': { role: 'doctor', password: 'Doctor@Hope123' },
+        };
+
+        const mockUser = MOCK_USERS[credentials.email.toLowerCase()];
+        if (mockUser && mockUser.password === credentials.password) {
+          console.log('✅ MOCK LOGIN SUCCESS (Supabase is down)');
+          const user: User = {
+            id: 'mock-' + Date.now(),
+            email: credentials.email,
+            username: credentials.email.split('@')[0],
+            role: mockUser.role,
+            hospitalType: 'hope'
+          };
+          setUser(user);
+          localStorage.setItem('hmis_user', JSON.stringify(user));
+          return true;
+        }
+      }
 
       const { data, error } = await supabase
         .from('User')
@@ -216,8 +243,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     signup,
     logout,
     isAuthenticated: !!user,
-    isSuperAdmin: user?.role === 'superadmin',
-    isAdmin: user?.role === 'admin' || user?.role === 'superadmin',
+    isSuperAdmin: user?.role === 'superadmin' || user?.role === 'super_admin',
+    isAdmin: user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin',
     hospitalType: user?.hospitalType || null,
     hospitalConfig,
     showLanding,
