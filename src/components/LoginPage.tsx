@@ -115,6 +115,104 @@ const LoginPage: React.FC = () => {
               {isLoading ? 'Signing In...' : 'Sign In'}
             </Button>
           </form>
+
+          {/* Quick Login - Development Only */}
+          {import.meta.env.DEV && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <p className="text-xs text-center text-gray-500 mb-3">
+                🧪 Quick Test Login (Dev Only)
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      email: 'admin@hopehospital.com',
+                      password: 'Admin@Hope123'
+                    });
+                  }}
+                  className="text-xs"
+                >
+                  🟢 Admin
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      email: 'reception1@hopehospital.com',
+                      password: 'Reception@123'
+                    });
+                  }}
+                  className="text-xs"
+                >
+                  🔵 Reception
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      email: 'lab@hopehospital.com',
+                      password: 'Lab@Hope123'
+                    });
+                  }}
+                  className="text-xs"
+                >
+                  🟡 Lab
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      email: 'pharmacy@hopehospital.com',
+                      password: 'Pharma@Hope123'
+                    });
+                  }}
+                  className="text-xs"
+                >
+                  🟠 Pharmacy
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      email: 'doctor1@hopehospital.com',
+                      password: 'Doctor@Hope123'
+                    });
+                  }}
+                  className="text-xs"
+                >
+                  🩺 Doctor
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormData({
+                      email: 'superadmin@yourapp.com',
+                      password: 'SuperAdmin@123'
+                    });
+                  }}
+                  className="text-xs"
+                >
+                  🔴 Super Admin
+                </Button>
+              </div>
+              <p className="text-xs text-center text-gray-400 mt-2">
+                Click button to auto-fill credentials
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
