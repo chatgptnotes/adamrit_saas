@@ -1,4 +1,4 @@
-import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake, ExternalLink, UserCheck, Bed, DoorOpen, LayoutDashboard, BookOpen, Clock, TrendingUp } from 'lucide-react';
+import { BarChart3, Calendar, Users, UserPlus, Database, Activity, FileText, TestTube, Camera, Pill, MapPin, Stethoscope, UserCog, ScrollText, Calculator, Syringe, Shield, Building2, ClipboardList, ShieldCheck, Receipt, HeartHandshake, ExternalLink, UserCheck, Bed, DoorOpen, LayoutDashboard, BookOpen, Clock, TrendingUp, User } from 'lucide-react';
 
 export const menuItems = [
   {
@@ -92,6 +92,12 @@ export const menuItems = [
     url: "/users",
     icon: UserCog,
   },
+  // Profile moved to TopHeader (right side of header)
+  // {
+  //   title: "Profile",
+  //   url: "/profile",
+  //   icon: User,
+  // },
   {
     title: "Complications",
     url: "/complications",

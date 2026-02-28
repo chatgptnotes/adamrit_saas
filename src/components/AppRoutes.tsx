@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
+import ProtectedRoute from "./ProtectedRoute";
 
 // Import critical pages synchronously
 import LandingPage from "../pages/LandingPage";
@@ -44,6 +45,7 @@ const EditFinalBill = lazy(() => import("../pages/EditFinalBill"));
 const Diagnoses = lazy(() => import("../pages/Diagnoses"));
 const Patients = lazy(() => import("../pages/Patients"));
 const Users = lazy(() => import("../pages/Users"));
+const Profile = lazy(() => import("../pages/Profile"));
 const Complications = lazy(() => import("../pages/Complications"));
 const CghsSurgery = lazy(() => import("../pages/CghsSurgery"));
 const CghsSurgeryMaster = lazy(() => import("../pages/CghsSurgeryMaster"));
@@ -141,12 +143,13 @@ export const AppRoutes = () => {
         <Route path="/pvi-form/:visitId" element={<Suspense fallback={<PageLoader />}><PVIFormPrint /></Suspense>} />
         <Route path="/diagnoses" element={<Suspense fallback={<PageLoader />}><Diagnoses /></Suspense>} />
         <Route path="/patients" element={<Suspense fallback={<PageLoader />}><Patients /></Suspense>} />
-        <Route path="/users" element={<Suspense fallback={<PageLoader />}><Users /></Suspense>} />
+        <Route path="/profile" element={<Suspense fallback={<PageLoader />}><ProtectedRoute><Profile /></ProtectedRoute></Suspense>} />
+        <Route path="/users" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin']}><Users /></ProtectedRoute></Suspense>} />
         <Route path="/complications" element={<Suspense fallback={<PageLoader />}><Complications /></Suspense>} />
         <Route path="/cghs-surgery" element={<Suspense fallback={<PageLoader />}><CghsSurgery /></Suspense>} />
         <Route path="/cghs-surgery-master" element={<Suspense fallback={<PageLoader />}><CghsSurgeryMaster /></Suspense>} />
-        <Route path="/lab" element={<Suspense fallback={<PageLoader />}><Lab /></Suspense>} />
-        <Route path="/radiology" element={<Suspense fallback={<PageLoader />}><Radiology /></Suspense>} />
+        <Route path="/lab" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'lab']}><Lab /></ProtectedRoute></Suspense>} />
+        <Route path="/radiology" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'radiology']}><Radiology /></ProtectedRoute></Suspense>} />
         <Route path="/treatment-sheet" element={<Suspense fallback={<PageLoader />}><TreatmentSheet /></Suspense>} />
         <Route path="/esic-surgeons" element={<Suspense fallback={<PageLoader />}><EsicSurgeons /></Suspense>} />
         <Route path="/referees" element={<Suspense fallback={<PageLoader />}><Referees /></Suspense>} />
@@ -158,20 +161,20 @@ export const AppRoutes = () => {
         <Route path="/ayushman-surgeons" element={<Suspense fallback={<PageLoader />}><AyushmanSurgeons /></Suspense>} />
         <Route path="/ayushman-consultants" element={<Suspense fallback={<PageLoader />}><AyushmanConsultants /></Suspense>} />
         <Route path="/ayushman-anaesthetists" element={<Suspense fallback={<PageLoader />}><AyushmanAnaesthetists /></Suspense>} />
-        <Route path="/accounting" element={<Suspense fallback={<PageLoader />}><Accounting /></Suspense>} />
-        <Route path="/cash-book" element={<Suspense fallback={<PageLoader />}><CashBook /></Suspense>} />
-        <Route path="/patient-ledger" element={<Suspense fallback={<PageLoader />}><PatientLedger /></Suspense>} />
-        <Route path="/day-book" element={<Suspense fallback={<PageLoader />}><DayBook /></Suspense>} />
-        <Route path="/ledger-statement" element={<Suspense fallback={<PageLoader />}><LedgerStatement /></Suspense>} />
+        <Route path="/accounting" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'accountant']}><Accounting /></ProtectedRoute></Suspense>} />
+        <Route path="/cash-book" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'accountant']}><CashBook /></ProtectedRoute></Suspense>} />
+        <Route path="/patient-ledger" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'accountant']}><PatientLedger /></ProtectedRoute></Suspense>} />
+        <Route path="/day-book" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'accountant']}><DayBook /></ProtectedRoute></Suspense>} />
+        <Route path="/ledger-statement" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'accountant']}><LedgerStatement /></ProtectedRoute></Suspense>} />
         <Route path="/corporate" element={<Suspense fallback={<PageLoader />}><Corporate /></Suspense>} />
         <Route path="/corporate-bulk-payments" element={<Suspense fallback={<PageLoader />}><CorporateBulkPayments /></Suspense>} />
-        <Route path="/pharmacy/goods-received-note" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
-        <Route path="/pharmacy/purchase-orders/add" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
-        <Route path="/pharmacy/purchase-orders/list" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
-        <Route path="/pharmacy/product-purchase-report" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
-        <Route path="/pharmacy/inventory-tracking" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
-        <Route path="/pharmacy" element={<Suspense fallback={<PageLoader />}><Pharmacy /></Suspense>} />
-        <Route path="/pharmacy/edit-sale/:saleId" element={<Suspense fallback={<PageLoader />}><EditSaleBill /></Suspense>} />
+        <Route path="/pharmacy/goods-received-note" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><Pharmacy /></ProtectedRoute></Suspense>} />
+        <Route path="/pharmacy/purchase-orders/add" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><Pharmacy /></ProtectedRoute></Suspense>} />
+        <Route path="/pharmacy/purchase-orders/list" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><Pharmacy /></ProtectedRoute></Suspense>} />
+        <Route path="/pharmacy/product-purchase-report" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><Pharmacy /></ProtectedRoute></Suspense>} />
+        <Route path="/pharmacy/inventory-tracking" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><Pharmacy /></ProtectedRoute></Suspense>} />
+        <Route path="/pharmacy" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><Pharmacy /></ProtectedRoute></Suspense>} />
+        <Route path="/pharmacy/edit-sale/:saleId" element={<Suspense fallback={<PageLoader />}><ProtectedRoute allowedRoles={['super_admin', 'admin', 'pharmacy']}><EditSaleBill /></ProtectedRoute></Suspense>} />
         <Route path="/reports" element={<Suspense fallback={<PageLoader />}><Reports /></Suspense>} />
         <Route path="/final-bill/:visitId" element={<Suspense fallback={<PageLoader />}><FinalBill /></Suspense>} />
         <Route path="/no-deduction-letter/:visitId" element={<NoDeductionLetterPage />} />

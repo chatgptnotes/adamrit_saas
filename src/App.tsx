@@ -14,6 +14,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import LoginPage from "@/components/LoginPage";
 import LandingPage from "@/components/LandingPage";
 import HospitalSelection from "@/components/HospitalSelection";
+import { TopHeader } from "@/components/TopHeader";
 import { useToast } from "@/hooks/use-toast";
 import { HospitalType, getHospitalConfig } from "@/types/hospital";
 
@@ -195,12 +196,15 @@ const AppContent = () => {
         <SidebarProvider>
           <div className="min-h-screen flex w-full">
             <AppSidebar {...counts} />
-            <main className="flex-1">
-              <div className="p-2 ml-4">
-                <SidebarTrigger />
-              </div>
-              <AppRoutes />
-            </main>
+            <div className="flex-1 flex flex-col">
+              <TopHeader />
+              <main className="flex-1">
+                <div className="p-2 ml-4">
+                  <SidebarTrigger />
+                </div>
+                <AppRoutes />
+              </main>
+            </div>
           </div>
         </SidebarProvider>
       </BrowserRouter>
