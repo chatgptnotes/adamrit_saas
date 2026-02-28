@@ -9,7 +9,12 @@ import { Separator } from '@/components/ui/separator';
 import { User, Mail, Phone, Shield, Building2, Eye, EyeOff, Save, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import bcrypt from 'bcryptjs';
+
+// Lazy load bcrypt only when changing password
+const loadBcrypt = async () => {
+  const bcrypt = await import('bcryptjs');
+  return bcrypt.default;
+};
 
 const Profile = () => {
   const { user, refreshUser } = useAuth();
@@ -86,6 +91,9 @@ const Profile = () => {
         .single();
 
       if (fetchError) throw fetchError;
+
+      // Lazy load bcrypt only when needed
+      const bcrypt = await loadBcrypt();
 
       // Verify old password
       const isValid = await bcrypt.compare(data.oldPassword, userData.password);

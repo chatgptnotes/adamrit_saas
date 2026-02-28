@@ -13,7 +13,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Switch } from '@/components/ui/switch';
 import { useHospitalFilter } from '@/hooks/useHospitalFilter';
-import bcrypt from 'bcryptjs';
+
+// Lazy load bcrypt only when creating users
+const loadBcrypt = async () => {
+  const bcrypt = await import('bcryptjs');
+  return bcrypt.default;
+};
 
 const Users = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,6 +67,8 @@ const Users = () => {
   // Create user mutation
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
+      // Lazy load bcrypt only when creating user
+      const bcrypt = await loadBcrypt();
       const hashedPassword = await bcrypt.hash(userData.password, 10);
 
       const { data, error } = await supabase

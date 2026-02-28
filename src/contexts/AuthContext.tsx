@@ -1,7 +1,13 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { HospitalType, getHospitalConfig } from '@/types/hospital';
 import { supabase } from '@/integrations/supabase/client';
-import { hashPassword, comparePassword, validateEmail, sanitizeInput, signupRateLimiter } from '@/utils/auth';
+import { validateEmail, sanitizeInput, signupRateLimiter } from '@/utils/auth';
+
+// Lazy load bcrypt only for signup (not login)
+const loadBcrypt = async () => {
+  const bcrypt = await import('bcryptjs');
+  return bcrypt.default;
+};
 
 interface User {
   id?: string;
@@ -114,55 +120,39 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
       }
 
+      // Use server-side password verification (RPC function)
+      // This is MUCH faster on mobile than client-side bcrypt!
       const { data, error } = await supabase
-        .from('User')
-        .select('*')
-        .eq('email', credentials.email.toLowerCase())
-        .single();
-
-      if (error || !data) {
-        console.error('Login error:', error);
-        return false;
-      }
-
-      console.log('✅ User found, checking password...');
-      console.log('📋 Password type:', data.password.startsWith('$2') ? 'hashed' : 'plain');
-
-      // Check if password is hashed (new users) or plain text (existing users)
-      let isPasswordValid = false;
-
-      if (data.password.startsWith('$2')) {
-        // Hashed password - use bcrypt compare with setTimeout to prevent UI blocking
-        isPasswordValid = await new Promise<boolean>((resolve) => {
-          setTimeout(async () => {
-            const result = await comparePassword(credentials.password, data.password);
-            resolve(result);
-          }, 10);
+        .rpc('verify_user_password', {
+          p_email: credentials.email.toLowerCase(),
+          p_password: credentials.password
         });
-      } else {
-        // Plain text password - direct comparison (for backward compatibility)
-        isPasswordValid = data.password === credentials.password;
-      }
 
-      console.log('🔑 Password validation result:', isPasswordValid);
-
-      if (!isPasswordValid) {
-        console.error('❌ Invalid password');
+      if (error) {
+        console.error('Login RPC error:', error);
         return false;
       }
 
-      console.log('✅ Password valid, creating user session...');
+      // RPC returns array, get first result
+      const result = Array.isArray(data) ? data[0] : data;
+
+      if (!result || !result.is_valid) {
+        console.error('❌ Invalid credentials');
+        return false;
+      }
+
+      console.log('✅ Password valid (server-side verification), creating user session...');
 
       const user: User = {
-        id: data.id,
-        email: data.email,
-        username: data.email.split('@')[0], // Use email prefix as username
-        full_name: data.full_name,
-        phone: data.phone,
-        is_active: data.is_active,
-        role: data.role,
-        hospitalType: data.hospital_type || 'hope',
-        hospital_type: data.hospital_type || 'hope'
+        id: result.user_id,
+        email: result.user_email,
+        username: result.user_email.split('@')[0],
+        full_name: result.user_full_name,
+        phone: result.user_phone,
+        is_active: result.user_is_active,
+        role: result.user_role,
+        hospitalType: result.user_hospital_type || 'hope',
+        hospital_type: result.user_hospital_type || 'hope'
       };
 
       setUser(user);
@@ -205,8 +195,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         return { success: false, error: 'Email already exists. Please use a different email.' };
       }
 
-      // Hash password
-      const hashedPassword = await hashPassword(userData.password);
+      // Hash password (lazy load bcrypt only when needed)
+      const bcrypt = await loadBcrypt();
+      const hashedPassword = await bcrypt.hash(userData.password, 10);
 
       // Insert new user
       const { error } = await supabase
