@@ -8,25 +8,31 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, User, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Search, User, Plus, Trash2, Eye, EyeOff, Edit, CheckCircle, XCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { Switch } from '@/components/ui/switch';
 import bcrypt from 'bcryptjs';
 
 const Users = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
   const [showPassword, setShowPassword] = useState(false);
   const { user: currentUser } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Form state
+  // Form state for new user
   const [newUser, setNewUser] = useState({
+    full_name: '',
     email: '',
+    phone: '',
     password: '',
     role: 'user' as 'super_admin' | 'admin' | 'reception' | 'lab' | 'radiology' | 'pharmacy' | 'doctor' | 'nurse' | 'accountant' | 'user',
-    hospital_type: 'hope' as 'hope' | 'ayushman'
+    hospital_type: 'hope' as 'hope' | 'ayushman',
+    is_active: true
   });
 
   const { data: users = [], isLoading } = useQuery({
@@ -49,16 +55,18 @@ const Users = () => {
   // Create user mutation
   const createUserMutation = useMutation({
     mutationFn: async (userData: typeof newUser) => {
-      // Hash password
       const hashedPassword = await bcrypt.hash(userData.password, 10);
 
       const { data, error } = await supabase
         .from('User')
         .insert([{
+          full_name: userData.full_name.trim(),
           email: userData.email.toLowerCase().trim(),
+          phone: userData.phone.trim(),
           password: hashedPassword,
           role: userData.role,
-          hospital_type: userData.hospital_type
+          hospital_type: userData.hospital_type,
+          is_active: userData.is_active
         }])
         .select()
         .single();
@@ -73,12 +81,84 @@ const Users = () => {
         description: 'User created successfully!',
       });
       setIsCreateDialogOpen(false);
-      setNewUser({ email: '', password: '', role: 'user', hospital_type: 'hope' });
+      setNewUser({ 
+        full_name: '',
+        email: '', 
+        phone: '',
+        password: '', 
+        role: 'user', 
+        hospital_type: 'hope',
+        is_active: true 
+      });
     },
     onError: (error: any) => {
       toast({
         title: 'Error',
         description: error.message || 'Failed to create user',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  // Update user mutation
+  const updateUserMutation = useMutation({
+    mutationFn: async (userData: any) => {
+      const { data, error } = await supabase
+        .from('User')
+        .update({
+          full_name: userData.full_name,
+          email: userData.email,
+          phone: userData.phone,
+          role: userData.role,
+          hospital_type: userData.hospital_type,
+          is_active: userData.is_active
+        })
+        .eq('id', userData.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast({
+        title: 'Success',
+        description: 'User updated successfully!',
+      });
+      setIsEditDialogOpen(false);
+      setEditingUser(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update user',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  // Toggle active status mutation
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ userId, isActive }: { userId: string; isActive: boolean }) => {
+      const { error } = await supabase
+        .from('User')
+        .update({ is_active: isActive })
+        .eq('id', userId);
+
+      if (error) throw error;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      toast({
+        title: 'Success',
+        description: `User ${variables.isActive ? 'activated' : 'deactivated'} successfully!`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to update user status',
         variant: 'destructive',
       });
     }
@@ -113,11 +193,10 @@ const Users = () => {
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
-    if (!newUser.email || !newUser.password) {
+    if (!newUser.full_name || !newUser.email || !newUser.password) {
       toast({
         title: 'Validation Error',
-        description: 'Email and password are required',
+        description: 'Name, email and password are required',
         variant: 'destructive',
       });
       return;
@@ -135,14 +214,35 @@ const Users = () => {
     createUserMutation.mutate(newUser);
   };
 
-  const handleDeleteUser = (userId: string, userEmail: string) => {
-    if (confirm(`Are you sure you want to delete user: ${userEmail}?`)) {
+  const handleEditUser = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!editingUser.full_name || !editingUser.email) {
+      toast({
+        title: 'Validation Error',
+        description: 'Name and email are required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    updateUserMutation.mutate(editingUser);
+  };
+
+  const handleDeleteUser = (userId: string, userName: string) => {
+    if (confirm(`Are you sure you want to delete user: ${userName}?`)) {
       deleteUserMutation.mutate(userId);
     }
   };
 
+  const handleToggleActive = (userId: string, currentStatus: boolean) => {
+    toggleActiveMutation.mutate({ userId, isActive: !currentStatus });
+  };
+
   const filteredUsers = users.filter(user =>
+    user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     user.role?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -165,11 +265,11 @@ const Users = () => {
           <div className="flex items-center justify-center gap-3 mb-4">
             <User className="h-8 w-8 text-primary" />
             <h1 className="text-4xl font-bold text-primary">
-              Users Master List
+              Users Management
             </h1>
           </div>
           <p className="text-lg text-muted-foreground">
-            View and manage system users
+            Manage system users and permissions
           </p>
         </div>
 
@@ -177,7 +277,7 @@ const Users = () => {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <Input
-              placeholder="Search users..."
+              placeholder="Search by name, email, phone, role..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
@@ -192,7 +292,7 @@ const Users = () => {
                   Create User
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[425px]">
+              <DialogContent className="sm:max-w-[500px]">
                 <form onSubmit={handleCreateUser}>
                   <DialogHeader>
                     <DialogTitle>Create New User</DialogTitle>
@@ -202,7 +302,18 @@ const Users = () => {
                   </DialogHeader>
                   <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="email">Email</Label>
+                      <Label htmlFor="full_name">Full Name *</Label>
+                      <Input
+                        id="full_name"
+                        placeholder="John Doe"
+                        value={newUser.full_name}
+                        onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="email">Email *</Label>
                       <Input
                         id="email"
                         type="email"
@@ -214,7 +325,18 @@ const Users = () => {
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="password">Password</Label>
+                      <Label htmlFor="phone">Phone</Label>
+                      <Input
+                        id="phone"
+                        type="tel"
+                        placeholder="+91 9876543210"
+                        value={newUser.phone}
+                        onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="password">Password *</Label>
                       <div className="relative">
                         <Input
                           id="password"
@@ -236,7 +358,7 @@ const Users = () => {
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="role">Role</Label>
+                      <Label htmlFor="role">Role *</Label>
                       <Select value={newUser.role} onValueChange={(value: any) => setNewUser({ ...newUser, role: value })}>
                         <SelectTrigger id="role">
                           <SelectValue placeholder="Select role" />
@@ -257,7 +379,7 @@ const Users = () => {
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="hospital_type">Hospital Type</Label>
+                      <Label htmlFor="hospital_type">Hospital Type *</Label>
                       <Select value={newUser.hospital_type} onValueChange={(value: any) => setNewUser({ ...newUser, hospital_type: value })}>
                         <SelectTrigger id="hospital_type">
                           <SelectValue placeholder="Select hospital" />
@@ -267,6 +389,15 @@ const Users = () => {
                           <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="is_active"
+                        checked={newUser.is_active}
+                        onCheckedChange={(checked) => setNewUser({ ...newUser, is_active: checked })}
+                      />
+                      <Label htmlFor="is_active">Active User</Label>
                     </div>
                   </div>
                   <DialogFooter>
@@ -283,35 +414,182 @@ const Users = () => {
           )}
         </div>
 
+        {/* Edit User Dialog */}
+        {editingUser && (
+          <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <DialogContent className="sm:max-w-[500px]">
+              <form onSubmit={handleEditUser}>
+                <DialogHeader>
+                  <DialogTitle>Edit User</DialogTitle>
+                  <DialogDescription>
+                    Update user information (password cannot be changed here)
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit_full_name">Full Name *</Label>
+                    <Input
+                      id="edit_full_name"
+                      value={editingUser.full_name || ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, full_name: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit_email">Email *</Label>
+                    <Input
+                      id="edit_email"
+                      type="email"
+                      value={editingUser.email || ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit_phone">Phone</Label>
+                    <Input
+                      id="edit_phone"
+                      value={editingUser.phone || ''}
+                      onChange={(e) => setEditingUser({ ...editingUser, phone: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit_role">Role *</Label>
+                    <Select value={editingUser.role} onValueChange={(value: any) => setEditingUser({ ...editingUser, role: value })}>
+                      <SelectTrigger id="edit_role">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="reception">Reception</SelectItem>
+                        <SelectItem value="lab">Lab</SelectItem>
+                        <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                        <SelectItem value="radiology">Radiology</SelectItem>
+                        <SelectItem value="doctor">Doctor</SelectItem>
+                        <SelectItem value="nurse">Nurse</SelectItem>
+                        <SelectItem value="accountant">Accountant</SelectItem>
+                        <SelectItem value="user">User</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="edit_hospital_type">Hospital Type *</Label>
+                    <Select value={editingUser.hospital_type} onValueChange={(value: any) => setEditingUser({ ...editingUser, hospital_type: value })}>
+                      <SelectTrigger id="edit_hospital_type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hope">Hope Hospital</SelectItem>
+                        <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="edit_is_active"
+                      checked={editingUser.is_active}
+                      onCheckedChange={(checked) => setEditingUser({ ...editingUser, is_active: checked })}
+                    />
+                    <Label htmlFor="edit_is_active">Active User</Label>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => {
+                    setIsEditDialogOpen(false);
+                    setEditingUser(null);
+                  }}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={updateUserMutation.isPending}>
+                    {updateUserMutation.isPending ? 'Updating...' : 'Update User'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
+
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredUsers.map((user) => (
-            <Card key={user.id} className="hover:shadow-md transition-shadow">
+            <Card key={user.id} className={`hover:shadow-md transition-shadow ${!user.is_active ? 'opacity-60' : ''}`}>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span className="text-lg truncate">{user.email}</span>
-                  <Badge variant={user.role === 'admin' || user.role === 'super_admin' ? 'default' : 'secondary'}>
-                    {user.role}
-                  </Badge>
+                  <span className="text-lg truncate">{user.full_name || user.email}</span>
+                  <div className="flex gap-2">
+                    <Badge variant={user.role === 'admin' || user.role === 'super_admin' ? 'default' : 'secondary'}>
+                      {user.role}
+                    </Badge>
+                    {user.is_active ? (
+                      <Badge variant="outline" className="border-green-500 text-green-700">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Active
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-red-500 text-red-700">
+                        <XCircle className="h-3 w-3 mr-1" />
+                        Inactive
+                      </Badge>
+                    )}
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground space-y-1">
+                <div className="text-sm text-muted-foreground space-y-2">
+                  <p><span className="font-semibold">Email:</span> {user.email}</p>
+                  {user.phone && <p><span className="font-semibold">Phone:</span> {user.phone}</p>}
                   <p><span className="font-semibold">Hospital:</span> {user.hospital_type || 'hope'}</p>
                   {user.created_at && (
                     <p><span className="font-semibold">Created:</span> {new Date(user.created_at).toLocaleDateString()}</p>
                   )}
                 </div>
                 {isSuperAdmin && user.id !== currentUser?.id && (
-                  <div className="mt-4">
+                  <div className="mt-4 flex flex-col gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={() => {
+                        setEditingUser(user);
+                        setIsEditDialogOpen(true);
+                      }}
+                    >
+                      <Edit className="h-4 w-4" />
+                      Edit
+                    </Button>
+                    <Button
+                      variant={user.is_active ? 'secondary' : 'default'}
+                      size="sm"
+                      className="w-full gap-2"
+                      onClick={() => handleToggleActive(user.id, user.is_active)}
+                      disabled={toggleActiveMutation.isPending}
+                    >
+                      {user.is_active ? (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          Deactivate
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4" />
+                          Activate
+                        </>
+                      )}
+                    </Button>
                     <Button
                       variant="destructive"
                       size="sm"
                       className="w-full gap-2"
-                      onClick={() => handleDeleteUser(user.id, user.email)}
+                      onClick={() => handleDeleteUser(user.id, user.full_name || user.email)}
                       disabled={deleteUserMutation.isPending}
                     >
                       <Trash2 className="h-4 w-4" />
-                      Delete User
+                      Delete
                     </Button>
                   </div>
                 )}

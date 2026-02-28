@@ -7,8 +7,12 @@ interface User {
   id?: string;
   email: string;
   username: string;
+  full_name?: string;
+  phone?: string;
+  is_active?: boolean;
   role: 'super_admin' | 'admin' | 'reception' | 'lab' | 'radiology' | 'pharmacy' | 'doctor' | 'nurse' | 'accountant' | 'user' | 'superadmin' | 'marketing_manager';
   hospitalType: HospitalType;
+  hospital_type?: string;
 }
 
 interface AuthContextType {
@@ -16,7 +20,9 @@ interface AuthContextType {
   login: (credentials: { email: string; password: string }) => Promise<boolean>;
   signup: (userData: { email: string; password: string; role: 'super_admin' | 'admin' | 'reception' | 'lab' | 'radiology' | 'pharmacy' | 'doctor' | 'nurse' | 'accountant' | 'user' | 'superadmin' | 'marketing_manager'; hospitalType: HospitalType }) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
+  refreshUser?: () => Promise<void>;
   isAuthenticated: boolean;
+  isLoading?: boolean;
   isSuperAdmin: boolean;
   isAdmin: boolean;
   hospitalType: HospitalType | null;
@@ -151,8 +157,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         id: data.id,
         email: data.email,
         username: data.email.split('@')[0], // Use email prefix as username
+        full_name: data.full_name,
+        phone: data.phone,
+        is_active: data.is_active,
         role: data.role,
-        hospitalType: data.hospital_type || 'hope'
+        hospitalType: data.hospital_type || 'hope',
+        hospital_type: data.hospital_type || 'hope'
       };
 
       setUser(user);
@@ -231,6 +241,40 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setShowHospitalSelection(false);
   };
 
+  const refreshUser = async () => {
+    try {
+      if (!user?.id) return;
+
+      const { data, error } = await supabase
+        .from('User')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (error || !data) {
+        console.error('Error refreshing user:', error);
+        return;
+      }
+
+      const updatedUser: User = {
+        id: data.id,
+        email: data.email,
+        username: data.email.split('@')[0],
+        full_name: data.full_name,
+        phone: data.phone,
+        is_active: data.is_active,
+        role: data.role,
+        hospitalType: data.hospital_type || 'hope',
+        hospital_type: data.hospital_type || 'hope'
+      };
+
+      setUser(updatedUser);
+      localStorage.setItem('hmis_user', JSON.stringify(updatedUser));
+    } catch (error) {
+      console.error('Failed to refresh user:', error);
+    }
+  };
+
   // 🚨 DEBUG: Check hospital config creation
   console.log('🔍 AUTH DEBUG: user =', user);
   console.log('🔍 AUTH DEBUG: user?.hospitalType =', user?.hospitalType);
@@ -242,7 +286,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     login,
     signup,
     logout,
+    refreshUser,
     isAuthenticated: !!user,
+    isLoading: false,
     isSuperAdmin: user?.role === 'superadmin' || user?.role === 'super_admin',
     isAdmin: user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin',
     hospitalType: user?.hospitalType || null,

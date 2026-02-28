@@ -70,9 +70,11 @@ export const useMenuItems = (props: AppSidebarProps): MenuItem[] => {
           return doctorAllowedItems.includes(item.title);
         }
 
-        // Hide Users tab for non-admins
-        if (item.title === "Users" && !canManageUsers) {
-          return false;
+        // Hide Users tab for non-super-admins
+        if (item.title === "Users") {
+          if (role !== 'super_admin' && role !== 'superadmin') {
+            return false;
+          }
         }
 
         // Hide Corporate Receipts for non-authorized roles (superadmin & marketing_manager only)
