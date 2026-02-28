@@ -36,6 +36,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
 import { RadiologyResultDialog } from './RadiologyResultDialog';
+import { RadiologyFileUpload } from './RadiologyFileUpload';
 
 interface EnhancedRadiologyOrdersProps {
   onBack?: () => void;
@@ -76,13 +77,20 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
           impression,
           notes,
           visit_id,
+          file_url,
+          file_name,
+          uploaded_at,
+          uploaded_by,
           radiology:radiology_id (
             name,
             description,
             category
           ),
           visits:visit_id (
+            id,
             patient_id,
+            visit_type,
+            reason_for_visit,
             patients:patient_id (
               name,
               age,
@@ -129,12 +137,14 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
       const groupedByVisit = {};
       (data || []).forEach((item) => {
         const patient = item.visits?.patients;
+        const reasonForVisit = item.visits?.reason_for_visit; // IPD or OPD
         const visitKey = item.visit_id || `unknown-${item.id}`;
         
         if (!groupedByVisit[visitKey]) {
           groupedByVisit[visitKey] = {
             patient: patient,
             visitId: item.visit_id,
+            visitType: reasonForVisit, // Use reason_for_visit which has IPD/OPD
             orders: []
           };
         }
@@ -150,6 +160,7 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
         const visitGroup = groupedByVisit[visitKey];
         const patient = visitGroup.patient;
         const visitId = visitGroup.visitId;
+        const visitType = visitGroup.visitType;
         
         visitGroup.orders.forEach((item, orderIndex) => {
           const radiologyInfo = item.radiology;
@@ -160,7 +171,8 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
             srNo: isFirstOrderForVisit ? serialNumber : '',
             sex: isFirstOrderForVisit ? (patient?.gender || 'Unknown') : '',
             patientName: isFirstOrderForVisit ? (patient?.name || 'Unknown Patient') : '',
-            patientId: isFirstOrderForVisit ? (visitId || 'Unknown Visit ID') : '',
+            patientId: isFirstOrderForVisit ? (patient?.patients_id || visitId || 'Unknown Visit ID') : '',
+            visitType: isFirstOrderForVisit ? (visitType || 'OPD') : '',
             service: radiologyInfo?.name || 'Unknown Service',
             primaryCareProvider: '', // Can be added later from visit data
             status: item.status || 'ordered',
@@ -170,6 +182,10 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
             findings: item.findings,
             impression: item.impression,
             notes: item.notes,
+            fileUrl: item.file_url,
+            fileName: item.file_name,
+            uploadedAt: item.uploaded_at,
+            uploadedBy: item.uploaded_by,
             isFirstInGroup: isFirstOrderForVisit,
             visitKey: visitKey
           });
@@ -423,10 +439,12 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
                   <TableHead className="w-16">Sex</TableHead>
                   <TableHead className="min-w-[150px]">Patient Name</TableHead>
                   <TableHead className="min-w-[120px]">Visit ID</TableHead>
+                  <TableHead className="w-24">Visit Type</TableHead>
                   <TableHead className="min-w-[200px]">Service</TableHead>
                   <TableHead className="min-w-[150px]">Primary care provider</TableHead>
                   <TableHead className="w-20">Status</TableHead>
                   <TableHead className="min-w-[150px]">Order Date</TableHead>
+                  <TableHead className="w-32">Upload File</TableHead>
                   <TableHead className="w-32">Enter Rad Result</TableHead>
                   <TableHead className="w-32">View DICOM Image</TableHead>
                 </TableRow>
@@ -457,6 +475,16 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
                       <TableCell className={isNewPatientGroup ? 'font-semibold text-blue-600' : 'text-gray-400'}>
                         {order.patientId}
                       </TableCell>
+                      <TableCell>
+                        {order.visitType && (
+                          <Badge 
+                            variant="outline"
+                            className={order.visitType === 'IPD' ? 'bg-purple-100 text-purple-700 border-purple-300' : 'bg-green-100 text-green-700 border-green-300'}
+                          >
+                            {order.visitType}
+                          </Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="font-medium">{order.service}</TableCell>
                       <TableCell>{order.primaryCareProvider || '-'}</TableCell>
                       <TableCell>
@@ -468,6 +496,16 @@ const EnhancedRadiologyOrders: React.FC<EnhancedRadiologyOrdersProps> = ({ onBac
                         </Badge>
                       </TableCell>
                       <TableCell>{order.orderDate}</TableCell>
+                      <TableCell>
+                        <RadiologyFileUpload
+                          orderId={order.id}
+                          patientName={order.patientName || 'Unknown Patient'}
+                          service={order.service}
+                          existingFileUrl={order.fileUrl}
+                          existingFileName={order.fileName}
+                          onUploadSuccess={refetch}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Button 
                           size="sm" 
