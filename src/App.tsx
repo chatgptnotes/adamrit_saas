@@ -15,6 +15,7 @@ import LoginPage from "@/components/LoginPage";
 import LandingPage from "@/components/LandingPage";
 import HospitalSelection from "@/components/HospitalSelection";
 import { TopHeader } from "@/components/TopHeader";
+import { RoleBasedRedirect } from "@/components/RoleBasedRedirect";
 import { useToast } from "@/hooks/use-toast";
 import { HospitalType, getHospitalConfig } from "@/types/hospital";
 
@@ -193,6 +194,7 @@ const AppContent = () => {
           v7_relativeSplatPath: true
         }}
       >
+        <RoleBasedRedirect />
         <SidebarProvider>
           <div className="min-h-screen flex w-full">
             <AppSidebar {...counts} />

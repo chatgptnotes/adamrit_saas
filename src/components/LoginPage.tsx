@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/AuthContext';
+import { getRoleDefaultRoute } from '@/utils/roleNavigation';
 import { Eye, EyeOff } from 'lucide-react';
 
 interface LoginFormData {
@@ -22,7 +24,8 @@ const LoginPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const { login } = useAuth();
+  const navigate = useNavigate();
+  const { login, user } = useAuth();
 
   const handleInputChange = (field: keyof LoginFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -46,7 +49,21 @@ const LoginPage: React.FC = () => {
         password: formData.password
       });
 
-      if (!success) {
+      if (success) {
+        // Wait a bit for user context to update
+        setTimeout(() => {
+          // Get the user data from localStorage (freshly set by login)
+          const savedUser = localStorage.getItem('hmis_user');
+          if (savedUser) {
+            const userData = JSON.parse(savedUser);
+            const defaultRoute = getRoleDefaultRoute(userData.role);
+            console.log('🚀 Redirecting', userData.role, 'to', defaultRoute);
+            navigate(defaultRoute);
+          } else {
+            navigate('/dashboard');
+          }
+        }, 100);
+      } else {
         setError('Invalid email or password');
       }
     } catch (err) {

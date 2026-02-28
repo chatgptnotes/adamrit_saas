@@ -291,7 +291,7 @@ const Users = () => {
             />
           </div>
 
-          {isUserSuperAdmin && (
+          {isSuperAdmin && (
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gap-2">
@@ -387,27 +387,15 @@ const Users = () => {
 
                     <div className="grid gap-2">
                       <Label htmlFor="hospital_type">Hospital Type *</Label>
-                      {isUserSuperAdmin ? (
-                        <Select value={newUser.hospital_type} onValueChange={(value: any) => setNewUser({ ...newUser, hospital_type: value })}>
-                          <SelectTrigger id="hospital_type">
-                            <SelectValue placeholder="Select hospital" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="hope">Hope Hospital</SelectItem>
-                            <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <div className="flex items-center gap-2 p-2 border rounded-md bg-muted">
-                          <Building2 className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">
-                            {newUser.hospital_type === 'hope' ? 'Hope Hospital' : 'Ayushman Hospital'}
-                          </span>
-                          <span className="text-xs text-muted-foreground ml-auto">
-                            (Fixed to your hospital)
-                          </span>
-                        </div>
-                      )}
+                      <Select value={newUser.hospital_type} onValueChange={(value: any) => setNewUser({ ...newUser, hospital_type: value })}>
+                        <SelectTrigger id="hospital_type">
+                          <SelectValue placeholder="Select hospital" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hope">Hope Hospital</SelectItem>
+                          <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="flex items-center space-x-2">
@@ -498,27 +486,15 @@ const Users = () => {
 
                   <div className="grid gap-2">
                     <Label htmlFor="edit_hospital_type">Hospital Type *</Label>
-                    {isUserSuperAdmin ? (
-                      <Select value={editingUser.hospital_type} onValueChange={(value: any) => setEditingUser({ ...editingUser, hospital_type: value })}>
-                        <SelectTrigger id="edit_hospital_type">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hope">Hope Hospital</SelectItem>
-                          <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <div className="flex items-center gap-2 p-2 border rounded-md bg-muted">
-                        <Building2 className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">
-                          {editingUser.hospital_type === 'hope' ? 'Hope Hospital' : 'Ayushman Hospital'}
-                        </span>
-                        <span className="text-xs text-muted-foreground ml-auto">
-                          (Cannot change)
-                        </span>
-                      </div>
-                    )}
+                    <Select value={editingUser.hospital_type} onValueChange={(value: any) => setEditingUser({ ...editingUser, hospital_type: value })}>
+                      <SelectTrigger id="edit_hospital_type">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="hope">Hope Hospital</SelectItem>
+                        <SelectItem value="ayushman">Ayushman Hospital</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="flex items-center space-x-2">
@@ -579,7 +555,7 @@ const Users = () => {
                     <p><span className="font-semibold">Created:</span> {new Date(user.created_at).toLocaleDateString()}</p>
                   )}
                 </div>
-                {isUserSuperAdmin && user.id !== currentUser?.id && (
+                {isSuperAdmin && user.id !== currentUser?.id && (
                   <div className="mt-4 flex flex-col gap-2">
                     <Button
                       variant="outline"
